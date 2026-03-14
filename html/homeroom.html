@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>担任画面</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --line: #d9e1ec;
+      --text: #1f2a37;
+      --sub: #6b7280;
+      --primary: #2f6feb;
+      --primary-soft: #eef4ff;
+      --ok: #1d6b37;
+      --ok-soft: #e8f7ec;
+      --warn: #8a5a00;
+      --warn-soft: #fff4db;
+      --info: #1f4fa3;
+      --info-soft: #e7f0ff;
+      --danger: #a12622;
+      --danger-soft: #fdecec;
+      --shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+      --radius: 14px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: sans-serif;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    .page-header {
+      margin-bottom: 16px;
+    }
+
+    .sub-text {
+      color: var(--sub);
+      font-size: 14px;
+    }
+
+    .message {
+      min-height: 24px;
+      margin: 8px 0 16px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #eef3ff;
+      color: #1f3c88;
+      font-size: 14px;
+      display: none;
+    }
+
+    .message.show {
+      display: block;
+    }
+
+    .message.error {
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 16px;
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .toolbar-block {
+      min-width: 0;
+    }
+
+    .toolbar-label {
+      font-size: 13px;
+      color: var(--sub);
+      margin-bottom: 8px;
+    }
+
+    .class-list,
+    .term-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip-btn {
+      border: 1px solid #ccd5e3;
+      background: #fff;
+      color: #334;
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+
+    .chip-btn:hover {
+      background: #f8fbff;
+      border-color: #9db7ef;
+    }
+
+    .chip-btn.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .main-btn {
+      border: none;
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .main-btn.secondary {
+      background: #eef2f7;
+      color: #334;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .summary-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .summary-label {
+      font-size: 13px;
+      color: var(--sub);
+      margin-bottom: 8px;
+    }
+
+    .summary-value {
+      font-size: 28px;
+      font-weight: bold;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      min-height: 560px;
+    }
+
+    .panel-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-header h2 {
+      margin: 0 0 6px;
+      font-size: 18px;
+    }
+
+    .panel-header .sub {
+      color: var(--sub);
+      font-size: 13px;
+    }
+
+    .student-list {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 680px;
+      overflow-y: auto;
+    }
+
+    .student-card {
+      border: 1px solid #d9e0ee;
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+
+    .student-card:hover {
+      background: #f8fbff;
+      border-color: #9db7ef;
+    }
+
+    .student-card.active {
+      border: 2px solid var(--primary);
+      background: var(--primary-soft);
+    }
+
+    .student-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .student-name {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .student-meta {
+      font-size: 13px;
+      color: var(--sub);
+      margin-bottom: 10px;
+    }
+
+    .student-stats {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .mini-badge {
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: bold;
+      background: #eef2f7;
+      color: #334;
+    }
+
+    .risk-pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .risk-normal {
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    .risk-warning {
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .risk-official_over {
+      background: var(--info-soft);
+      color: var(--info);
+    }
+
+    .risk-normal_over {
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .detail-wrap {
+      padding: 16px;
+    }
+
+    .detail-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    .detail-name {
+      font-size: 22px;
+      font-weight: bold;
+      margin-bottom: 6px;
+    }
+
+    .detail-meta {
+      font-size: 14px;
+      color: var(--sub);
+    }
+
+    .detail-summary {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .pill.normal {
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    .pill.warning {
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .pill.official_over {
+      background: var(--info-soft);
+      color: var(--info);
+    }
+
+    .pill.normal_over {
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+    }
+
+    th, td {
+      border-bottom: 1px solid #e5e9f2;
+      padding: 10px 8px;
+      text-align: center;
+      vertical-align: middle;
+      font-size: 14px;
+    }
+
+    th {
+      background: #f7f9fc;
+      font-size: 13px;
+    }
+
+    td.left,
+    th.left {
+      text-align: left;
+    }
+
+    .empty-box {
+      padding: 24px;
+      border: 1px dashed #ccd5e3;
+      border-radius: 10px;
+      background: #fafcff;
+      color: #667;
+      margin: 12px;
+    }
+
+    .footer-note {
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--sub);
+    }
+    
+        .subject-link-btn {
+      border: none;
+      background: transparent;
+      color: var(--primary);
+      font-weight: bold;
+      cursor: pointer;
+      padding: 0;
+      font-size: 14px;
+      text-align: left;
+    }
+
+    .subject-link-btn:hover {
+      text-decoration: underline;
+    }
+
+    .history-box {
+      padding: 10px 12px;
+      background: #f8fbff;
+      border: 1px solid #e2ebfb;
+      border-radius: 10px;
+    }
+
+    .history-row {
+      padding: 6px 0;
+      border-bottom: 1px solid #e5eef8;
+      font-size: 13px;
+      color: #334;
+    }
+
+    .history-row:last-child {
+      border-bottom: none;
+    }
+
+    @media (max-width: 1100px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <h1>担任画面</h1>
+    <div class="sub-text">学生ごとの欠席累積と、注意・公欠超過・留級対象の状況を確認します。</div>
+    <div id="messageArea" class="message"></div>
+  </div>
+
+  <div class="toolbar">
+    <div class="toolbar-block">
+      <div class="toolbar-label">担任クラス</div>
+      <div id="classListArea" class="class-list"></div>
+    </div>
+
+    <div class="toolbar-block">
+      <div class="toolbar-label">開設期</div>
+      <div id="termListArea" class="term-list">
+        <button type="button" class="chip-btn active" data-term="all">全体</button>
+        <button type="button" class="chip-btn" data-term="前期">前期</button>
+        <button type="button" class="chip-btn" data-term="後期">後期</button>
+        <button type="button" class="chip-btn" data-term="通年">通年</button>
+      </div>
+    </div>
+
+    <div class="toolbar-block">
+      <button id="reloadButton" type="button" class="main-btn secondary">再読込</button>
+    </div>
+  </div>
+
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="summary-label">対象クラス</div>
+      <div id="summaryClass" class="summary-value">-</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">在籍数</div>
+      <div id="summaryTotal" class="summary-value">0</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">注意 / 公欠超過</div>
+      <div id="summaryRisk" class="summary-value">0 / 0</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">留級対象</div>
+      <div id="summaryDanger" class="summary-value">0</div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>学生一覧</h2>
+        <div id="studentListSub" class="sub">読み込み中...</div>
+      </div>
+      <div id="studentListArea" class="student-list">
+        <div class="empty-box">読み込み中...</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2>科目別詳細</h2>
+        <div id="detailSub" class="sub">生徒を選択してください</div>
+      </div>
+      <div id="detailArea" class="detail-wrap">
+        <div class="empty-box">左の学生一覧から対象生徒を選択してください。</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let userInfo = null;
+    let homeroomClasses = [];
+    let selectedClass = null;
+    let selectedTerm = 'all';
+    let summaryData = null;
+    let selectedStudentId = null;
+    let detailData = null;
+    let openedSubjectId = null;
+
+    function showMessage(text, isError) {
+      const el = document.getElementById('messageArea');
+      el.textContent = text || '';
+      el.className = 'message show' + (isError ? ' error' : '');
+    }
+
+    function clearMessage() {
+      const el = document.getElementById('messageArea');
+      el.textContent = '';
+      el.className = 'message';
+    }
+
+    function escapeHtml(str) {
+      if (str == null) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escapeJs(str) {
+      if (str == null) return '';
+      return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'");
+    }
+
+    function getErrorMessage(err) {
+      if (!err) return '不明なエラーが発生しました。';
+      if (typeof err === 'string') return err;
+      if (err.message) return err.message;
+      return JSON.stringify(err);
+    }
+
+    function renderTermButtons() {
+      document.querySelectorAll('#termListArea .chip-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.term === selectedTerm);
+      });
+    }
+
+    function renderClassButtons() {
+      const area = document.getElementById('classListArea');
+
+      if (!homeroomClasses.length) {
+        area.innerHTML = '<div class="empty-box" style="margin:0;">担任クラスがありません。</div>';
+        return;
+      }
+
+      area.innerHTML = homeroomClasses.map(function(cls) {
+        const active = selectedClass &&
+          String(selectedClass.grade) === String(cls.grade) &&
+          String(selectedClass.unit) === String(cls.unit);
+
+        return `
+          <button
+            type="button"
+            class="chip-btn ${active ? 'active' : ''}"
+            onclick="selectHomeroomClass('${escapeJs(cls.grade)}','${escapeJs(cls.unit)}')"
+          >
+            ${escapeHtml(cls.classLabel || (cls.grade + '年' + cls.unit))}
+          </button>
+        `;
+      }).join('');
+    }
+
+    function updateSummaryCards(data) {
+      document.getElementById('summaryClass').textContent = data ? (data.classLabel || '-') : '-';
+      document.getElementById('summaryTotal').textContent = data && data.summary ? (data.summary.totalStudents || 0) : 0;
+      document.getElementById('summaryRisk').textContent = data && data.summary
+        ? ((data.summary.warningStudents || 0) + ' / ' + (data.summary.officialOverStudents || 0))
+        : '0 / 0';
+      document.getElementById('summaryDanger').textContent = data && data.summary
+        ? (data.summary.normalOverStudents || 0)
+        : 0;
+
+      document.getElementById('studentListSub').textContent = data
+        ? ((data.classLabel || '') + ' / ' + termLabel(selectedTerm))
+        : 'クラス未選択';
+    }
+
+    function renderStudentList() {
+      const area = document.getElementById('studentListArea');
+      const students = summaryData && summaryData.students ? summaryData.students : [];
+
+      if (!students.length) {
+        area.innerHTML = '<div class="empty-box">欠席・公欠・遅刻の記録がある学生はいません。</div>';
+        return;
+      }
+
+      area.innerHTML = students.map(function(student) {
+        const active = String(student.studentId) === String(selectedStudentId);
+        const riskClass = 'risk-' + (student.highestRiskLevel || 'normal');
+
+        return `
+          <div class="student-card ${active ? 'active' : ''}" onclick="selectStudent('${escapeJs(student.studentId)}')">
+            <div class="student-top">
+              <div class="student-name">${escapeHtml(student.name)}</div>
+              <span class="risk-pill ${riskClass}">${escapeHtml(student.highestRiskLabel || '正常')}</span>
+            </div>
+            <div class="student-meta">
+              出席番号: ${escapeHtml(student.attendanceNumber || '')}
+            </div>
+            <div class="student-stats">
+              <span class="mini-badge">欠席 ${student.totalNormalAbsence || 0}</span>
+              <span class="mini-badge">公欠 ${student.totalOfficialAbsence || 0}</span>
+              <span class="mini-badge">遅刻 ${student.totalLate || 0}</span>
+            </div>
+            <div class="student-stats">
+              <span class="mini-badge">注意 ${student.warningSubjects || 0}</span>
+              <span class="mini-badge">公欠超過 ${student.officialOverSubjects || 0}</span>
+              <span class="mini-badge">留級対象 ${student.normalOverSubjects || 0}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+      
+      function renderDetail() {
+      const area = document.getElementById('detailArea');
+
+      if (!detailData || !detailData.student) {
+        area.innerHTML = '<div class="empty-box">左の学生一覧から対象生徒を選択してください。</div>';
+        document.getElementById('detailSub').textContent = '生徒を選択してください';
+        return;
+      }
+
+      const student = detailData.student;
+      const subjects = detailData.subjects || [];
+      const summary = detailData.summary || {};
+      const highestRiskClass = summary.highestRiskLevel || 'normal';
+
+      document.getElementById('detailSub').textContent =
+        (detailData.classLabel || '') + ' / ' + termLabel(detailData.termFilter);
+
+      let html = '';
+      html += '<div class="detail-header">';
+      html += '  <div>';
+      html += '    <div class="detail-name">' + escapeHtml(student.name) + '</div>';
+      html += '    <div class="detail-meta">';
+      html += '      学籍番号: ' + escapeHtml(student.studentId) +
+              ' ／ 出席番号: ' + escapeHtml(student.attendanceNumber) +
+              ' ／ ' + escapeHtml(detailData.classLabel || '');
+      html += '    </div>';
+      html += '  </div>';
+      html += '  <div><span class="pill ' + highestRiskClass + '">' + escapeHtml(summary.highestRiskLabel || '正常') + '</span></div>';
+      html += '</div>';
+
+      html += '<div class="detail-summary">';
+      html += '  <span class="pill warning">注意 ' + (summary.warningSubjects || 0) + '</span>';
+      html += '  <span class="pill official_over">公欠超過 ' + (summary.officialOverSubjects || 0) + '</span>';
+      html += '  <span class="pill normal_over">留級対象 ' + (summary.normalOverSubjects || 0) + '</span>';
+      html += '  <span class="pill normal">科目数 ' + (summary.subjectCount || 0) + '</span>';
+      html += '</div>';
+
+      if (!subjects.length) {
+        html += '<div class="empty-box" style="margin:0;">対象科目のデータがありません。</div>';
+        area.innerHTML = html;
+        return;
+      }
+
+      html += '<div class="table-wrap">';
+      html += '<table>';
+      html += '<thead>';
+      html += '<tr>';
+      html += '<th class="left">科目名</th>';
+      html += '<th>開設期</th>';
+      html += '<th>上限</th>';
+      html += '<th>通常欠席</th>';
+      html += '<th>公欠</th>';
+      html += '<th>遅刻</th>';
+      html += '<th>合計</th>';
+      html += '<th>残り</th>';
+      html += '<th>通常超過</th>';
+      html += '<th>公欠超過</th>';
+      html += '<th>判定</th>';
+      html += '</tr>';
+      html += '</thead>';
+      html += '<tbody>';
+
+      subjects.forEach(function(subject) {
+        const isOpen = String(openedSubjectId) === String(subject.subjectId);
+        const records = (subject.records || []).filter(function(record) {
+          return record.status === 'A' || record.status === 'O' || record.status === 'L';
+        });
+
+        html += '<tr>';
+        html += '<td class="left">';
+        html += '<button type="button" class="subject-link-btn" onclick="toggleSubjectHistory(\'' + escapeJs(subject.subjectId) + '\')">';
+        html += escapeHtml(subject.subjectName || '');
+        html += '</button>';
+        html += '</td>';
+        html += '<td>' + escapeHtml(subject.term || '') + '</td>';
+        html += '<td>' + escapeHtml(subject.limit) + '</td>';
+        html += '<td>' + escapeHtml(subject.normalAbsence) + '</td>';
+        html += '<td>' + escapeHtml(subject.officialAbsence) + '</td>';
+        html += '<td>' + escapeHtml(subject.late || 0) + '</td>';
+        html += '<td>' + escapeHtml(subject.totalAbsence) + '</td>';
+        html += '<td>' + escapeHtml(subject.remaining) + '</td>';
+        html += '<td>' + escapeHtml(subject.normalOver) + '</td>';
+        html += '<td>' + escapeHtml(subject.officialOver) + '</td>';
+        html += '<td><span class="risk-pill risk-' + escapeHtml(subject.riskLevel || 'normal') + '">' + escapeHtml(subject.riskLabel || '正常') + '</span></td>';
+        html += '</tr>';
+
+        if (isOpen) {
+          html += '<tr>';
+          html += '<td colspan="11" class="left">';
+
+          if (!records.length) {
+            html += '<div class="history-box">欠席・公欠・遅刻の履歴はありません。</div>';
+          } else {
+            html += '<div class="history-box">';
+            records.forEach(function(record) {
+              html += '<div class="history-row">';
+              html += escapeHtml(record.date || '') + ' ';
+              html += escapeHtml(record.period || '') + '限 ';
+              html += escapeHtml(getStatusLabel(record.status));
+              html += '</div>';
+            });
+            html += '</div>';
+          }
+
+          html += '</td>';
+          html += '</tr>';
+        }
+      });
+
+      html += '</tbody>';
+      html += '</table>';
+      html += '</div>';
+      html += '<div class="footer-note">※ 通常欠席が上限超過なら留級対象、通常欠席が上限以内で合計超過分がある場合は公欠超過として表示します。</div>';
+
+      area.innerHTML = html;
+    }
+    
+    function termLabel(term) {
+      if (term === '前期') return '前期';
+      if (term === '後期') return '後期';
+      if (term === '通年') return '通年';
+      return '全体';
+    }
+
+        function toggleSubjectHistory(subjectId) {
+      if (String(openedSubjectId) === String(subjectId)) {
+        openedSubjectId = null;
+      } else {
+        openedSubjectId = subjectId;
+      }
+      renderDetail();
+    }
+
+    function getStatusLabel(code) {
+      if (code === 'A') return '欠席';
+      if (code === 'O') return '公欠';
+      if (code === 'L') return '遅刻';
+      return '';
+    }
+
+    function setStudentListLoading() {
+      document.getElementById('studentListArea').innerHTML = '<div class="empty-box">学生一覧を読み込み中...</div>';
+    }
+
+    function setDetailLoading() {
+      document.getElementById('detailArea').innerHTML = '<div class="empty-box">科目別詳細を読み込み中...</div>';
+      document.getElementById('detailSub').textContent = '読み込み中...';
+    }
+
+    function loadInitialData() {
+      clearMessage();
+      setStudentListLoading();
+      renderDetail();
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          userInfo = data.user || null;
+          homeroomClasses = data.homeroomClasses || [];
+          selectedTerm = data.selectedTermFilter || 'all';
+          renderTermButtons();
+          renderClassButtons();
+
+          if (!homeroomClasses.length) {
+            updateSummaryCards(null);
+            document.getElementById('studentListArea').innerHTML = '<div class="empty-box">担任クラスが登録されていません。</div>';
+            return;
+          }
+          if (data.firstSummary) {
+            selectedClass = {
+              grade: data.firstSummary.grade,
+              unit: data.firstSummary.unit,
+              classLabel: data.firstSummary.classLabel
+            };
+            summaryData = data.firstSummary;
+            openedSubjectId = null;
+            renderClassButtons();
+            updateSummaryCards(summaryData);
+            renderStudentList();
+
+            if (summaryData.students && summaryData.students.length > 0) {
+              selectedStudentId = summaryData.students[0].studentId;
+              renderStudentList();
+              loadStudentDetail(selectedStudentId);
+            } else {
+              selectedStudentId = null;
+              detailData = null;
+              renderDetail();
+            }
+          } else {
+            selectedClass = homeroomClasses[0];
+            renderClassButtons();
+            loadSummary(selectedClass.grade, selectedClass.unit);
+          }
+        })
+        .withFailureHandler(function(err) {
+          showMessage(getErrorMessage(err), true);
+          document.getElementById('studentListArea').innerHTML = '<div class="empty-box">読込に失敗しました。</div>';
+        })
+        .getHomeroomInitialData('all');
+    }
+
+    function loadSummary(grade, unit) {
+      clearMessage();
+      setStudentListLoading();
+      setDetailLoading();
+      openedSubjectId = null;
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          summaryData = data;
+          selectedClass = {
+            grade: data.grade,
+            unit: data.unit,
+            classLabel: data.classLabel
+          };
+
+          renderClassButtons();
+          updateSummaryCards(data);
+          renderStudentList();
+
+          if (data.students && data.students.length > 0) {
+            selectedStudentId = data.students[0].studentId;
+            renderStudentList();
+            loadStudentDetail(selectedStudentId);
+          } else {
+            selectedStudentId = null;
+            detailData = null;
+            renderDetail();
+          }
+        })
+        .withFailureHandler(function(err) {
+          showMessage(getErrorMessage(err), true);
+          document.getElementById('studentListArea').innerHTML = '<div class="empty-box">学生一覧の読み込みに失敗しました。</div>';
+          document.getElementById('detailArea').innerHTML = '<div class="empty-box">詳細の読み込みに失敗しました。</div>';
+        })
+        .getHomeroomRiskSummary(String(grade), String(unit), selectedTerm);
+    }
+
+    function loadStudentDetail(studentId) {
+      if (!studentId) return;
+
+      setDetailLoading();
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          detailData = data;
+          renderDetail();
+        })
+        .withFailureHandler(function(err) {
+          showMessage(getErrorMessage(err), true);
+          document.getElementById('detailArea').innerHTML = '<div class="empty-box">詳細の読み込みに失敗しました。</div>';
+        })
+        .getStudentAbsenceRiskDetail(String(studentId), selectedTerm);
+    }
+
+    function selectHomeroomClass(grade, unit) {
+      if (
+        selectedClass &&
+        String(selectedClass.grade) === String(grade) &&
+        String(selectedClass.unit) === String(unit)
+      ) {
+        return;
+      }
+
+      selectedClass = { grade: grade, unit: unit };
+      selectedStudentId = null;
+      detailData = null;
+      openedSubjectId = null;
+      renderClassButtons();
+      loadSummary(grade, unit);
+    }
+
+      function selectStudent(studentId) {
+      if (String(selectedStudentId) === String(studentId)) return;
+      selectedStudentId = studentId;
+      openedSubjectId = null;
+      renderStudentList();
+      loadStudentDetail(studentId);
+    }
+
+    function bindEvents() {
+      document.getElementById('reloadButton').addEventListener('click', function() {
+        if (!selectedClass) {
+          loadInitialData();
+          return;
+        }
+        loadSummary(selectedClass.grade, selectedClass.unit);
+      });
+
+      document.getElementById('termListArea').addEventListener('click', function(e) {
+        const btn = e.target.closest('.chip-btn');
+        if (!btn) return;
+
+        const nextTerm = btn.dataset.term;
+        if (!nextTerm || nextTerm === selectedTerm) return;
+
+        selectedTerm = nextTerm;
+        renderTermButtons();
+
+        if (selectedClass) {
+          loadSummary(selectedClass.grade, selectedClass.unit);
+        }
+      });
+    }
+
+    function init() {
+      bindEvents();
+      loadInitialData();
+    }
+
+    init();
+  </script>
+</body>
+</html>

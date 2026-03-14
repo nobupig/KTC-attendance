@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>出席管理システム</title>
+</head>
+
+<body>
+
+<h2>読み込み中...</h2>
+
+<script>
+
+function init() {
+
+  google.script.run
+    .withSuccessHandler(function(user){
+
+      if (user.roles.includes("admin")) {
+        window.location.href = "?page=admin";
+        return;
+      }
+
+      if (user.roles.includes("teacher")) {
+        window.location.href = "?page=teacher";
+        return;
+      }
+
+      if (user.roles.includes("homeroom")) {
+        window.location.href = "?page=homeroom";
+        return;
+      }
+
+      document.body.innerHTML = "権限がありません";
+
+    })
+    .getUserRoleInfo();
+
+}
+
+init();
+
+</script>
+
+</body>
+</html>

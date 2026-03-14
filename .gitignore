@@ -1,0 +1,4 @@
+*.zip
+*.gsheet
+*.gscript
+.clasp.json
