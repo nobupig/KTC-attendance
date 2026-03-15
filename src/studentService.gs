@@ -4,29 +4,22 @@ function getStudentsByClassId(classId) {
     return [];
   }
 
-  const cache = CacheService.getScriptCache();
   const cacheKey = "studentsByClassId__" + targetClassId;
-  const cached = cache.get(cacheKey);
-
+  const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
-    return JSON.parse(cached);
+    return cached;
   }
 
-  const ss = getMasterSpreadsheet();
-  const classesSheet = ss.getSheetByName(CONFIG.SHEETS.CLASSES);
-  const studentsSheet = ss.getSheetByName(CONFIG.SHEETS.STUDENTS);
+  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
+  const studentsData = getSheetDataCached_('MASTER', CONFIG.SHEETS.STUDENTS, 300);
 
-  const classes = classesSheet.getDataRange().getValues();
-  const students = studentsSheet.getDataRange().getValues();
+  const classRows = classesData.rows;
+  const studentRows = studentsData.rows;
 
-  if (classes.length <= 1 || students.length <= 1) {
-    return [];
-  }
+  const targetClass = classRows.find(function(row) {
+    return String(row[0]).trim() === targetClassId;
+  });
 
-  const classRows = classes.slice(1);
-  const studentRows = students.slice(1);
-
-  const targetClass = classRows.find(row => String(row[0]).trim() === targetClassId);
   if (!targetClass) {
     return [];
   }
@@ -35,25 +28,28 @@ function getStudentsByClassId(classId) {
   const unit = String(targetClass[3]).trim();
 
   const result = studentRows
-    .filter(row => {
+    .filter(function(row) {
       return (
         String(row[1]).trim() === grade &&
         String(row[2]).trim() === unit &&
         String(row[5]).trim() === "active"
       );
     })
-    .map(row => ({
-      studentId: String(row[0]).trim(),
-      grade: String(row[1]).trim(),
-      unit: String(row[2]).trim(),
-      attendanceNumber: row[3],
-      name: String(row[4]).trim(),
-      status: String(row[5]).trim()
-    }))
-    .sort((a, b) => Number(a.attendanceNumber) - Number(b.attendanceNumber));
+    .map(function(row) {
+      return {
+        studentId: String(row[0]).trim(),
+        grade: String(row[1]).trim(),
+        unit: String(row[2]).trim(),
+        attendanceNumber: row[3],
+        name: String(row[4]).trim(),
+        status: String(row[5]).trim()
+      };
+    })
+    .sort(function(a, b) {
+      return Number(a.attendanceNumber) - Number(b.attendanceNumber);
+    });
 
-  cache.put(cacheKey, JSON.stringify(result), 300);
-
+  putScriptCacheJson_(cacheKey, result, 300);
   return result;
 }
 

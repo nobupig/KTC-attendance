@@ -1,22 +1,40 @@
 function getTodayClassesForCurrentUser(targetDate) {
+  Logger.log('getTodayClassesForCurrentUser called');
+
+  const opSs = getOperationSpreadsheet();
+  const masterSs = getMasterSpreadsheet();
+
+  const classSessionsSheet = opSs.getSheetByName(CONFIG.SHEETS.CLASS_SESSIONS);
+  const timetableSheet = opSs.getSheetByName(CONFIG.SHEETS.TIMETABLE);
+  const subjectsSheet = masterSs.getSheetByName(CONFIG.SHEETS.SUBJECTS);
+  const classesSheet = masterSs.getSheetByName(CONFIG.SHEETS.CLASSES);
+
+  if (!classSessionsSheet) throw new Error('classSessions シートがありません');
+  if (!timetableSheet) throw new Error('timetable シートがありません');
+  if (!subjectsSheet) throw new Error('Subjects シートがありません');
+  if (!classesSheet) throw new Error('classes シートがありません');
+
   const currentUserEmail = String(getCurrentUserEmail()).trim().toLowerCase();
+  Logger.log('currentUserEmail=' + currentUserEmail);
 
   const timezone = Session.getScriptTimeZone() || 'Asia/Tokyo';
   const today = targetDate
     ? formatDateToYmd(targetDate)
     : Utilities.formatDate(new Date(), timezone, 'yyyy-MM-dd');
 
-  const classSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_SESSIONS, 300);
-  const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 300);
-  const subjectsData = getSheetDataCached_('MASTER', CONFIG.SHEETS.SUBJECTS, 300);
-  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
+  Logger.log('today=' + today);
 
-  const classSessions = classSessionsData.rows;
-  const timetable = timetableData.rows;
-  const subjects = subjectsData.rows;
-  const classes = classesData.rows;
+  const classSessions = getSheetBodyValues_(classSessionsSheet);
+  const timetable = getSheetBodyValues_(timetableSheet);
+  const subjects = getSheetBodyValues_(subjectsSheet);
+  const classes = getSheetBodyValues_(classesSheet);
 
-  const timetableHeaders = timetableData.headers;
+  Logger.log('classSessions=' + JSON.stringify(classSessions));
+  Logger.log('timetable=' + JSON.stringify(timetable));
+
+  // ===== timetable（OPERATION）=====
+  // 想定ヘッダー例: classId / weekday / period / teacherEmail
+  const timetableHeaders = getSheetHeaders_(timetableSheet);
   const ttCol = {
     classId: findColumnIndex_(timetableHeaders, ['classId', 'ClassID']),
     weekday: findColumnIndex_(timetableHeaders, ['weekday', '曜日']),
@@ -26,13 +44,14 @@ function getTodayClassesForCurrentUser(targetDate) {
   validateColumns_('timetable', ttCol);
 
   const timetableMap = {};
-  timetable.forEach(function(row) {
+  timetable.forEach(row => {
     const classId = String(row[ttCol.classId] || '').trim();
     const period = String(row[ttCol.period] || '').trim();
 
     if (!classId || !period) return;
 
-    timetableMap[classId + '__' + period] = {
+    const key = classId + '__' + period;
+    timetableMap[key] = {
       classId: classId,
       weekday: row[ttCol.weekday],
       period: period,
@@ -40,7 +59,10 @@ function getTodayClassesForCurrentUser(targetDate) {
     };
   });
 
-  const subjectHeaders = subjectsData.headers;
+  // ===== Subjects（MASTER）=====
+  // 想定ヘッダー例:
+  // SubjectID, 科目名, 開設学年, 組・コース, 開設期, 履修区分, 欠席可能コマ数
+  const subjectHeaders = getSheetHeaders_(subjectsSheet);
   const subjCol = {
     subjectId: findColumnIndex_(subjectHeaders, ['SubjectID', 'subjectId']),
     subjectName: findColumnIndex_(subjectHeaders, ['科目名', 'subjectName'])
@@ -48,7 +70,7 @@ function getTodayClassesForCurrentUser(targetDate) {
   validateColumns_('Subjects', subjCol);
 
   const subjectMap = {};
-  subjects.forEach(function(row) {
+  subjects.forEach(row => {
     const subjectId = String(row[subjCol.subjectId] || '').trim();
     if (!subjectId) return;
 
@@ -58,7 +80,10 @@ function getTodayClassesForCurrentUser(targetDate) {
     };
   });
 
-  const classHeaders = classesData.headers;
+  // ===== classes（MASTER）=====
+  // 想定ヘッダー例:
+  // ClassID, SubjectID, 学年, 対象区分
+  const classHeaders = getSheetHeaders_(classesSheet);
   const clsCol = {
     classId: findColumnIndex_(classHeaders, ['ClassID', 'classId']),
     subjectId: findColumnIndex_(classHeaders, ['SubjectID', 'subjectId']),
@@ -68,7 +93,7 @@ function getTodayClassesForCurrentUser(targetDate) {
   validateColumns_('classes', clsCol);
 
   const classMap = {};
-  classes.forEach(function(row) {
+  classes.forEach(row => {
     const classId = String(row[clsCol.classId] || '').trim();
     if (!classId) return;
 
@@ -80,7 +105,9 @@ function getTodayClassesForCurrentUser(targetDate) {
     };
   });
 
-  const classSessionHeaders = classSessionsData.headers;
+  // ===== classSessions（OPERATION）=====
+  // 想定ヘッダー例: classId / date / period / sessionNumber
+  const classSessionHeaders = getSheetHeaders_(classSessionsSheet);
   const csCol = {
     classId: findColumnIndex_(classSessionHeaders, ['classId', 'ClassID']),
     date: findColumnIndex_(classSessionHeaders, ['date', '日付']),
@@ -89,11 +116,9 @@ function getTodayClassesForCurrentUser(targetDate) {
   };
   validateColumns_('classSessions', csCol);
 
-  return classSessions
-    .filter(function(row) {
-      return formatDateToYmd(row[csCol.date]) === today;
-    })
-    .map(function(row) {
+  const result = classSessions
+    .filter(row => formatDateToYmd(row[csCol.date]) === today)
+    .map(row => {
       const classId = String(row[csCol.classId] || '').trim();
       const period = String(row[csCol.period] || '').trim();
       const sessionNumber = row[csCol.sessionNumber];
@@ -101,6 +126,13 @@ function getTodayClassesForCurrentUser(targetDate) {
       const tt = timetableMap[classId + '__' + period];
       const cls = classMap[classId];
       const subj = cls ? subjectMap[cls.subjectId] : null;
+
+      Logger.log(
+        'checking classId=' + classId +
+        ', period=' + period +
+        ', ttTeacher=' + (tt ? tt.teacherEmail : 'NONE') +
+        ', currentUser=' + currentUserEmail
+      );
 
       if (!tt || tt.teacherEmail !== currentUserEmail) {
         return null;
@@ -117,9 +149,10 @@ function getTodayClassesForCurrentUser(targetDate) {
       };
     })
     .filter(Boolean)
-    .sort(function(a, b) {
-      return Number(a.period) - Number(b.period);
-    });
+    .sort((a, b) => Number(a.period) - Number(b.period));
+
+  Logger.log('result=' + JSON.stringify(result));
+  return result;
 }
 
 function testGetTodayClassesForCurrentUser() {

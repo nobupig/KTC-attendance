@@ -43,31 +43,33 @@ function doGet(e) {
 
 function getCurrentUserContext() {
   const email = Session.getActiveUser().getEmail().toLowerCase().trim();
-  const cacheKey = 'userContext__' + email;
-  const cached = getScriptCacheJson_(cacheKey);
 
-  if (cached) {
-    return cached;
+  const ss = getOperationSpreadsheet();
+
+  const teachersSheet = ss.getSheetByName(CONFIG.SHEETS.TEACHERS);
+  const homeroomSheet = ss.getSheetByName(CONFIG.SHEETS.HOMEROOM_ASSIGNMENTS);
+
+  if (!teachersSheet) {
+    throw new Error('teachers シートが見つかりません');
+  }
+  if (!homeroomSheet) {
+    throw new Error('homeroomAssignments シートが見つかりません');
   }
 
-  const teachersData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TEACHERS, 300);
-  const homeroomData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.HOMEROOM_ASSIGNMENTS, 300);
+  const teachersData = teachersSheet.getDataRange().getValues();
+  const homeroomData = homeroomSheet.getDataRange().getValues();
 
-  const teachersHeaders = teachersData.headers;
-  const teachersRows = teachersData.rows;
-  const homeroomHeaders = homeroomData.headers;
-  const homeroomRows = homeroomData.rows;
-
-  const roleIndex = teachersHeaders.indexOf("role");
-  const emailIndex = teachersHeaders.indexOf("email");
-  const idIndex = teachersHeaders.indexOf("teacherId");
-  const nameIndex = teachersHeaders.indexOf("name");
+  const headers = teachersData.shift();
+  const roleIndex = headers.indexOf("role");
+  const emailIndex = headers.indexOf("email");
+  const idIndex = headers.indexOf("teacherId");
+  const nameIndex = headers.indexOf("name");
 
   let teacherId = null;
   let name = null;
   const roles = new Set();
 
-  teachersRows.forEach(function(row) {
+  teachersData.forEach(row => {
     if (String(row[emailIndex]).toLowerCase().trim() === email) {
       teacherId = row[idIndex];
       name = row[nameIndex];
@@ -75,12 +77,14 @@ function getCurrentUserContext() {
     }
   });
 
-  const hrEmailIndex = homeroomHeaders.indexOf("email");
-  const gradeIndex = homeroomHeaders.indexOf("grade");
-  const unitIndex = homeroomHeaders.indexOf("unit");
-
   const homeroomClasses = [];
-  homeroomRows.forEach(function(row) {
+
+  const hrHeaders = homeroomData.shift();
+  const hrEmailIndex = hrHeaders.indexOf("email");
+  const gradeIndex = hrHeaders.indexOf("grade");
+  const unitIndex = hrHeaders.indexOf("unit");
+
+  homeroomData.forEach(row => {
     if (String(row[hrEmailIndex]).toLowerCase().trim() === email) {
       homeroomClasses.push({
         grade: row[gradeIndex],
@@ -89,16 +93,13 @@ function getCurrentUserContext() {
     }
   });
 
-  const result = {
-    email: email,
-    teacherId: teacherId,
-    name: name,
+  return {
+    email,
+    teacherId,
+    name,
     roles: Array.from(roles),
-    homeroomClasses: homeroomClasses
+    homeroomClasses
   };
-
-  putScriptCacheJson_(cacheKey, result, 300);
-  return result;
 }
 
 function getUserRoleInfo() {

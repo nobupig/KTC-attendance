@@ -2,3 +2,5 @@
 *.gsheet
 *.gscript
 .clasp.json
+*.txt
+config.gs
