@@ -25,8 +25,13 @@ function getMyHomeroomClasses() {
 function getHomeroomInitialData(termFilter) {
   const user = getCurrentUserContext();
   const homeroomClasses = getMyHomeroomClasses();
-
   const normalizedTermFilter = normalizeTermFilter_(termFilter);
+
+  const cacheKey = buildHomeroomInitialCacheKey_(user.email, normalizedTermFilter);
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    return cached;
+  }
 
   let firstSummary = null;
   if (homeroomClasses.length > 0) {
@@ -38,7 +43,7 @@ function getHomeroomInitialData(termFilter) {
     );
   }
 
-  return {
+  const result = {
     user: {
       email: user.email,
       name: user.name,
@@ -48,6 +53,9 @@ function getHomeroomInitialData(termFilter) {
     selectedTermFilter: normalizedTermFilter,
     firstSummary: firstSummary
   };
+
+  putScriptCacheJson_(cacheKey, result, 120);
+  return result;
 }
 
 function getHomeroomRiskSummary(grade, unit, termFilter) {
@@ -61,13 +69,23 @@ function getHomeroomRiskSummary(grade, unit, termFilter) {
 
   ensureHomeroomAccess_(targetGrade, targetUnit);
 
+  const cacheKey = buildHomeroomSummaryCacheKey_(
+    targetGrade,
+    targetUnit,
+    normalizedTermFilter
+  );
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const result = calculateHomeroomRiskSummary(
     targetGrade,
     targetUnit,
     normalizedTermFilter
   );
 
-  return {
+  const response = {
     grade: result.grade,
     unit: result.unit,
     classLabel: buildHomeroomClassLabel_(result.grade, result.unit),
@@ -80,6 +98,9 @@ function getHomeroomRiskSummary(grade, unit, termFilter) {
       normalOverStudents: 0
     }
   };
+
+  putScriptCacheJson_(cacheKey, response, 120);
+  return response;
 }
 
 function getStudentAbsenceRiskDetail(studentId, termFilter) {
@@ -88,6 +109,15 @@ function getStudentAbsenceRiskDetail(studentId, termFilter) {
 
   if (!targetStudentId) {
     throw new Error('studentId が指定されていません');
+  }
+
+  const cacheKey = buildHomeroomDetailCacheKey_(
+    targetStudentId,
+    normalizedTermFilter
+  );
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    return cached;
   }
 
   const student = getStudentBasicInfoById_(targetStudentId);
@@ -110,7 +140,7 @@ function getStudentAbsenceRiskDetail(studentId, termFilter) {
     (subject.officialOver || 0) > 0
   );
 
-  return {
+  const response = {
     student: {
       studentId: result.student.studentId,
       grade: result.student.grade,
@@ -143,6 +173,9 @@ function getStudentAbsenceRiskDetail(studentId, termFilter) {
             : '正常'
     }
   };
+
+  putScriptCacheJson_(cacheKey, response, 120);
+  return response;
 }
 
 function getHomeroomClassDetail(grade, unit, termFilter) {
@@ -290,20 +323,9 @@ function getStudentBasicInfoById_(studentId) {
     return null;
   }
 
-  const ss = getMasterSpreadsheet();
-  const sheet = ss.getSheetByName(CONFIG.SHEETS.STUDENTS);
-
-  if (!sheet) {
-    throw new Error('students シートがありません');
-  }
-
-  const values = sheet.getDataRange().getValues();
-  if (values.length <= 1) {
-    return null;
-  }
-
-  const headers = values[0];
-  const rows = values.slice(1);
+  const studentsData = getSheetDataCached_('MASTER', CONFIG.SHEETS.STUDENTS, 300);
+  const headers = studentsData.headers;
+  const rows = studentsData.rows;
 
   const col = {
     studentId: findColumnIndexForHomeroom_(headers, ['studentId', 'StudentID']),

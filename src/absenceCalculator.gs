@@ -29,13 +29,20 @@ function calculateStudentAbsenceRiskFromBundle_(studentId, termFilter, bundle) {
     throw new Error('対象学生が見つかりません: ' + targetStudentId);
   }
 
-  const targetKeys = getTargetSubjectKeysForStudent_(student, bundle.classMap, bundle.subjectMap, termFilter);
+  const targetKeys = getTargetSubjectKeysForStudent_(
+  student,
+  bundle.classMap,
+  bundle.subjectMap,
+  termFilter,
+  bundle.homeroomSubjectKeysMap
+);
   const subjectTotals = initializeSubjectTotals_(targetKeys, bundle.subjectMap);
 
-  bundle.attendanceRows.forEach(row => {
-    const rowStudentId = String(row[bundle.attendanceCol.studentId] || '').trim();
-    if (rowStudentId !== targetStudentId) return;
+  // 高速化ポイント:
+  // 全 attendanceRows ではなく、この学生の行だけ見る
+  const studentAttendanceRows = bundle.studentAttendanceMap[targetStudentId] || [];
 
+  studentAttendanceRows.forEach(row => {
     const classId = String(row[bundle.attendanceCol.classId] || '').trim();
     const statusCode = normalizeStatusCode_(row[bundle.attendanceCol.statusCode]);
 
@@ -55,22 +62,22 @@ function calculateStudentAbsenceRiskFromBundle_(studentId, termFilter, bundle) {
 
     const rule = bundle.statusRuleMap[statusCode] || createDefaultStatusRule_(statusCode);
 
-subjectTotals[subjectKey].normalAbsence += rule.normalAbsence;
-subjectTotals[subjectKey].officialAbsence += rule.officialAbsence;
+    subjectTotals[subjectKey].normalAbsence += rule.normalAbsence;
+    subjectTotals[subjectKey].officialAbsence += rule.officialAbsence;
 
-if (statusCode === 'L') {
-  subjectTotals[subjectKey].late++;
-}
+    if (statusCode === 'L') {
+      subjectTotals[subjectKey].late++;
+    }
 
-if (statusCode === 'E') {
-  subjectTotals[subjectKey].early++;
-}
+    if (statusCode === 'E') {
+      subjectTotals[subjectKey].early++;
+    }
 
-subjectTotals[subjectKey].records.push({
-  date: formatDateToYmd(row[bundle.attendanceCol.date]),
-  period: row[bundle.attendanceCol.period],
-  status: statusCode
-});
+    subjectTotals[subjectKey].records.push({
+      date: formatDateToYmd(row[bundle.attendanceCol.date]),
+      period: row[bundle.attendanceCol.period],
+      status: statusCode
+    });
   });
 
   const subjects = Object.keys(subjectTotals)
@@ -202,31 +209,26 @@ function testCalculateHomeroomRiskSummary() {
  * ========================= */
 
 function buildAbsenceCalculationBundle_(termFilter) {
-  const masterSs = getMasterSpreadsheet();
-  const operationSs = getOperationSpreadsheet();
+  const studentsData = getSheetDataCached_('MASTER', CONFIG.SHEETS.STUDENTS, 300);
+  const subjectsData = getSheetDataCached_('MASTER', CONFIG.SHEETS.SUBJECTS, 300);
+  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
+  const attendanceData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE, 60);
+  const attendanceStatusData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_STATUS, 300);
 
-  const studentsSheet = masterSs.getSheetByName(CONFIG.SHEETS.STUDENTS);
-  const subjectsSheet = masterSs.getSheetByName(CONFIG.SHEETS.SUBJECTS);
-  const classesSheet = masterSs.getSheetByName(CONFIG.SHEETS.CLASSES);
-  const attendanceSheet = operationSs.getSheetByName(CONFIG.SHEETS.ATTENDANCE);
-  const attendanceStatusSheet = operationSs.getSheetByName(CONFIG.SHEETS.ATTENDANCE_STATUS);
+  const studentsHeaders = studentsData.headers;
+  const studentsRows = studentsData.rows;
 
-  if (!studentsSheet) throw new Error('students シートがありません');
-  if (!subjectsSheet) throw new Error('Subjects シートがありません');
-  if (!classesSheet) throw new Error('classes シートがありません');
-  if (!attendanceSheet) throw new Error('attendance シートがありません');
+  const subjectsHeaders = subjectsData.headers;
+  const subjectsRows = subjectsData.rows;
 
-  const studentsHeaders = getSheetHeadersForAbsence_(studentsSheet);
-  const studentsRows = getSheetBodyValuesForAbsence_(studentsSheet);
+  const classesHeaders = classesData.headers;
+  const classesRows = classesData.rows;
 
-  const subjectsHeaders = getSheetHeadersForAbsence_(subjectsSheet);
-  const subjectsRows = getSheetBodyValuesForAbsence_(subjectsSheet);
+  const attendanceHeaders = attendanceData.headers;
+  const attendanceRows = attendanceData.rows;
 
-  const classesHeaders = getSheetHeadersForAbsence_(classesSheet);
-  const classesRows = getSheetBodyValuesForAbsence_(classesSheet);
-
-  const attendanceHeaders = getSheetHeadersForAbsence_(attendanceSheet);
-  const attendanceRows = getSheetBodyValuesForAbsence_(attendanceSheet);
+  const attendanceStatusHeaders = attendanceStatusData.headers;
+  const attendanceStatusRows = attendanceStatusData.rows;
 
   const studentCol = {
     studentId: findColumnIndexForAbsence_(studentsHeaders, ['studentId', 'StudentID']),
@@ -292,19 +294,43 @@ function buildAbsenceCalculationBundle_(termFilter) {
   });
 
   const classMap = {};
+  const homeroomSubjectKeysMap = {};
   classesRows.forEach(row => {
     const classId = String(row[classCol.classId] || '').trim();
     if (!classId) return;
 
+    const grade = String(row[classCol.grade] || '').trim();
+    const unit = String(row[classCol.unit] || '').trim();
+    const subjectId = String(row[classCol.subjectId] || '').trim();
+
     classMap[classId] = {
       classId: classId,
-      subjectId: String(row[classCol.subjectId] || '').trim(),
-      grade: String(row[classCol.grade] || '').trim(),
-      unit: String(row[classCol.unit] || '').trim()
+      subjectId: subjectId,
+      grade: grade,
+      unit: unit
     };
+
+    const guKey = grade + '__' + unit;
+    if (!homeroomSubjectKeysMap[guKey]) {
+      homeroomSubjectKeysMap[guKey] = [];
+    }
+    if (subjectId && homeroomSubjectKeysMap[guKey].indexOf(subjectId) === -1) {
+      homeroomSubjectKeysMap[guKey].push(subjectId);
+    }
   });
 
-  const statusRuleMap = buildAttendanceStatusRuleMap_(attendanceStatusSheet);
+  const statusRuleMap = buildAttendanceStatusRuleMapFromRows_(attendanceStatusHeaders, attendanceStatusRows);
+
+  const studentAttendanceMap = {};
+  attendanceRows.forEach(row => {
+    const rowStudentId = String(row[attendanceCol.studentId] || '').trim();
+    if (!rowStudentId) return;
+
+    if (!studentAttendanceMap[rowStudentId]) {
+      studentAttendanceMap[rowStudentId] = [];
+    }
+    studentAttendanceMap[rowStudentId].push(row);
+  });
 
   return {
     studentMap: studentMap,
@@ -312,8 +338,51 @@ function buildAbsenceCalculationBundle_(termFilter) {
     classMap: classMap,
     attendanceRows: attendanceRows,
     attendanceCol: attendanceCol,
-    statusRuleMap: statusRuleMap
+    statusRuleMap: statusRuleMap,
+    studentAttendanceMap: studentAttendanceMap,
+    homeroomSubjectKeysMap: homeroomSubjectKeysMap
   };
+}
+
+function buildAttendanceStatusRuleMapFromRows_(headers, rows) {
+  const defaultMap = {
+    P: { normalAbsence: 0, officialAbsence: 0 },
+    A: { normalAbsence: 1, officialAbsence: 0 },
+    O: { normalAbsence: 0, officialAbsence: 1 },
+    L: { normalAbsence: 0, officialAbsence: 0 },
+    E: { normalAbsence: 0, officialAbsence: 0 },
+    ABS: { normalAbsence: 1, officialAbsence: 0 },
+    OFF: { normalAbsence: 0, officialAbsence: 1 },
+    LAT: { normalAbsence: 0, officialAbsence: 0 }
+  };
+
+  if (!headers || !rows) {
+    return defaultMap;
+  }
+
+  const col = {
+    code: findColumnIndexForAbsence_(headers, ['code', 'statusCode']),
+    normalAbsence: findColumnIndexForAbsence_(headers, ['normalAbsence', '通常欠席換算']),
+    officialAbsence: findColumnIndexForAbsence_(headers, ['officialAbsence', '公欠換算'])
+  };
+
+  if (col.code === -1 || col.normalAbsence === -1 || col.officialAbsence === -1) {
+    return defaultMap;
+  }
+
+  const map = Object.assign({}, defaultMap);
+
+  rows.forEach(row => {
+    const code = normalizeStatusCode_(row[col.code]);
+    if (!code) return;
+
+    map[code] = {
+      normalAbsence: toNumberForAbsence_(row[col.normalAbsence]),
+      officialAbsence: toNumberForAbsence_(row[col.officialAbsence])
+    };
+  });
+
+  return map;
 }
 
 function buildAttendanceStatusRuleMap_(attendanceStatusSheet) {
@@ -362,23 +431,17 @@ function buildAttendanceStatusRuleMap_(attendanceStatusSheet) {
   return map;
 }
 
-function getTargetSubjectKeysForStudent_(student, classMap, subjectMap, termFilter) {
-  const keys = [];
+function getTargetSubjectKeysForStudent_(student, classMap, subjectMap, termFilter, homeroomSubjectKeysMap) {
+  const guKey = String(student.grade || '').trim() + '__' + String(student.unit || '').trim();
+  const candidateKeys = homeroomSubjectKeysMap && homeroomSubjectKeysMap[guKey]
+    ? homeroomSubjectKeysMap[guKey]
+    : [];
 
-  Object.values(classMap).forEach(cls => {
-    if (String(cls.grade) !== String(student.grade)) return;
-    if (String(cls.unit) !== String(student.unit)) return;
-
-    const subject = subjectMap[cls.subjectId];
-    if (!subject) return;
-    if (!isSubjectIncludedByTerm_(subject.term, termFilter)) return;
-
-    if (!keys.includes(cls.subjectId)) {
-      keys.push(cls.subjectId);
-    }
+  return candidateKeys.filter(function(subjectId) {
+    const subject = subjectMap[subjectId];
+    if (!subject) return false;
+    return isSubjectIncludedByTerm_(subject.term, termFilter);
   });
-
-  return keys;
 }
 
 function initializeSubjectTotals_(subjectIds, subjectMap) {

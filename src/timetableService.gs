@@ -1,8 +1,8 @@
-function getTodayClassesForCurrentUser(targetDate) {
+function getClassesForCurrentUserByDate(targetDate) {
   const currentUserEmail = String(getCurrentUserEmail()).trim().toLowerCase();
 
   const timezone = Session.getScriptTimeZone() || 'Asia/Tokyo';
-  const today = targetDate
+  const ymd = targetDate
     ? formatDateToYmd(targetDate)
     : Utilities.formatDate(new Date(), timezone, 'yyyy-MM-dd');
 
@@ -91,7 +91,7 @@ function getTodayClassesForCurrentUser(targetDate) {
 
   return classSessions
     .filter(function(row) {
-      return formatDateToYmd(row[csCol.date]) === today;
+      return formatDateToYmd(row[csCol.date]) === ymd;
     })
     .map(function(row) {
       const classId = String(row[csCol.classId] || '').trim();
@@ -120,6 +120,10 @@ function getTodayClassesForCurrentUser(targetDate) {
     .sort(function(a, b) {
       return Number(a.period) - Number(b.period);
     });
+}
+
+function getTodayClassesForCurrentUser(targetDate) {
+  return getClassesForCurrentUserByDate(targetDate);
 }
 
 function testGetTodayClassesForCurrentUser() {
