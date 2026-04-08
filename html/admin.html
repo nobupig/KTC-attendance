@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>教務画面</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: sans-serif;
+      background: #f5f7fb;
+      color: #222;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+
+    .page-header {
+      margin-bottom: 16px;
+    }
+
+    .sub-text {
+      color: #666;
+      font-size: 14px;
+      margin-bottom: 8px;
+      line-height: 1.6;
+    }
+
+    .message {
+      min-height: 24px;
+      margin: 8px 0 16px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #eef3ff;
+      color: #1f3c88;
+      font-size: 14px;
+      display: none;
+    }
+
+    .message.show { display: block; }
+    .message.success { background: #e8f7ec; color: #1d6b37; }
+    .message.error { background: #fdecec; color: #a12622; }
+    .message.warn { background: #fff4db; color: #8a5a00; }
+
+    .panel {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      margin-bottom: 16px;
+    }
+
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+
+    .filter-grid {
+      display: grid;
+      grid-template-columns: 220px 180px auto auto auto;
+      gap: 10px;
+      align-items: end;
+    }
+
+    .field label {
+      display: block;
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 6px;
+      font-weight: bold;
+    }
+
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      border: 1px solid #ccd5e3;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 14px;
+      background: #fff;
+    }
+
+    .field textarea {
+      min-height: 90px;
+      resize: vertical;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 10px;
+      padding: 11px 16px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .btn-primary {
+      background: #2f6feb;
+      color: #fff;
+    }
+
+    .btn-secondary {
+      background: #eef2f7;
+      color: #334;
+    }
+
+    .btn-danger-lite {
+      background: #fff4db;
+      color: #8a5a00;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .summary-card {
+      border: 1px solid #d9e0ee;
+      border-radius: 10px;
+      background: #f8fbff;
+      padding: 14px;
+    }
+
+    .summary-label {
+      font-size: 13px;
+      color: #667;
+      margin-bottom: 6px;
+    }
+
+    .summary-value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #1f3c88;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      min-width: 980px;
+    }
+
+    th, td {
+      border-bottom: 1px solid #e5e9f2;
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: middle;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    th {
+      background: #f7f9fc;
+      font-size: 13px;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: bold;
+      background: #fdecec;
+      color: #a12622;
+      border: 1px solid #e8b3b1;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .small-btn {
+      border: 1px solid #ccd5e3;
+      background: #fff;
+      color: #334;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .small-btn:hover {
+      background: #f4f7fb;
+    }
+
+    .small-btn.proxy {
+      background: #eef4ff;
+      border-color: #9db7ef;
+      color: #1f4fa3;
+    }
+
+    .empty-box {
+      padding: 20px;
+      border: 1px dashed #ccd5e3;
+      border-radius: 10px;
+      background: #fafcff;
+      color: #667;
+      text-align: center;
+    }
+
+    .admin-name {
+      font-size: 14px;
+      font-weight: bold;
+      color: #334;
+    }
+
+    .loading-note {
+      font-size: 13px;
+      color: #667;
+      margin-top: 8px;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.35);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      padding: 16px;
+    }
+
+    .modal-backdrop.show {
+      display: flex;
+    }
+
+    .modal {
+      width: 100%;
+      max-width: 720px;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
+      overflow: hidden;
+    }
+
+    .modal-header {
+      padding: 16px 18px;
+      border-bottom: 1px solid #e5e9f2;
+    }
+
+    .modal-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .modal-body {
+      padding: 16px 18px;
+    }
+
+    .modal-footer {
+      padding: 14px 18px;
+      border-top: 1px solid #e5e9f2;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 10px 12px;
+      font-size: 14px;
+    }
+
+    .detail-label {
+      font-weight: bold;
+      color: #555;
+    }
+
+    .note-text {
+      font-size: 13px;
+      color: #667;
+      line-height: 1.6;
+      margin-top: 8px;
+    }
+
+    @media (max-width: 980px) {
+      .filter-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .filter-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 768px) {
+      body {
+        padding: 12px;
+      }
+
+      h1 {
+        font-size: 22px;
+      }
+
+      .panel {
+        padding: 12px;
+      }
+
+      .btn {
+        width: 100%;
+      }
+
+      .action-buttons {
+        flex-direction: column;
+      }
+    }
+
+     .loading-banner {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: #eef4ff;
+    border: 1px solid #b9cdf7;
+    color: #1f4fa3;
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .loading-banner.show {
+    display: flex;
+  }
+
+  .loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid #c9dafc;
+    border-top: 3px solid #2f6feb;
+    border-radius: 50%;
+    animation: adminSpin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes adminSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <h1>出席管理 管理者画面</h1>
+    <div class="sub-text">
+      未入力授業の確認と、必要時のみ代理登録を行います。<br>
+      通常の出席入力は科目担当画面で行い、この画面は管理・督促・支援用として使用します。
+    </div>
+    <div id="adminName" class="admin-name">管理者：読み込み中...</div>
+    <div id="messageArea" class="message"></div>
+  </div>
+
+  <div class="panel">
+    <h2>検索条件</h2>
+    <div class="filter-grid">
+      <div class="field">
+        <label for="targetDate">対象日</label>
+        <input type="date" id="targetDate">
+      </div>
+
+      <div class="field">
+        <label for="gradeFilter">学年</label>
+        <select id="gradeFilter">
+          <option value="">全て</option>
+          <option value="1">1年</option>
+          <option value="2">2年</option>
+          <option value="3">3年</option>
+          <option value="4">4年</option>
+          <option value="5">5年</option>
+        </select>
+      </div>
+
+      <button id="searchButton" type="button" class="btn btn-primary">検索</button>
+      <button id="todayButton" type="button" class="btn btn-secondary">今日に戻る</button>
+      <button id="clearButton" type="button" class="btn btn-secondary">条件クリア</button>
+    </div>
+    <div id="loadingNote" class="loading-banner">
+  <div class="loading-spinner"></div>
+  <div id="loadingText">未入力授業を検索中です...</div>
+</div>
+  </div>
+
+  <div class="panel">
+    <h2>サマリー</h2>
+    <div class="summary-grid">
+      <div class="summary-card">
+        <div class="summary-label">対象日の全授業数</div>
+        <div id="totalCount" class="summary-value">-</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">未入力授業数</div>
+        <div id="missingCount" class="summary-value">-</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">最終更新時刻</div>
+        <div id="updatedAt" class="summary-value" style="font-size:18px;">-</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>未入力授業一覧</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>時限</th>
+            <th>学年</th>
+            <th>組・コース</th>
+            <th>科目名</th>
+            <th>担当教員</th>
+            <th>状況</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody">
+          <tr>
+            <td colspan="8">
+              <div class="empty-box">読み込み中です...</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 詳細モーダル -->
+  <div id="detailModal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">授業詳細</h3>
+      </div>
+      <div class="modal-body">
+        <div id="detailGrid" class="detail-grid"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeDetailModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 代理登録モーダル -->
+  <div id="proxyModal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">代理登録の確認</h3>
+      </div>
+      <div class="modal-body">
+        <div id="proxyDetailGrid" class="detail-grid"></div>
+
+        <div class="note-text">
+          代理登録は例外対応用です。理由を必ず記録し、必要最小限の運用にしてください。
+        </div>
+
+        <div class="field" style="margin-top:14px;">
+          <label for="proxyReasonType">代理理由</label>
+          <select id="proxyReasonType">
+            <option value="">選択してください</option>
+            <option value="操作困難のため代行">操作困難のため代行</option>
+            <option value="担当教員不在">担当教員不在</option>
+            <option value="緊急対応">緊急対応</option>
+            <option value="操作支援">操作支援</option>
+            <option value="その他">その他</option>
+          </select>
+        </div>
+
+        <div class="field" style="margin-top:12px;">
+          <label for="proxyReasonNote">備考（その他の詳細を含む）</label>
+          <textarea id="proxyReasonNote" placeholder="必要があれば補足を入力してください"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeProxyModal()">キャンセル</button>
+        <button type="button" class="btn btn-primary" onclick="openTeacherProxyPage()">代理登録へ進む</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let dashboardRows = [];
+    let selectedRow = null;
+    let appBaseUrl = "";
+
+    document.addEventListener("DOMContentLoaded", function() {
+      setToday();
+      bindEvents();
+      loadInitial();
+    });
+
+    function bindEvents() {
+      document.getElementById("searchButton").addEventListener("click", searchData);
+      document.getElementById("todayButton").addEventListener("click", function() {
+        setToday();
+        searchData();
+      });
+      document.getElementById("clearButton").addEventListener("click", function() {
+        setToday();
+        document.getElementById("gradeFilter").value = "";
+        searchData();
+      });
+    }
+
+ function loadInitial() {
+  setLoading(true, "初期情報を読み込み中です...");
+  clearMessage();
+
+  google.script.run
+    .withSuccessHandler(function(user) {
+      if (!user || !Array.isArray(user.roles) || user.roles.indexOf("admin") === -1) {
+        showMessage("教務画面の権限がありません。", "error");
+        setLoading(false, "");
+        return;
+      }
+
+      document.getElementById("adminName").textContent = "管理者：" + (user.name || user.email || "");
+      appBaseUrl = window.location.href.split("?")[0];
+      searchData();
+    })
+    .withFailureHandler(function(error) {
+      setLoading(false, "");
+      showMessage("ユーザー情報の取得に失敗しました。", "error");
+      console.error(error);
+    })
+    .getUserRoleInfo();
+}
+
+    
+
+    function setToday() {
+      const today = new Date();
+      document.getElementById("targetDate").value = toInputDate(today);
+    }
+
+    function toInputDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return y + "-" + m + "-" + d;
+    }
+
+   function setLoading(flag, text) {
+  const loadingEl = document.getElementById("loadingNote");
+  const loadingTextEl = document.getElementById("loadingText");
+
+  const searchButton = document.getElementById("searchButton");
+  const todayButton = document.getElementById("todayButton");
+  const clearButton = document.getElementById("clearButton");
+
+  if (flag) {
+    loadingTextEl.textContent = text || "読み込み中...";
+    loadingEl.classList.add("show");
+
+    if (searchButton) searchButton.disabled = true;
+    if (todayButton) todayButton.disabled = true;
+    if (clearButton) clearButton.disabled = true;
+  } else {
+    loadingEl.classList.remove("show");
+
+    if (searchButton) searchButton.disabled = false;
+    if (todayButton) todayButton.disabled = false;
+    if (clearButton) clearButton.disabled = false;
+  }
+}
+
+    function showMessage(text, type) {
+      const el = document.getElementById("messageArea");
+      el.textContent = text;
+      el.className = "message show";
+      if (type) el.classList.add(type);
+    }
+
+    function clearMessage() {
+      const el = document.getElementById("messageArea");
+      el.textContent = "";
+      el.className = "message";
+    }
+
+    function searchData() {
+      const targetDate = document.getElementById("targetDate").value;
+      const gradeFilter = document.getElementById("gradeFilter").value;
+
+      if (!targetDate) {
+        showMessage("対象日を指定してください。", "warn");
+        return;
+      }
+
+      setLoading(true, "未入力授業を検索中です...");
+      clearMessage();
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          setLoading(false, "");
+
+          if (!data) {
+            showMessage("検索結果を取得できませんでした。", "error");
+            return;
+          }
+
+          dashboardRows = Array.isArray(data.rows) ? data.rows : [];
+          renderSummary(data);
+          renderTable(dashboardRows);
+
+          if (dashboardRows.length === 0) {
+            showMessage("未入力授業はありません。", "success");
+          }
+        })
+        .withFailureHandler(function(error) {
+          setLoading(false, "");
+          showMessage("未入力授業の取得に失敗しました。", "error");
+          console.error(error);
+        })
+        .getAdminDashboardData(targetDate, gradeFilter);
+    }
+
+    function renderSummary(data) {
+      document.getElementById("totalCount").textContent =
+        data.totalCount != null ? data.totalCount : "-";
+
+      document.getElementById("missingCount").textContent =
+        data.missingCount != null ? data.missingCount : "-";
+
+      document.getElementById("updatedAt").textContent =
+        data.updatedAt || "-";
+    }
+
+    function renderTable(rows) {
+      const tbody = document.getElementById("tableBody");
+
+      if (!rows || rows.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8">
+              <div class="empty-box">条件に一致する未入力授業はありません。</div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      let html = "";
+      rows.forEach(function(row, index) {
+        html += "<tr>";
+        html += "<td>" + escapeHtml(row.date || "") + "</td>";
+        html += "<td>" + escapeHtml(String(row.period || "")) + "</td>";
+        html += "<td>" + escapeHtml(String(row.grade || "")) + "</td>";
+        html += "<td>" + escapeHtml(row.unit || "") + "</td>";
+        html += "<td>" + escapeHtml(row.subjectName || "") + "</td>";
+        html += "<td>" + escapeHtml(row.teacherName || "") + "</td>";
+        html += "<td><span class='status-badge'>" + escapeHtml(row.status || "未入力") + "</span></td>";
+        html += "<td>";
+        html += "  <div class='action-buttons'>";
+        html += "    <button type='button' class='small-btn' onclick='openDetailModal(" + index + ")'>詳細</button>";
+        html += "    <button type='button' class='small-btn proxy' onclick='openProxyModal(" + index + ")'>代理登録</button>";
+        html += "  </div>";
+        html += "</td>";
+        html += "</tr>";
+      });
+
+      tbody.innerHTML = html;
+    }
+
+    function openDetailModal(index) {
+      const row = dashboardRows[index];
+      if (!row) return;
+
+      const grid = document.getElementById("detailGrid");
+      grid.innerHTML = [
+        detailRow("日付", row.date || ""),
+        detailRow("時限", row.period || ""),
+        detailRow("学年", row.grade || ""),
+        detailRow("組・コース", row.unit || ""),
+        detailRow("科目名", row.subjectName || ""),
+        detailRow("classId", row.classId || ""),
+        detailRow("担当教員", row.teacherName || ""),
+        detailRow("teacherId", row.teacherId || ""),
+        detailRow("状況", row.status || "未入力")
+      ].join("");
+
+      document.getElementById("detailModal").classList.add("show");
+    }
+
+    function closeDetailModal() {
+      document.getElementById("detailModal").classList.remove("show");
+    }
+
+    function openProxyModal(index) {
+      const row = dashboardRows[index];
+      if (!row) return;
+
+      selectedRow = row;
+      document.getElementById("proxyReasonType").value = "";
+      document.getElementById("proxyReasonNote").value = "";
+
+      const grid = document.getElementById("proxyDetailGrid");
+      grid.innerHTML = [
+        detailRow("対象日", row.date || ""),
+        detailRow("時限", row.period || ""),
+        detailRow("学年", row.grade || ""),
+        detailRow("組・コース", row.unit || ""),
+        detailRow("科目名", row.subjectName || ""),
+        detailRow("classId", row.classId || ""),
+        detailRow("本来の担当教員", row.teacherName || "")
+      ].join("");
+
+      document.getElementById("proxyModal").classList.add("show");
+    }
+
+    function closeProxyModal() {
+      document.getElementById("proxyModal").classList.remove("show");
+      selectedRow = null;
+    }
+
+    function openTeacherProxyPage() {
+      if (!selectedRow) return;
+
+      const proxyReasonType = document.getElementById("proxyReasonType").value;
+      const proxyReasonNote = document.getElementById("proxyReasonNote").value.trim();
+
+      if (!proxyReasonType) {
+        showMessage("代理理由を選択してください。", "warn");
+        return;
+      }
+
+      if (!appBaseUrl) {
+        showMessage("アプリURLを取得できていません。", "error");
+        return;
+      }
+
+      const url =
+        appBaseUrl +
+        "?page=teacher" +
+        "&classId=" + encodeURIComponent(selectedRow.classId || "") +
+        "&date=" + encodeURIComponent(selectedRow.date || "") +
+        "&period=" + encodeURIComponent(selectedRow.period || "") +
+        "&proxyMode=1" +
+        "&proxyForTeacherId=" + encodeURIComponent(selectedRow.teacherId || "") +
+        "&proxyForTeacherName=" + encodeURIComponent(selectedRow.teacherName || "") +
+        "&proxyReasonType=" + encodeURIComponent(proxyReasonType) +
+        "&proxyReasonNote=" + encodeURIComponent(proxyReasonNote || "");
+
+      window.open(url, "_blank");
+      closeProxyModal();
+      showMessage("代理登録画面を別タブで開きました。", "success");
+    }
+
+    function detailRow(label, value) {
+      return (
+        "<div class='detail-label'>" + escapeHtml(label) + "</div>" +
+        "<div>" + escapeHtml(String(value || "")) + "</div>"
+      );
+    }
+
+    function escapeHtml(str) {
+      if (str == null) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+  </script>
+</body>
+</html>

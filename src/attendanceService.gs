@@ -63,16 +63,7 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
       }
     });
 
-    appendAttendanceSessionLog_(attendanceSessionsSheet, [
-      targetClassId,
-      targetDate,
-      Number(targetPeriod),
-      currentUserEmail,
-      now,
-      actionType,
-      targetSessionKey,
-      savedModeLabel
-    ]);
+
 
     const values = attendanceSheet.getDataRange().getValues();
     const headers = values.length > 0 ? values[0] : [];
@@ -93,90 +84,126 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
       }
     });
 
-    const newRows = attendance
-      .filter(function(record) {
-        return String(record.statusCode || "").trim() !== "";
-      })
-      .map(function(record) {
-        return [
-          targetClassId,
-          targetDate,
-          Number(targetPeriod),
-          String(record.studentId).trim(),
-          String(record.statusCode).trim(),
-          now
-        ];
-      });
+    const targetStudentIds = {};
+    const desiredByStudentId = {};
 
-    const matchedRowNumbers = [];
-    rows.forEach(function(row, i) {
+    attendance.forEach(function(record) {
+      const studentId = String(record.studentId || '').trim();
+      const statusCode = String(record.statusCode || '').trim();
+      if (!studentId) return;
+      targetStudentIds[studentId] = true;
+      desiredByStudentId[studentId] = statusCode;
+    });
+
+    const existingRowNumberByStudentId = {};
+    rows.forEach(function(row, index) {
       const rowClassId = String(row[col.classId] || '').trim();
       const rowDate = formatDateToYmd(row[col.date]);
-      const rowPeriod = String(row[col.period] || '').trim();
+      const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
+      const rowStudentId = String(row[col.studentId] || '').trim();
 
       if (
         rowClassId === targetClassId &&
         rowDate === targetDate &&
-        rowPeriod === targetPeriod
+        rowPeriod === targetPeriod &&
+        targetStudentIds[rowStudentId]
       ) {
-        matchedRowNumbers.push(i + 2);
+        existingRowNumberByStudentId[rowStudentId] = index + 2;
       }
     });
 
-    if (
-      matchedRowNumbers.length > 0 &&
-      matchedRowNumbers.length === newRows.length &&
-      isSequentialRows_(matchedRowNumbers) &&
-      newRows.length > 0
-    ) {
-      attendanceSheet
-        .getRange(matchedRowNumbers[0], 1, newRows.length, newRows[0].length)
-        .setValues(newRows);
+    const rowsToClear = [];
+    const rowsToUpdate = [];
+    const appendRows = [];
 
-    } else if (matchedRowNumbers.length === 0) {
-      if (newRows.length > 0) {
-        attendanceSheet
-          .getRange(attendanceSheet.getLastRow() + 1, 1, newRows.length, newRows[0].length)
-          .setValues(newRows);
+    Object.keys(targetStudentIds).forEach(function(studentId) {
+      const statusCode = desiredByStudentId[studentId] || '';
+      const existingRowNumber = existingRowNumberByStudentId[studentId];
+
+      if (!statusCode) {
+        if (existingRowNumber) {
+          rowsToClear.push(existingRowNumber);
+        }
+        return;
       }
 
-    } else {
-      const filteredRows = rows.filter(function(row) {
-        const rowClassId = String(row[col.classId] || '').trim();
-        const rowDate = formatDateToYmd(row[col.date]);
-        const rowPeriod = String(row[col.period] || '').trim();
-
-        return !(
-          rowClassId === targetClassId &&
-          rowDate === targetDate &&
-          rowPeriod === targetPeriod
-        );
+      const fullRow = buildAttendanceSheetRow_(headers.length, col, {
+        classId: targetClassId,
+        date: targetDate,
+        period: Number(targetPeriod),
+        studentId: studentId,
+        statusCode: statusCode,
+        recordedAt: now
       });
 
-      const rebuiltRows = filteredRows.concat(newRows);
-
-      const lastRow = attendanceSheet.getLastRow();
-      const lastColumn = attendanceSheet.getLastColumn();
-
-      if (lastRow > 1) {
-        attendanceSheet.getRange(2, 1, lastRow - 1, lastColumn).clearContent();
+      if (existingRowNumber) {
+        rowsToUpdate.push({ rowNumber: existingRowNumber, values: fullRow });
+      } else {
+        appendRows.push(fullRow);
       }
+    });
 
-      if (rebuiltRows.length > 0) {
-        attendanceSheet
-          .getRange(2, 1, rebuiltRows.length, rebuiltRows[0].length)
-          .setValues(rebuiltRows);
+    rowsToClear.sort(function(a, b) { return a - b; });
+    rowsToUpdate.sort(function(a, b) { return a.rowNumber - b.rowNumber; });
+
+    if (rowsToClear.length > 0) {
+      if (isSequentialRows_(rowsToClear)) {
+        attendanceSheet.getRange(rowsToClear[0], 1, rowsToClear.length, headers.length).clearContent();
+      } else {
+        rowsToClear.forEach(function(rowNumber) {
+          attendanceSheet.getRange(rowNumber, 1, 1, headers.length).clearContent();
+        });
       }
     }
 
+    if (rowsToUpdate.length > 0) {
+      const rowNumbers = rowsToUpdate.map(function(item) { return item.rowNumber; });
+      if (isSequentialRows_(rowNumbers)) {
+        attendanceSheet.getRange(rowNumbers[0], 1, rowsToUpdate.length, headers.length)
+          .setValues(rowsToUpdate.map(function(item) { return item.values; }));
+      } else {
+        rowsToUpdate.forEach(function(item) {
+          attendanceSheet.getRange(item.rowNumber, 1, 1, headers.length).setValues([item.values]);
+        });
+      }
+    }
+
+    if (appendRows.length > 0) {
+      const startRow = Math.max(attendanceSheet.getLastRow(), 1) + 1;
+      attendanceSheet.getRange(startRow, 1, appendRows.length, headers.length).setValues(appendRows);
+    }
+    appendAttendanceSessionLog_(attendanceSessionsSheet, [
+  targetClassId,
+  targetDate,
+  Number(targetPeriod),
+  currentUserEmail,
+  now,
+  actionType,
+  targetSessionKey,
+  savedModeLabel
+]);
     invalidateAttendanceCaches_(targetClassId, targetDate, targetPeriod);
+
+    const lastSavedInfo = {
+      teacherEmail: currentUserEmail,
+      savedAt: now,
+      savedAtText: formatDateTimeJst_(now),
+      actionType: actionType,
+      targetSessionKey: targetSessionKey,
+      savedModeLabel: savedModeLabel,
+      savedByCurrentUser: true
+    };
 
     return {
       success: true,
       savedCount: attendance.length,
+      updatedCount: rowsToUpdate.length,
+      appendedCount: appendRows.length,
+      clearedCount: rowsToClear.length,
       mode: allowPastEdit ? 'past-edit' : 'normal',
       actionType: actionType,
-      targetSessionKey: targetSessionKey
+      targetSessionKey: targetSessionKey,
+      lastSavedInfo: lastSavedInfo
     };
 
   } finally {
@@ -218,7 +245,7 @@ function getAttendanceMap(classId, date, period) {
   rows.forEach(function(row) {
     const rowClassId = String(row[col.classId] || '').trim();
     const rowDate = formatDateToYmd(row[col.date]);
-    const rowPeriod = String(row[col.period] || '').trim();
+    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
 
     if (
       rowClassId === targetClassId &&
@@ -238,6 +265,17 @@ function getAttendanceMap(classId, date, period) {
 /* =========================
  * 内部ヘルパー
  * ========================= */
+
+function buildAttendanceSheetRow_(headerCount, col, record) {
+  const row = new Array(headerCount).fill('');
+  row[col.classId] = record.classId;
+  row[col.date] = record.date;
+  row[col.period] = record.period;
+  row[col.studentId] = record.studentId;
+  row[col.statusCode] = record.statusCode;
+  row[col.recordedAt] = record.recordedAt;
+  return row;
+}
 
 function appendAttendanceSessionLog_(sheet, baseRow) {
   const headerCount = sheet.getLastColumn();
@@ -267,9 +305,102 @@ function isSequentialRows_(rowNumbers) {
   return true;
 }
 
+
 function invalidateAttendanceCaches_(classId, date, period) {
   removeScriptCacheKeys_([
     getAttendanceSheetCacheKey_(),
+    getAttendanceSessionsSheetCacheKey_(),
     buildAttendanceSessionCacheKey_(classId, date, period)
   ]);
+}
+
+function normalizeAttendanceActionTypes_(actionTypes) {
+  if (!actionTypes) return null;
+
+  const list = Array.isArray(actionTypes) ? actionTypes : [actionTypes];
+  const normalized = list
+    .map(function(item) { return String(item || '').trim(); })
+    .filter(Boolean);
+
+  return normalized.length ? normalized : null;
+}
+
+function formatDateTimeJst_(value) {
+  if (!value) return '';
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return '';
+  return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+}
+
+function getLatestAttendanceSessionInfo_(classId, date, period, actionTypes) {
+  const targetClassId = normalizeString_(classId);
+  const targetDate = formatDateToYmd(date);
+  const targetPeriod = normalizeString_(period);
+  const allowedActionTypes = normalizeAttendanceActionTypes_(actionTypes);
+  const currentUserEmail = String(getCurrentUserEmail() || '').trim().toLowerCase();
+
+  if (!targetClassId || !targetDate || !targetPeriod) {
+    return null;
+  }
+
+  const data = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
+  const headers = data.headers;
+  const rows = data.rows;
+
+  const col = {
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    date: findColumnIndex_(headers, ['date', '日付']),
+    period: findColumnIndex_(headers, ['period', '時限']),
+    teacherEmail: findColumnIndex_(headers, ['teacherEmail', 'email']),
+    accessedAt: findColumnIndex_(headers, ['accessedAt', 'savedAt']),
+    actionType: findColumnIndex_(headers, ['actionType']),
+    targetSessionKey: findColumnIndex_(headers, ['targetSessionKey']),
+    savedModeLabel: findColumnIndex_(headers, ['savedModeLabel'])
+  };
+
+  ['classId', 'date', 'period'].forEach(function(key) {
+    if (col[key] === -1) {
+      throw new Error('attendanceSessions シートに ' + key + ' 列がありません');
+    }
+  });
+
+  let latest = null;
+
+  rows.forEach(function(row) {
+    const rowClassId = normalizeString_(row[col.classId]);
+    const rowDate = formatDateToYmd(row[col.date]);
+    const rowPeriod = normalizeString_(row[col.period]);
+    const rowActionType = col.actionType !== -1 ? String(row[col.actionType] || '').trim() : '';
+
+    if (rowClassId !== targetClassId) return;
+    if (rowDate !== targetDate) return;
+    if (rowPeriod !== targetPeriod) return;
+    if (allowedActionTypes && allowedActionTypes.indexOf(rowActionType) === -1) return;
+
+    const accessedAtRaw = col.accessedAt !== -1 ? row[col.accessedAt] : '';
+    const accessedAt = accessedAtRaw instanceof Date ? accessedAtRaw : new Date(accessedAtRaw);
+    const accessedAtMs = isNaN(accessedAt.getTime()) ? 0 : accessedAt.getTime();
+
+    if (!latest || accessedAtMs >= latest._ms) {
+      const teacherEmail = col.teacherEmail !== -1 ? String(row[col.teacherEmail] || '').trim() : '';
+      latest = {
+        teacherEmail: teacherEmail,
+        savedAt: accessedAtRaw,
+        savedAtText: formatDateTimeJst_(accessedAtRaw),
+        actionType: rowActionType,
+        targetSessionKey: col.targetSessionKey !== -1 ? String(row[col.targetSessionKey] || '').trim() : '',
+        savedModeLabel: col.savedModeLabel !== -1 ? String(row[col.savedModeLabel] || '').trim() : '',
+        savedByCurrentUser: !!teacherEmail && teacherEmail.toLowerCase() === currentUserEmail,
+        _ms: accessedAtMs
+      };
+    }
+  });
+
+  if (!latest) return null;
+  delete latest._ms;
+  return latest;
+}
+
+function hasAttendanceSessionRecord_(classId, date, period, actionTypes) {
+  return !!getLatestAttendanceSessionInfo_(classId, date, period, actionTypes);
 }

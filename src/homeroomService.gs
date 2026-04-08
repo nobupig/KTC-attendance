@@ -9,16 +9,13 @@ function getMyHomeroomClasses() {
     ? user.homeroomClasses
     : [];
 
-  if (user.roles && user.roles.includes('admin')) {
-    const allClasses = getAllHomeroomClasses_();
-    return sortHomeroomClasses_(allClasses);
-  }
-
   return sortHomeroomClasses_(
-    classes.map(item => ({
-      grade: String(item.grade || '').trim(),
-      unit: String(item.unit || '').trim()
-    }))
+    classes.map(function(item) {
+      return {
+        grade: String(item.grade || '').trim(),
+        unit: String(item.unit || '').trim()
+      };
+    })
   );
 }
 
@@ -226,19 +223,19 @@ function ensureHomeroomAccess_(grade, unit) {
   const targetGrade = String(grade || '').trim();
   const targetUnit = String(unit || '').trim();
 
-  if (user.roles && user.roles.includes('admin')) {
-    return true;
-  }
-
   const homeroomClasses = Array.isArray(user.homeroomClasses)
     ? user.homeroomClasses
     : [];
 
-  const allowed = homeroomClasses.some(item => {
-    return (
-      String(item.grade || '').trim() === targetGrade &&
-      String(item.unit || '').trim() === targetUnit
-    );
+  const allowed = homeroomClasses.some(function(item) {
+    const assignedGrade = String(item.grade || '').trim();
+    const assignedUnit = String(item.unit || '').trim();
+
+    if (assignedGrade !== targetGrade) {
+      return false;
+    }
+
+    return doesHomeroomUnitCoverTargetUnit_(assignedUnit, targetUnit);
   });
 
   if (!allowed) {
@@ -246,6 +243,21 @@ function ensureHomeroomAccess_(grade, unit) {
   }
 
   return true;
+}
+
+function doesHomeroomUnitCoverTargetUnit_(assignedUnit, targetUnit) {
+  const assigned = String(assignedUnit || '').trim().toUpperCase();
+  const target = String(targetUnit || '').trim().toUpperCase();
+
+  if (assigned === target) {
+    return true;
+  }
+
+  if (assigned === 'CA' && (target === 'C' || target === 'A' || target === 'CA')) {
+    return true;
+  }
+
+  return false;
 }
 
 function getAllHomeroomClasses_() {

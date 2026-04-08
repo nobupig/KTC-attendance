@@ -502,10 +502,10 @@
     <div class="panel">
       <div class="panel-header">
         <h2>科目別詳細</h2>
-        <div id="detailSub" class="sub">生徒を選択してください</div>
+        <div id="detailSub" class="sub">学生を選択してください</div>
       </div>
       <div id="detailArea" class="detail-wrap">
-        <div class="empty-box">左の学生一覧から対象生徒を選択してください。</div>
+        <div class="empty-box">左の学生一覧から対象学生を選択してください。</div>
       </div>
     </div>
   </div>
@@ -643,8 +643,8 @@
       const area = document.getElementById('detailArea');
 
       if (!detailData || !detailData.student) {
-        area.innerHTML = '<div class="empty-box">左の学生一覧から対象生徒を選択してください。</div>';
-        document.getElementById('detailSub').textContent = '生徒を選択してください';
+        area.innerHTML = '<div class="empty-box">左の学生一覧から対象学生を選択してください。</div>';
+        document.getElementById('detailSub').textContent = '学生を選択してください';
         return;
       }
 

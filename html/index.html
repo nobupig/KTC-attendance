@@ -1,46 +1,508 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>出席管理システム</title>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>出席管理システム</title>
+<style>
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: sans-serif;
+    background: #f4f7fb;
+    color: #223;
+  }
+
+  .page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 16px 40px;
+  }
+
+  .hero {
+    background: linear-gradient(135deg, #1f4fa3 0%, #2f6feb 100%);
+    color: #fff;
+    border-radius: 18px;
+    padding: 24px 24px 20px;
+    box-shadow: 0 8px 24px rgba(31, 79, 163, 0.18);
+    margin-bottom: 18px;
+  }
+
+  .hero-title {
+    margin: 0 0 8px;
+    font-size: 28px;
+    font-weight: 700;
+  }
+
+  .hero-sub {
+    margin: 0;
+    font-size: 14px;
+    opacity: 0.95;
+    line-height: 1.8;
+  }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+
+  .panel {
+    background: #fff;
+    border-radius: 16px;
+    padding: 18px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.06);
+  }
+
+  .panel h2 {
+    margin: 0 0 12px;
+    font-size: 18px;
+    color: #1f2f50;
+  }
+
+  .muted {
+    color: #667;
+    font-size: 14px;
+    line-height: 1.8;
+  }
+
+  .subtle {
+    color: #667;
+    font-size: 14px;
+    line-height: 1.8;
+  }
+
+  .user-name {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: #1f2f50;
+  }
+
+  .user-email {
+    font-size: 13px;
+    color: #667;
+    word-break: break-all;
+    margin-bottom: 12px;
+  }
+
+  .badge-row,
+  .class-badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: #eef3ff;
+    color: #234;
+    font-size: 13px;
+    font-weight: 700;
+    border: 1px solid #d3def5;
+  }
+
+  .badge.admin {
+    background: #fdecec;
+    color: #9a1f1f;
+    border-color: #efc4c4;
+  }
+
+  .badge.teacher {
+    background: #e8f7ec;
+    color: #1d6b37;
+    border-color: #bddfc7;
+  }
+
+  .badge.homeroom {
+    background: #fff4db;
+    color: #8a5a00;
+    border-color: #ead39c;
+  }
+
+  .class-badge {
+    display: inline-block;
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: #f4f7fb;
+    color: #334;
+    font-size: 13px;
+    font-weight: 700;
+    border: 1px solid #dde4ef;
+  }
+
+  .section-title {
+    margin: 0 0 12px;
+    font-size: 20px;
+    color: #1f2f50;
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .portal-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 230px;
+    background: #fff;
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+    border: 1px solid #e7edf7;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+
+  .portal-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+    border-color: #cfdcf4;
+  }
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .card-tag {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: #f4f7fb;
+    color: #556;
+  }
+
+  .card-emoji {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    background: #eef3ff;
+    flex-shrink: 0;
+  }
+
+  .portal-card h3 {
+    margin: 0 0 10px;
+    font-size: 20px;
+    color: #1f2f50;
+    line-height: 1.4;
+  }
+
+  .card-desc {
+    margin: 0 0 18px;
+    font-size: 14px;
+    color: #667;
+    line-height: 1.8;
+    flex-grow: 1;
+  }
+
+  .card-list {
+    margin: 0 0 18px;
+    padding-left: 18px;
+    color: #445;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+
+  .card-list li {
+    margin-bottom: 4px;
+  }
+
+  .card-link {
+    display: inline-block;
+    text-align: center;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-weight: 700;
+    background: #2f6feb;
+    color: #fff;
+    margin-top: auto;
+  }
+
+  .empty-state {
+    background: #fff;
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px dashed #cfd9ea;
+    color: #667;
+    line-height: 1.8;
+  }
+
+  .footer-note {
+    margin-top: 18px;
+    font-size: 12px;
+    color: #667;
+    text-align: right;
+  }
+
+  .loading-box {
+    background: #fff;
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.06);
+    color: #556;
+    font-size: 15px;
+  }
+
+  .error-box {
+    background: #fff1f1;
+    border: 1px solid #efc4c4;
+    color: #922;
+    border-radius: 16px;
+    padding: 18px;
+    line-height: 1.8;
+  }
+
+  @media (max-width: 960px) {
+    .info-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .card-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .page {
+      padding: 16px 12px 32px;
+    }
+
+    .hero {
+      padding: 18px 16px;
+    }
+
+    .hero-title {
+      font-size: 24px;
+    }
+
+    .hero-sub {
+      font-size: 13px;
+    }
+
+    .panel,
+    .loading-box,
+    .empty-state {
+      padding: 16px;
+    }
+
+    .section-title {
+      font-size: 18px;
+    }
+
+    .portal-card {
+      min-height: auto;
+      padding: 16px;
+    }
+
+    .portal-card h3 {
+      font-size: 18px;
+    }
+  }
+</style>
 </head>
-
 <body>
+  <div class="page">
+    <div class="hero">
+      <h1 class="hero-title">出席管理システム</h1>
+      <p class="hero-sub">
+        ログイン中の権限に応じて、利用可能な画面を表示します。<br>
+        必要な機能を選択して作業を開始してください。
+      </p>
+    </div>
 
-<h2>読み込み中...</h2>
+    <div id="portalRoot">
+      <div class="loading-box">ポータル情報を読み込み中...</div>
+    </div>
+
+    <div class="footer-note">
+      Attendance Portal
+    </div>
+  </div>
 
 <script>
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
-function init() {
+  function hasRole(user, role) {
+    return Array.isArray(user.roles) && user.roles.indexOf(role) !== -1;
+  }
 
-  google.script.run
-    .withSuccessHandler(function(user){
-
-      if (user.roles.includes("admin")) {
-        window.location.href = "?page=admin";
-        return;
-      }
-
-      if (user.roles.includes("teacher")) {
-        window.location.href = "?page=teacher";
-        return;
-      }
-
-      if (user.roles.includes("homeroom")) {
-        window.location.href = "?page=homeroom";
-        return;
-      }
-
-      document.body.innerHTML = "権限がありません";
-
-    })
-    .getUserRoleInfo();
-
+function buildRoleBadges(user) {
+  const roles = Array.isArray(user.roles) ? user.roles : [];
+  if (!roles.length) {
+    return '<span class="badge">権限なし</span>';
+  }
+  return roles.map(function(role) {
+    let label = role;
+    if (role === 'admin') label = '教務';
+    if (role === 'teacher') label = '科目担当';
+    if (role === 'homeroom') label = '担任';
+    return '<span class="badge ' + escapeHtml(role) + '">' + escapeHtml(label) + '</span>';
+  }).join('');
 }
 
-init();
+function buildHomeroomBadges(user) {
+  const classes = Array.isArray(user.homeroomClasses) ? user.homeroomClasses : [];
+  if (!classes.length) {
+    return '<span class="subtle">担任クラスはありません</span>';
+  }
 
+  return classes.map(function(item) {
+    const grade = escapeHtml(item.grade || '');
+    const unit = escapeHtml(item.unit || '');
+    return '<span class="class-badge">' + grade + '年 ' + unit + '組</span>';
+  }).join('');
+}
+
+  function buildCard(title, tag, emoji, description, bullets, href) {
+    const bulletHtml = (Array.isArray(bullets) ? bullets : []).map(function(item) {
+      return '<li>' + escapeHtml(item) + '</li>';
+    }).join('');
+
+    return '' +
+      '<a class="portal-card" href="' + escapeHtml(href) + '">' +
+        '<div class="card-head">' +
+          '<span class="card-tag">' + escapeHtml(tag) + '</span>' +
+          '<span class="card-emoji">' + escapeHtml(emoji) + '</span>' +
+        '</div>' +
+        '<h3>' + escapeHtml(title) + '</h3>' +
+        '<p class="card-desc">' + escapeHtml(description) + '</p>' +
+        '<ul class="card-list">' + bulletHtml + '</ul>' +
+        '<div class="card-link">画面を開く</div>' +
+      '</a>';
+  }
+
+  function renderPortal(user, appBaseUrl) {
+    const root = document.getElementById("portalRoot");
+    const cards = [];
+
+    if (hasRole(user, "teacher")) {
+      cards.push(buildCard(
+        "科目担当画面",
+        "科目担当",
+        "🧑‍🏫",
+        "本日の担当授業の出席入力、過去授業の検索・修正、超過状態の確認を行います。",
+        [
+          "本日の出席入力",
+          "過去授業の検索・修正",
+          "欠席超過・注意の確認"
+        ],
+        appBaseUrl + "?page=teacher"
+      ));
+    }
+
+    if (Array.isArray(user.homeroomClasses) && user.homeroomClasses.length > 0) {
+      cards.push(buildCard(
+        "担任画面",
+        "担任",
+        "👥",
+        "担任クラスの出欠状況と欠席リスクの確認を行います。",
+        [
+          "担任クラスの状況確認",
+          "学生別の欠席リスク確認",
+          "クラス全体の把握"
+        ],
+        appBaseUrl + "?page=homeroom"
+      ));
+
+      cards.push(buildCard(
+        "担任SHR出席記録",
+        "担任",
+        "📝",
+        "ホームルームの毎日の出席・欠席・遅刻・早退を簡単に記録します。",
+        [
+          "全員出席を初期値で表示",
+          "欠席・遅刻・早退だけ変更",
+          "SHRを日次で記録"
+        ],
+        appBaseUrl + "?page=homeroomShr"
+      ));
+    }
+
+    if (hasRole(user, "admin")) {
+      cards.push(buildCard(
+        "教務画面",
+        "教務",
+        "🛠️",
+        "教務向けの確認・管理作業を行う画面です。",
+        [
+          "管理系メニュー",
+          "全体状況の確認",
+          "今後の拡張機能の入口"
+        ],
+        appBaseUrl + "?page=admin"
+      ));
+    }
+
+    const userPanel = '' +
+      '<div class="info-grid">' +
+        '<div class="panel">' +
+          '<h2>ログインユーザー</h2>' +
+          '<div class="user-name">' + escapeHtml(user.name || "氏名未設定") + '</div>' +
+          '<div class="user-email">' + escapeHtml(user.email || "") + '</div>' +
+          '<div class="badge-row">' + buildRoleBadges(user) + '</div>' +
+        '</div>' +
+        '<div class="panel">' +
+          '<h2>担任担当クラス</h2>' +
+          '<div class="class-badge-row">' + buildHomeroomBadges(user) + '</div>' +
+        '</div>' +
+      '</div>';
+
+    const cardsHtml = cards.length
+      ? '<div><h2 class="section-title">利用可能な画面</h2><div class="card-grid">' + cards.join('') + '</div></div>'
+      : '<div class="empty-state">利用可能な画面が見つかりませんでした。権限設定をご確認ください。</div>';
+
+    root.innerHTML = userPanel + cardsHtml;
+  }
+
+  function showError(message) {
+    const root = document.getElementById("portalRoot");
+    root.innerHTML = '<div class="error-box">' + escapeHtml(message) + '</div>';
+  }
+
+  function initPortal() {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (!result || !result.user || !result.appBaseUrl) {
+          showError('ポータル情報の取得結果が不正です。');
+          return;
+        }
+        renderPortal(result.user, result.appBaseUrl);
+      })
+      .withFailureHandler(function(error) {
+        const msg = (error && error.message) ? error.message : 'ポータル情報の取得に失敗しました。';
+        showError(msg);
+      })
+      .getPortalInitialData();
+  }
+
+  document.addEventListener('DOMContentLoaded', initPortal);
 </script>
-
 </body>
 </html>

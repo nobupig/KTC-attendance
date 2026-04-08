@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>担任出席管理（SHR）</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --line: #d9e1ec;
+      --text: #1f2a37;
+      --sub: #6b7280;
+      --primary: #2f6feb;
+      --primary-soft: #eef4ff;
+      --danger: #a12622;
+      --danger-soft: #fdecec;
+      --warn: #8a5a00;
+      --warn-soft: #fff4db;
+      --ok: #1d6b37;
+      --ok-soft: #e8f7ec;
+      --shadow: 0 3px 12px rgba(0, 0, 0, 0.06);
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: sans-serif;
+    }
+
+    .page {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 20px 16px 40px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #1f4fa3 0%, #2f6feb 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 22px 24px;
+      box-shadow: 0 8px 24px rgba(31, 79, 163, 0.18);
+      margin-bottom: 16px;
+    }
+
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    .hero p {
+      margin: 0;
+      line-height: 1.8;
+      font-size: 14px;
+      opacity: 0.96;
+    }
+
+    .message {
+      display: none;
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.7;
+      background: #eef3ff;
+      color: #1f3c88;
+    }
+
+    .message.show { display: block; }
+    .message.error { background: var(--danger-soft); color: var(--danger); }
+    .message.success { background: var(--ok-soft); color: var(--ok); }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1.2fr 220px auto auto;
+      gap: 12px;
+      align-items: end;
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .toolbar-block { min-width: 0; }
+
+    .toolbar-label {
+      font-size: 13px;
+      color: var(--sub);
+      margin-bottom: 8px;
+    }
+
+    .chip-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip-btn {
+      border: 1px solid #ccd5e3;
+      background: #fff;
+      color: #334;
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+
+    .chip-btn:hover {
+      background: #f8fbff;
+      border-color: #9db7ef;
+    }
+
+    .chip-btn.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .date-input {
+      width: 100%;
+      border: 1px solid #ccd5e3;
+      border-radius: 10px;
+      padding: 11px 12px;
+      font-size: 14px;
+      background: #fff;
+    }
+
+    .main-btn {
+      border: none;
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .main-btn.secondary {
+      background: #eef2f7;
+      color: #334;
+    }
+
+    .main-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .summary-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .summary-label {
+      font-size: 13px;
+      color: var(--sub);
+      margin-bottom: 8px;
+    }
+
+    .summary-value {
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .table-wrap {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .table-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .table-title {
+      margin: 0 0 6px;
+      font-size: 18px;
+    }
+
+    .table-sub {
+      color: var(--sub);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .save-state {
+      font-size: 13px;
+      color: var(--sub);
+    }
+
+    .table-scroller {
+      overflow: auto;
+      max-height: 72vh;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 940px;
+    }
+
+    th, td {
+      border-bottom: 1px solid #e8edf5;
+      padding: 12px 10px;
+      text-align: center;
+      vertical-align: middle;
+      background: #fff;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f8fbff;
+      font-size: 13px;
+      color: #445;
+    }
+
+    th.name-col,
+    td.name-col {
+      text-align: left;
+      min-width: 220px;
+      position: sticky;
+      left: 74px;
+      z-index: 1;
+      background: #fff;
+    }
+
+    th.no-col,
+    td.no-col {
+      width: 74px;
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      background: #fff;
+    }
+
+    th.name-col { z-index: 3; background: #f8fbff; }
+    th.no-col { z-index: 3; background: #f8fbff; }
+
+    .student-name {
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .student-meta {
+      margin-top: 4px;
+      color: var(--sub);
+      font-size: 12px;
+    }
+
+    .radio-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      transition: 0.15s;
+      min-width: 88px;
+      justify-content: center;
+    }
+
+    .radio-label input {
+      margin: 0;
+      accent-color: var(--primary);
+    }
+
+    .radio-label.present { background: #f7fbf7; color: #215b33; }
+    .radio-label.absent  { background: #fff3f3; color: #9b2020; }
+    .radio-label.late    { background: #fff8ea; color: #8a5a00; }
+    .radio-label.early   { background: #eef4ff; color: #1f4fa3; }
+
+    tr.modified-row td {
+      background: #fffdf2;
+    }
+
+    .footer-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      padding: 16px;
+      border-top: 1px solid var(--line);
+      background: #fbfcff;
+    }
+
+    .empty-box {
+      padding: 40px 20px;
+      text-align: center;
+      color: var(--sub);
+      line-height: 1.8;
+    }
+
+    @media (max-width: 980px) {
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .footer-actions {
+        justify-content: stretch;
+        flex-direction: column;
+      }
+
+      .main-btn {
+        width: 100%;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .page {
+        padding: 16px 12px 32px;
+      }
+
+      .hero {
+        padding: 18px 16px;
+      }
+
+      .hero h1 {
+        font-size: 24px;
+      }
+
+      .hero p {
+        font-size: 13px;
+      }
+
+      .table-header {
+        padding: 14px 12px;
+      }
+
+      .table-scroller {
+        max-height: none;
+        overflow-x: auto;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      table {
+        min-width: 720px;
+      }
+
+      th,
+      td {
+        padding: 10px 6px;
+        font-size: 12px;
+      }
+
+      th.no-col,
+      td.no-col {
+        width: 56px;
+        min-width: 56px;
+      }
+
+      th.name-col,
+      td.name-col {
+        min-width: 8em;
+        left: 56px;
+      }
+
+      .student-name {
+        font-size: 13px;
+      }
+
+      .student-meta {
+        font-size: 11px;
+        word-break: break-all;
+      }
+
+      .radio-label {
+        min-width: 64px;
+        padding: 8px 6px;
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <h1>担任出席管理（SHR）</h1>
+      <p>未変更の学生は「出席」として保存されます。欠席・遅刻・早退学生だけを切り替えて保存してください。</p>
+    </div>
+
+    <div id="messageArea" class="message"></div>
+
+    <div class="toolbar">
+      <div class="toolbar-block">
+        <div class="toolbar-label">担任クラス</div>
+        <div id="classChipList" class="chip-list"></div>
+      </div>
+
+      <div class="toolbar-block">
+        <div class="toolbar-label">記録日</div>
+        <input id="dateInput" class="date-input" type="date">
+      </div>
+
+      <button id="reloadBtn" class="main-btn secondary" type="button">再読込</button>
+      <button id="saveBtnTop" class="main-btn" type="button">保存する</button>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card">
+        <div class="summary-label">出席</div>
+        <div id="countPresent" class="summary-value">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">欠席</div>
+        <div id="countAbsent" class="summary-value">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">遅刻</div>
+        <div id="countLate" class="summary-value">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">早退</div>
+        <div id="countEarly" class="summary-value">0</div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <div class="table-header">
+        <div>
+          <h2 id="tableTitle" class="table-title">読み込み中...</h2>
+          <div id="tableSub" class="table-sub">しばらくお待ちください。</div>
+        </div>
+        <div id="saveState" class="save-state"></div>
+        <div id="lastSavedInfo" class="save-state"></div>
+      </div>
+
+      <div id="tableContainer" class="table-scroller">
+        <div class="empty-box">データを読み込んでいます...</div>
+      </div>
+
+      <div class="footer-actions">
+        <button id="backBtn" class="main-btn secondary" type="button">トップへ戻る</button>
+        <button id="saveBtnBottom" class="main-btn" type="button">保存する</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STATUS_OPTIONS = [
+      { code: "",  label: "出席", className: "present" },
+      { code: "A", label: "欠席", className: "absent"  },
+      { code: "L", label: "遅刻", className: "late"    },
+      { code: "E", label: "早退", className: "early"   }
+    ];
+
+    let initialData = null;
+    let selectedGrade = "";
+    let selectedUnit = "";
+    let currentDate = "";
+    let studentsState = [];
+    let isLoading = false;
+    let isSaving = false;
+
+    function escapeHtml(str) {
+      if (str == null) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function escapeJs(str) {
+      return String(str == null ? "" : str)
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'");
+    }
+
+    function showMessage(text, type) {
+      const el = document.getElementById("messageArea");
+      el.textContent = text || "";
+      el.className = "message show";
+      if (type) el.classList.add(type);
+    }
+
+    function clearMessage() {
+      const el = document.getElementById("messageArea");
+      el.textContent = "";
+      el.className = "message";
+    }
+
+    function setBusy(flag) {
+      isLoading = flag;
+      document.getElementById("reloadBtn").disabled = flag || isSaving;
+      document.getElementById("saveBtnTop").disabled = flag || isSaving;
+      document.getElementById("saveBtnBottom").disabled = flag || isSaving;
+      document.getElementById("dateInput").disabled = flag || isSaving;
+    }
+
+    function setSaving(flag) {
+      isSaving = flag;
+      document.getElementById("reloadBtn").disabled = flag || isLoading;
+      document.getElementById("saveBtnTop").disabled = flag || isLoading;
+      document.getElementById("saveBtnBottom").disabled = flag || isLoading;
+      document.getElementById("dateInput").disabled = flag || isLoading;
+      document.getElementById("saveState").textContent = flag ? "保存中..." : "";
+    }
+
+    function renderHomeroomLastSavedInfo(info) {
+  const el = document.getElementById("lastSavedInfo");
+  if (!el) return;
+
+  if (!info) {
+    el.textContent = "この日の保存履歴はまだありません。";
+    return;
+  }
+
+  let text = "最終保存: " + (info.savedAtText || "");
+
+  if (info.savedByCurrentUser) {
+    text += " / あなた";
+  } else if (info.teacherEmail) {
+    text += " / " + info.teacherEmail;
+  }
+
+  if (info.savedModeLabel) {
+    text += " / " + info.savedModeLabel;
+  }
+
+  el.textContent = text;
+}
+
+    function renderClassChips() {
+      const list = document.getElementById("classChipList");
+      const classes = Array.isArray(initialData && initialData.homeroomClasses)
+        ? initialData.homeroomClasses
+        : [];
+
+      list.innerHTML = classes.map(function(cls) {
+        const active = (String(cls.grade) === String(selectedGrade) && String(cls.unit) === String(selectedUnit)) ? " active" : "";
+        return '<button class="chip-btn' + active + '" type="button" onclick="selectHomeroomClass(\'' +
+          escapeJs(cls.grade) + '\', \'' + escapeJs(cls.unit) + '\')">' +
+          escapeHtml(cls.classLabel) +
+          '</button>';
+      }).join("");
+    }
+
+    function selectHomeroomClass(grade, unit) {
+      if (isLoading || isSaving) return;
+      selectedGrade = String(grade || "");
+      selectedUnit = String(unit || "");
+      renderClassChips();
+      loadDailyData();
+    }
+
+    function renderSummaryCounts() {
+      let present = 0;
+      let absent = 0;
+      let late = 0;
+      let early = 0;
+
+      studentsState.forEach(function(student) {
+        const code = String(student.statusCode || "");
+        if (code === "A") absent++;
+        else if (code === "L") late++;
+        else if (code === "E") early++;
+        else present++;
+      });
+
+      document.getElementById("countPresent").textContent = present;
+      document.getElementById("countAbsent").textContent = absent;
+      document.getElementById("countLate").textContent = late;
+      document.getElementById("countEarly").textContent = early;
+    }
+
+    function renderTable() {
+      const container = document.getElementById("tableContainer");
+
+      if (!studentsState.length) {
+        container.innerHTML = '<div class="empty-box">対象の学生が見つかりませんでした。</div>';
+        renderSummaryCounts();
+        return;
+      }
+
+      const rowsHtml = studentsState.map(function(student, idx) {
+        const rowClass = student.statusCode ? "modified-row" : "";
+        const safeName = escapeHtml(student.name || "");
+        const attendanceNo = escapeHtml(student.attendanceNumber || "");
+        const studentId = escapeHtml(student.studentId || "");
+        const groupName = 'status_' + studentId;
+
+        const radios = STATUS_OPTIONS.map(function(option) {
+          const checked = String(student.statusCode || "") === option.code ? ' checked' : '';
+          return '' +
+            '<td>' +
+              '<label class="radio-label ' + option.className + '">' +
+                '<input type="radio" name="' + groupName + '" value="' + escapeHtml(option.code) + '"' + checked +
+                ' onchange="updateStudentStatus(' + idx + ', \'' + escapeJs(option.code) + '\')">' +
+                '<span>' + escapeHtml(option.label) + '</span>' +
+              '</label>' +
+            '</td>';
+        }).join("");
+
+        return '' +
+          '<tr class="' + rowClass + '">' +
+            '<td class="no-col">' + attendanceNo + '</td>' +
+            '<td class="name-col">' +
+              '<div class="student-name">' + safeName + '</div>' +
+              '<div class="student-meta">' + studentId + '</div>' +
+            '</td>' +
+            radios +
+          '</tr>';
+      }).join("");
+
+      container.innerHTML = '' +
+        '<table>' +
+          '<thead>' +
+            '<tr>' +
+              '<th class="no-col">出席番号</th>' +
+              '<th class="name-col">氏名</th>' +
+              '<th>出席</th>' +
+              '<th>欠席</th>' +
+              '<th>遅刻</th>' +
+              '<th>早退</th>' +
+            '</tr>' +
+          '</thead>' +
+          '<tbody>' + rowsHtml + '</tbody>' +
+        '</table>';
+
+      renderSummaryCounts();
+    }
+
+    function updateStudentStatus(index, statusCode) {
+      if (!studentsState[index]) return;
+      studentsState[index].statusCode = String(statusCode || "");
+      renderTable();
+    }
+
+    function loadInitialData() {
+      setBusy(true);
+      clearMessage();
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          initialData = data;
+          selectedGrade = data.defaultGrade;
+          selectedUnit = data.defaultUnit;
+          currentDate = data.defaultDate;
+
+          document.getElementById("dateInput").value = currentDate;
+          renderClassChips();
+          loadDailyData();
+        })
+        .withFailureHandler(function(error) {
+          console.error(error);
+          setBusy(false);
+          showMessage("初期データの取得に失敗しました。", "error");
+        })
+        .getHomeroomShrInitialData();
+    }
+
+    function loadDailyData() {
+      if (!selectedGrade || !selectedUnit) return;
+
+      currentDate = document.getElementById("dateInput").value || currentDate;
+      if (!currentDate) return;
+
+      setBusy(true);
+      clearMessage();
+      document.getElementById("tableTitle").textContent = "読み込み中...";
+      document.getElementById("tableSub").textContent = "出席データを取得しています。";
+      document.getElementById("tableContainer").innerHTML = '<div class="empty-box">データを読み込んでいます...</div>';
+
+      google.script.run
+.withSuccessHandler(function(data) {
+  console.log("getHomeroomShrDailyData result =", data);
+
+  if (!data || !Array.isArray(data.students) || !data.classInfo) {
+    setBusy(false);
+    showMessage("SHRデータの取得結果が不正です。最新デプロイまたは同名関数の重複を確認してください。", "error");
+    document.getElementById("tableTitle").textContent = "読み込みに失敗しました";
+    document.getElementById("tableSub").textContent = "データが正しく返っていません。";
+    document.getElementById("tableContainer").innerHTML = '<div class="empty-box">読み込み結果が不正です。</div>';
+    document.getElementById("saveState").textContent = "";
+    renderHomeroomLastSavedInfo(null);
+    return;
+  }
+
+  studentsState = Array.isArray(data.students) ? data.students : [];
+  document.getElementById("tableTitle").textContent = data.classInfo.classLabel + " のSHR出席";
+  document.getElementById("tableSub").textContent = data.date + " の記録です。未変更の学生は出席です。";
+  document.getElementById("saveState").textContent = data.hasSavedSession ? "保存済み" : "未保存";
+  renderHomeroomLastSavedInfo(data.lastSavedInfo || null);
+  renderClassChips();
+  renderTable();
+  setBusy(false);
+})
+        .withFailureHandler(function(error) {
+          console.error(error);
+          setBusy(false);
+          showMessage("出席データの取得に失敗しました。", "error");
+          document.getElementById("tableContainer").innerHTML = '<div class="empty-box">読み込みに失敗しました。</div>';
+        })
+        .getHomeroomShrDailyData(selectedGrade, selectedUnit, currentDate);
+    }
+
+    function saveAttendance() {
+      if (isLoading || isSaving) return;
+      if (!selectedGrade || !selectedUnit) return;
+
+      const dateValue = document.getElementById("dateInput").value;
+      if (!dateValue) {
+        showMessage("日付を選択してください。", "error");
+        return;
+      }
+
+      const payload = {
+        grade: selectedGrade,
+        unit: selectedUnit,
+        date: dateValue,
+        records: studentsState.map(function(student) {
+          return {
+            studentId: student.studentId,
+            statusCode: String(student.statusCode || "")
+          };
+        })
+      };
+
+      setSaving(true);
+      clearMessage();
+
+      google.script.run
+.withSuccessHandler(function(result) {
+  console.log("saveHomeroomShrAttendance result =", result);
+  setSaving(false);
+  showMessage("保存しました。", "success");
+  document.getElementById("saveState").textContent = "保存済み";
+  renderHomeroomLastSavedInfo(result && result.lastSavedInfo ? result.lastSavedInfo : null);
+})
+        .withFailureHandler(function(error) {
+          console.error(error);
+          setSaving(false);
+          showMessage("保存に失敗しました。 " + (error && error.message ? error.message : ""), "error");
+        })
+        .saveHomeroomShrAttendance(payload);
+    }
+
+    document.getElementById("reloadBtn").addEventListener("click", loadDailyData);
+    document.getElementById("saveBtnTop").addEventListener("click", saveAttendance);
+    document.getElementById("saveBtnBottom").addEventListener("click", saveAttendance);
+    document.getElementById("dateInput").addEventListener("change", loadDailyData);
+    document.getElementById("backBtn").addEventListener("click", function() {
+      google.script.run
+        .withSuccessHandler(function(baseUrl) {
+          window.location.href = baseUrl + "?page=index";
+        })
+        .getAppBaseUrl();
+    });
+
+    loadInitialData();
+  </script>
+</body>
+</html>

@@ -3,7 +3,7 @@ const ABSENCE_CALCULATOR_CONFIG = {
 };
 
 /**
- * 生徒1人の科目別欠席状況を計算
+ *学生1人の科目別欠席状況を計算
  * @param {string} studentId
  * @param {string=} termFilter 例: '前期', '後期', '通年', 'all'
  * @returns {{
@@ -113,11 +113,12 @@ function calculateHomeroomRiskSummary(grade, unit, termFilter) {
 
   const targetGrade = String(grade || '').trim();
   const targetUnit = String(unit || '').trim();
+  const targetStudentUnits = expandTargetStudentUnitsForHomeroomUnit_(targetUnit);
 
   const allStudents = Object.values(bundle.studentMap)
     .filter(student =>
       String(student.grade || '').trim() === targetGrade &&
-      String(student.unit || '').trim() === targetUnit &&
+      targetStudentUnits.includes(String(student.unit || '').trim()) &&
       isStudentActive_(student.status)
     );
 
@@ -189,7 +190,7 @@ function calculateHomeroomRiskSummary(grade, unit, termFilter) {
 }
 
 /**
- * テスト用: 生徒1人の科目別結果をログ出力
+ * テスト用:学生1人の科目別結果をログ出力
  */
 function testCalculateStudentAbsenceRisk() {
   const result = calculateStudentAbsenceRisk('S001', 'all');
@@ -432,16 +433,61 @@ function buildAttendanceStatusRuleMap_(attendanceStatusSheet) {
 }
 
 function getTargetSubjectKeysForStudent_(student, classMap, subjectMap, termFilter, homeroomSubjectKeysMap) {
-  const guKey = String(student.grade || '').trim() + '__' + String(student.unit || '').trim();
-  const candidateKeys = homeroomSubjectKeysMap && homeroomSubjectKeysMap[guKey]
-    ? homeroomSubjectKeysMap[guKey]
-    : [];
+  const candidateHomeroomKeys = buildHomeroomSubjectKeyCandidatesForStudent_(
+    student.grade,
+    student.unit
+  );
+
+  const candidateKeys = [];
+  const seen = {};
+
+  candidateHomeroomKeys.forEach(function(guKey) {
+    const subjectIds = homeroomSubjectKeysMap && homeroomSubjectKeysMap[guKey]
+      ? homeroomSubjectKeysMap[guKey]
+      : [];
+
+    subjectIds.forEach(function(subjectId) {
+      if (!seen[subjectId]) {
+        seen[subjectId] = true;
+        candidateKeys.push(subjectId);
+      }
+    });
+  });
 
   return candidateKeys.filter(function(subjectId) {
     const subject = subjectMap[subjectId];
     if (!subject) return false;
     return isSubjectIncludedByTerm_(subject.term, termFilter);
   });
+}
+
+function expandTargetStudentUnitsForHomeroomUnit_(homeroomUnit) {
+  const unit = String(homeroomUnit || '').trim().toUpperCase();
+
+  if (unit === 'CA') {
+    return ['C', 'A', 'CA'];
+  }
+
+  return [String(homeroomUnit || '').trim()];
+}
+
+function buildHomeroomSubjectKeyCandidatesForStudent_(grade, studentUnit) {
+  const g = String(grade || '').trim();
+  const u = String(studentUnit || '').trim().toUpperCase();
+
+  if (u === 'C') {
+    return [g + '__CA', g + '__C'];
+  }
+
+  if (u === 'A') {
+    return [g + '__CA', g + '__A'];
+  }
+
+  if (u === 'CA') {
+    return [g + '__CA', g + '__C', g + '__A'];
+  }
+
+  return [g + '__' + String(studentUnit || '').trim()];
 }
 
 function initializeSubjectTotals_(subjectIds, subjectMap) {

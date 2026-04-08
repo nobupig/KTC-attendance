@@ -1,61 +1,6 @@
-function initializeMasterSheets() {
-  const ss = getMasterSpreadsheet();
-
-  const definitions = [
-    {
-      name: CONFIG.SHEETS.STUDENTS,
-      headers: ['studentId', 'grade', 'unit', 'attendanceNumber', 'name', 'status']
-    },
-    {
-      name: CONFIG.SHEETS.SUBJECTS,
-      headers: ['subjectId', 'subjectName', 'isActive']
-    },
-    {
-      name: CONFIG.SHEETS.CLASSES,
-      headers: ['classId', 'subjectId', 'grade', 'unit', 'group']
-    },
-    {
-      name: CONFIG.SHEETS.TEACHERS,
-      headers: ['teacherId', 'name', 'email', 'role']
-    },
-    {
-      name: CONFIG.SHEETS.TIMETABLE,
-      headers: ['classId', 'weekday', 'period', 'teacherEmail']
-    },
-    {
-      name: CONFIG.SHEETS.CALENDAR,
-      headers: ['date', 'weekday', 'isClassDay']
-    },
-    {
-      name: CONFIG.SHEETS.STUDENT_GROUPS,
-      headers: ['studentId', 'subjectId', 'group']
-    },
-    {
-      name: CONFIG.SHEETS.ATTENDANCE_STATUS,
-      headers: ['code', 'label']
-    },
-    {
-      name: CONFIG.SHEETS.HOMEROOM_TEACHERS,
-      headers: ['grade', 'unit', 'teacherEmail']
-    },
-    {
-      name: CONFIG.SHEETS.ATTENDANCE_SESSIONS,
-      headers: ['classId', 'date', 'period', 'teacherEmail', 'accessedAt']
-    },
-    {
-      name: CONFIG.SHEETS.ATTENDANCE,
-      headers: ['classId', 'date', 'period', 'studentId', 'statusCode', 'recordedAt']
-    },
-    {
-      name: CONFIG.SHEETS.CLASS_SESSIONS,
-      headers: ['classId', 'date', 'period', 'sessionNumber']
-    }
-  ];
-
-  definitions.forEach(def => {
-    const sheet = getOrCreateSheet(ss, def.name);
-    setHeader(sheet, def.headers);
-  });
+function initializeMasterSheets_legacy() {
+  throw new Error('この初期化関数は旧構造用のため、現在は使用禁止です。');
+  
 }
 
 function getTeacherNameByEmail(email) {
@@ -83,7 +28,7 @@ function getTeacherNameByEmail(email) {
   return email;
 }
 
-function getClassDisplayName(classId) {
+function getClassDisplayName_legacy(classId) {
 
   const ss = getMasterSpreadsheet();
 

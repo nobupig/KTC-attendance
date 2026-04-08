@@ -14,21 +14,74 @@ function getOperationSheet(name) {
   return getOperationSpreadsheet().getSheetByName(name);
 }
 
+function isSafeScriptCacheKey_(key) {
+  const normalizedKey = String(key || '');
+  return normalizedKey.length > 0 && normalizedKey.length <= 240;
+}
+
 function getScriptCacheJson_(key) {
-  const cache = CacheService.getScriptCache();
-  const cached = cache.get(key);
-  return cached ? JSON.parse(cached) : null;
+  if (!isSafeScriptCacheKey_(key)) {
+    Logger.log('Cache get skip (invalid key): length=' + String(key || '').length);
+    return null;
+  }
+
+  try {
+    const cache = CacheService.getScriptCache();
+    const cached = cache.get(key);
+    return cached ? JSON.parse(cached) : null;
+  } catch (e) {
+    Logger.log('Cache get failed: ' + e + ' key=' + key);
+    return null;
+  }
 }
 
 function putScriptCacheJson_(key, value, ttlSeconds) {
+  if (!isSafeScriptCacheKey_(key)) {
+    Logger.log('Cache skip (key too large): length=' + String(key || '').length);
+    return;
+  }
+
   const cache = CacheService.getScriptCache();
-  cache.put(key, JSON.stringify(value), ttlSeconds || 300);
+  const serialized = safeJsonStringifyForCache_(value);
+
+  // Script Cache の1キーあたり上限は約100KB
+  // 余裕を見て 90KB を超えるものはキャッシュしない
+  if (!serialized) {
+    return;
+  }
+
+  if (serialized.length > 90000) {
+    Logger.log('Cache skip (too large): ' + key + ' size=' + serialized.length);
+    return;
+  }
+
+  try {
+    cache.put(key, serialized, ttlSeconds || 300);
+  } catch (e) {
+    Logger.log('Cache put failed: ' + e + ' key=' + key);
+  }
+}
+
+function safeJsonStringifyForCache_(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (e) {
+    Logger.log('Cache stringify failed: ' + e);
+    return '';
+  }
 }
 
 function removeScriptCacheKeys_(keys) {
   const cache = CacheService.getScriptCache();
   (keys || []).forEach(function(key) {
-    cache.remove(key);
+    if (!isSafeScriptCacheKey_(key)) {
+      return;
+    }
+    try {
+      cache.remove(key);
+    } catch (e) {
+      Logger.log('Cache remove failed: ' + e + ' key=' + key);
+    }
   });
 }
 
@@ -78,6 +131,10 @@ function getAttendanceSheetCacheKey_() {
   return 'sheetData__OPERATION__' + CONFIG.SHEETS.ATTENDANCE;
 }
 
+function getAttendanceSessionsSheetCacheKey_() {
+  return 'sheetData__OPERATION__' + CONFIG.SHEETS.ATTENDANCE_SESSIONS;
+}
+
 function buildHomeroomSummaryCacheKey_(grade, unit, termFilter) {
   return 'homeroomSummary__' +
     String(grade || '').trim() + '__' +
@@ -107,4 +164,25 @@ function clearHomeroomCachesForTest() {
     buildHomeroomInitialCacheKey_(user.email, '通年')
   ];
   cache.removeAll(keys);
+}
+
+function clearCoreCachesForTest() {
+  const cache = CacheService.getScriptCache();
+
+  const keys = [
+    'sheetData__MASTER__' + CONFIG.SHEETS.CLASSES,
+    'sheetData__MASTER__' + CONFIG.SHEETS.STUDENTS,
+    'sheetData__MASTER__' + CONFIG.SHEETS.SUBJECTS,
+    'sheetData__OPERATION__' + CONFIG.SHEETS.TIMETABLE,
+    'sheetData__OPERATION__' + CONFIG.SHEETS.CLASS_TEACHER_TEAMS,
+    'sheetData__OPERATION__' + CONFIG.SHEETS.CLASS_SESSIONS,
+    'sheetData__OPERATION__' + CONFIG.SHEETS.TEACHERS,
+    'sheetData__OPERATION__' + CONFIG.SHEETS.HOMEROOM_ASSIGNMENTS,
+
+    // teacherService.gs 側の script cache
+    'classTeacherTeamRows__all'
+  ];
+
+  cache.removeAll(keys);
+  Logger.log('Core caches cleared');
 }
