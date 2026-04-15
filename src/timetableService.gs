@@ -150,16 +150,15 @@ attendanceSessionRows.forEach(function(row) {
   const accessedAtMs = isNaN(accessedAt.getTime()) ? 0 : accessedAt.getTime();
 
   if (!savedSessionMap[key] || accessedAtMs >= savedSessionMap[key]._ms) {
-    savedSessionMap[key] = {
-      teacherEmail: teacherEmail,
-      savedAt: accessedAtRaw,
-      savedAtText: formatDateTimeJst_(accessedAtRaw),
-      actionType: asCol.actionType !== -1 ? normalizeString_(row[asCol.actionType]) : '',
-      targetSessionKey: asCol.targetSessionKey !== -1 ? normalizeString_(row[asCol.targetSessionKey]) : '',
-      savedModeLabel: asCol.savedModeLabel !== -1 ? normalizeString_(row[asCol.savedModeLabel]) : '',
-      savedByCurrentUser: !!teacherEmail && teacherEmail === currentUserEmail,
-      _ms: accessedAtMs
-    };
+savedSessionMap[key] = {
+  teacherEmail: teacherEmail,
+  savedAtText: formatDateTimeJst_(accessedAtRaw),
+  actionType: asCol.actionType !== -1 ? normalizeString_(row[asCol.actionType]) : '',
+  targetSessionKey: asCol.targetSessionKey !== -1 ? normalizeString_(row[asCol.targetSessionKey]) : '',
+  savedModeLabel: asCol.savedModeLabel !== -1 ? normalizeString_(row[asCol.savedModeLabel]) : '',
+  savedByCurrentUser: !!teacherEmail && teacherEmail === currentUserEmail,
+  _ms: accessedAtMs
+};
   }
 });
 
@@ -216,14 +215,14 @@ attendanceSessionRows.forEach(function(row) {
       const tt = timetableMap[classId + '__' + weekday + '__' + period];
       const cls = classMap[classId];
       const saveInfoRaw = savedSessionMap[[classId, sessionYmd, period].join('__')] || null;
+
 const saveInfo = saveInfoRaw ? {
-  teacherEmail: saveInfoRaw.teacherEmail,
-  savedAt: saveInfoRaw.savedAt,
-  savedAtText: saveInfoRaw.savedAtText,
-  actionType: saveInfoRaw.actionType,
-  targetSessionKey: saveInfoRaw.targetSessionKey,
-  savedModeLabel: saveInfoRaw.savedModeLabel,
-  savedByCurrentUser: saveInfoRaw.savedByCurrentUser
+  teacherEmail: saveInfoRaw.teacherEmail || '',
+  savedAtText: saveInfoRaw.savedAtText || '',
+  actionType: saveInfoRaw.actionType || '',
+  targetSessionKey: saveInfoRaw.targetSessionKey || '',
+  savedModeLabel: saveInfoRaw.savedModeLabel || '',
+  savedByCurrentUser: !!saveInfoRaw.savedByCurrentUser
 } : null;
 
       if (!tt || !Array.isArray(tt.teacherIds) || !tt.teacherIds.includes(currentTeacherId)) {

@@ -72,11 +72,14 @@ function getTeacherSessionDetailLight(classId, date, period, group) {
   const targetGroup = normalizeString_(group);
 
   let students = [];
+  const rosterSource = getRosterSourceByClassId_(targetClassId);
 
-  if (isExperimentGroupTargetClass_(targetClassId)) {
-    students = getStudentsByClassIdAndGroup(targetClassId, targetGroup);
-  } else if (hasStudentGroupRowsForClassId_(targetClassId)) {
-    students = getStudentsByStudentGroupsClassId_(targetClassId);
+  if (rosterSource === 'studentGroups') {
+    if (isExperimentGroupTargetClass_(targetClassId)) {
+      students = getStudentsByClassIdAndGroup(targetClassId, targetGroup);
+    } else {
+      students = getStudentsByStudentGroupsClassId_(targetClassId);
+    }
   } else {
     students = getStudentsByClassId(targetClassId);
   }
@@ -89,14 +92,25 @@ function getTeacherSessionDetailLight(classId, date, period, group) {
     ['normal', 'past-edit']
   );
 
-  return {
-    students: students,
-    attendanceMap: attendanceMap,
-    hasSavedSession: !!lastSavedInfo,
-    lastSavedInfo: lastSavedInfo,
-    group: targetGroup,
-    availableGroups: isExperimentGroupTargetClass_(targetClassId) ? getGroupsByClassId(targetClassId) : []
-  };
+const safeLastSavedInfo = lastSavedInfo ? {
+  teacherEmail: lastSavedInfo.teacherEmail || '',
+  savedAtText: lastSavedInfo.savedAtText || '',
+  actionType: lastSavedInfo.actionType || '',
+  targetSessionKey: lastSavedInfo.targetSessionKey || '',
+  savedModeLabel: lastSavedInfo.savedModeLabel || '',
+  savedByCurrentUser: !!lastSavedInfo.savedByCurrentUser
+} : null;
+
+return {
+  students: students,
+  attendanceMap: attendanceMap,
+  hasSavedSession: !!safeLastSavedInfo,
+  lastSavedInfo: safeLastSavedInfo,
+  group: targetGroup,
+  availableGroups: (rosterSource === 'studentGroups' && isExperimentGroupTargetClass_(targetClassId))
+    ? getGroupsByClassId(targetClassId)
+    : []
+};
 }
 
 function getTeacherSessionDetail(classId, date, period, group) {
@@ -477,4 +491,32 @@ function getStudentsByStudentGroupsClassId_(classId) {
     })
     .filter(Boolean)
     .sort(compareStudentsByAttendanceNumber_);
+}
+
+function getRosterSourceByClassId_(classId) {
+  const targetClassId = normalizeString_(classId);
+  if (!targetClassId) return 'students';
+
+  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
+  const headers = classesData.headers || [];
+  const rows = classesData.rows || [];
+
+  const col = {
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    rosterSource: findColumnIndex_(headers, ['rosterSource', '名簿取得元'])
+  };
+
+  if (col.classId === -1) {
+    throw new Error('classes シートに classId 列がありません');
+  }
+
+  const row = rows.find(function(r) {
+    return normalizeString_(r[col.classId]) === targetClassId;
+  });
+
+  if (!row) return 'students';
+  if (col.rosterSource === -1) return 'students';
+
+  const value = normalizeString_(row[col.rosterSource]).toLowerCase();
+  return value === 'studentgroups' ? 'studentGroups' : 'students';
 }

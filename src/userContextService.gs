@@ -21,10 +21,9 @@ function getDevMasqueradeConfig_() {
   return {
     enabled: false, 
     developerEmail: 'nyasui@ktc.ac.jp',
-    masqueradeEmail: 'nakahira@ktc.ac.jp'
+    masqueradeEmail: 'bando@ktc.ac.jp'
   };
 }
-
 /**
  * 実際のログインメールアドレスを取得
  */
@@ -65,6 +64,34 @@ function getCurrentUserEmail() {
   return actualEmail;
 }
 
+function buildCurrentUserContextCacheKey_(actualEmail, resolvedEmail) {
+  return 'currentUserContext__' +
+    normalizeString_(actualEmail).toLowerCase() + '__' +
+    normalizeString_(resolvedEmail).toLowerCase();
+}
+
+function getOperationSheetObjectsCached_(sheetName, ttlSeconds) {
+  const data = getSheetDataCached_('OPERATION', sheetName, ttlSeconds || 300);
+  const headers = Array.isArray(data && data.headers) ? data.headers : [];
+  const rows = Array.isArray(data && data.rows) ? data.rows : [];
+
+  if (headers.length === 0 || rows.length === 0) {
+    return [];
+  }
+
+  return rows.map(function(row) {
+    return getRowObject_(headers, row);
+  });
+}
+
+function getTeachersSheetObjectsCached_(ttlSeconds) {
+  return getOperationSheetObjectsCached_(CONFIG.SHEETS.TEACHERS, ttlSeconds || 300);
+}
+
+function getHomeroomAssignmentsSheetObjectsCached_(ttlSeconds) {
+  return getOperationSheetObjectsCached_(CONFIG.SHEETS.HOMEROOM_ASSIGNMENTS, ttlSeconds || 300);
+}
+
 /**
  * 現在ユーザーのコンテキストを返す
  *
@@ -85,24 +112,30 @@ function getCurrentUserEmail() {
 function getCurrentUserContext() {
   const actualEmail = getActualCurrentUserEmail_();
   const resolvedEmail = getCurrentUserEmail();
+  const cacheKey = buildCurrentUserContextCacheKey_(actualEmail, resolvedEmail);
+  const cached = getScriptCacheJson_(cacheKey);
 
-  const ss = openOperationSpreadsheet_();
-  const teachers = readSheetAsObjects_(ss, CONFIG.SHEETS.TEACHERS);
+  if (cached !== null) {
+    return cached;
+  }
 
-  const teacher = teachers.find(row =>
-    normalizeString_(row.email).toLowerCase() === resolvedEmail
-  );
+  const teachers = getTeachersSheetObjectsCached_(300);
+
+  const teacher = teachers.find(function(row) {
+    return normalizeString_(row.email).toLowerCase() === resolvedEmail;
+  });
 
   if (!teacher) {
+    putScriptCacheJson_(cacheKey, null, 120);
     return null;
   }
 
   const teacherId = normalizeString_(teacher.teacherId);
   const name = normalizeString_(teacher.name);
   const roles = parseRoles_(teacher.roles);
-  const homeroomClasses = getHomeroomClassesByTeacherId_(ss, teacherId);
+  const homeroomClasses = getHomeroomClassesByTeacherId_(teacherId);
 
-  return {
+  const context = {
     teacherId: teacherId,
     name: name,
     email: resolvedEmail,
@@ -114,21 +147,27 @@ function getCurrentUserContext() {
     isHomeroom: roles.includes('homeroom'),
     isAdmin: roles.includes('admin')
   };
+
+  putScriptCacheJson_(cacheKey, context, 300);
+  return context;
 }
 
-function getHomeroomClassesByTeacherId_(ss, teacherId) {
-  const rows = readSheetAsObjects_(ss, CONFIG.SHEETS.HOMEROOM_ASSIGNMENTS);
+function getHomeroomClassesByTeacherId_(teacherId) {
+  const targetTeacherId = normalizeString_(teacherId);
+  if (!targetTeacherId) return [];
+
+  const rows = getHomeroomAssignmentsSheetObjectsCached_(300);
 
   const results = [];
   const seen = new Set();
 
-  rows.forEach(row => {
+  rows.forEach(function(row) {
     const rowTeacherId = normalizeString_(row.teacherId);
     const grade = normalizeString_(row.grade);
     const unit = normalizeString_(row.unit);
 
     if (!rowTeacherId || !grade || !unit) return;
-    if (rowTeacherId !== teacherId) return;
+    if (rowTeacherId !== targetTeacherId) return;
 
     const key = grade + '|' + unit;
     if (seen.has(key)) return;
@@ -172,6 +211,14 @@ function readSheetAsObjects_(ss, sheetName) {
     });
     return obj;
   });
+}
+
+function clearCurrentUserContextCacheForTest() {
+  const actualEmail = getActualCurrentUserEmail_();
+  const resolvedEmail = getCurrentUserEmail();
+  removeScriptCacheKeys_([
+    buildCurrentUserContextCacheKey_(actualEmail, resolvedEmail)
+  ]);
 }
 
 /**

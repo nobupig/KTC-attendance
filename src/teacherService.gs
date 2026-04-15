@@ -1,14 +1,8 @@
-function getTeacherRecordByEmail_(email) {
-  const targetEmail = normalizeString_(email).toLowerCase();
-  if (!targetEmail) return null;
+function buildTeacherMasterCacheKey_() {
+  return 'teacherMasterBundle__all';
+}
 
-  const ss = openOperationSpreadsheet_();
-  const teachers = readSheetAsObjects_(ss, CONFIG.SHEETS.TEACHERS);
-
-  const row = teachers.find(teacher =>
-    normalizeString_(teacher.email).toLowerCase() === targetEmail
-  );
-
+function buildTeacherRecordFromRow_(row) {
   if (!row) return null;
 
   return {
@@ -17,48 +11,67 @@ function getTeacherRecordByEmail_(email) {
     email: normalizeString_(row.email).toLowerCase(),
     roles: parseRoles_(row.roles)
   };
+}
+
+function getTeacherMasterBundle_() {
+  const cacheKey = buildTeacherMasterCacheKey_();
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached !== null) {
+    return cached;
+  }
+
+  const rows = getTeachersSheetObjectsCached_(300);
+  const byEmail = {};
+  const byId = {};
+  const byName = {};
+
+  rows.forEach(function(row) {
+    const record = buildTeacherRecordFromRow_(row);
+    if (!record) return;
+
+    if (record.email && !byEmail[record.email]) {
+      byEmail[record.email] = record;
+    }
+    if (record.teacherId && !byId[record.teacherId]) {
+      byId[record.teacherId] = record;
+    }
+    if (record.name && !byName[record.name]) {
+      byName[record.name] = record;
+    }
+  });
+
+  const bundle = {
+    byEmail: byEmail,
+    byId: byId,
+    byName: byName
+  };
+
+  putScriptCacheJson_(cacheKey, bundle, 300);
+  return bundle;
+}
+
+function getTeacherRecordByEmail_(email) {
+  const targetEmail = normalizeString_(email).toLowerCase();
+  if (!targetEmail) return null;
+
+  const bundle = getTeacherMasterBundle_();
+  return bundle.byEmail[targetEmail] || null;
 }
 
 function getTeacherRecordById_(teacherId) {
   const targetTeacherId = normalizeString_(teacherId);
   if (!targetTeacherId) return null;
 
-  const ss = openOperationSpreadsheet_();
-  const teachers = readSheetAsObjects_(ss, CONFIG.SHEETS.TEACHERS);
-
-  const row = teachers.find(teacher =>
-    normalizeString_(teacher.teacherId) === targetTeacherId
-  );
-
-  if (!row) return null;
-
-  return {
-    teacherId: normalizeString_(row.teacherId),
-    name: normalizeString_(row.name),
-    email: normalizeString_(row.email).toLowerCase(),
-    roles: parseRoles_(row.roles)
-  };
+  const bundle = getTeacherMasterBundle_();
+  return bundle.byId[targetTeacherId] || null;
 }
 
 function getTeacherRecordByName_(name) {
   const targetName = normalizeString_(name);
   if (!targetName) return null;
 
-  const ss = openOperationSpreadsheet_();
-  const teachers = readSheetAsObjects_(ss, CONFIG.SHEETS.TEACHERS);
-
-  const row = teachers.find(teacher =>
-    normalizeString_(teacher.name) === targetName
-  );
-
-  if (!row) return null;
-
-  return {
-    teacherId: normalizeString_(row.teacherId),
-    name: normalizeString_(row.name),
-    email: normalizeString_(row.email).toLowerCase(),
-    roles: parseRoles_(row.roles)
-  };
+  const bundle = getTeacherMasterBundle_();
+  return bundle.byName[targetName] || null;
 }
 
 function getClassTeacherTeamRows_() {
@@ -259,17 +272,26 @@ function getTeacherByClassId(classId) {
 /**
  * 動作確認用
  */
-function debugTeacherService() {
+function debugTeacherAssignmentsByClassId(classId) {
+  const result = getTeacherAssignmentsByClassId_(classId);
+  Logger.log(JSON.stringify(result, null, 2));
+}
+
+function debugTeacherAssignmentByClassPeriod(classId, weekday, period) {
+  const result = getTeacherAssignmentByClassPeriod_(classId, weekday, period);
+  Logger.log(JSON.stringify(result, null, 2));
+}
+
+function debugCurrentTeacherAssignment() {
   const user = getCurrentUserContext();
-  Logger.log('Current user: ' + JSON.stringify(user, null, 2));
+  Logger.log('current user=' + JSON.stringify(user, null, 2));
 
-  if (user) {
+  if (user && user.email) {
     const byEmail = getTeacherRecordByEmail_(user.email);
-    Logger.log('By email: ' + JSON.stringify(byEmail, null, 2));
-
+    Logger.log('teacher by email=' + JSON.stringify(byEmail, null, 2));
+  }
+  if (user && user.teacherId) {
     const byId = getTeacherRecordById_(user.teacherId);
-    Logger.log('By id: ' + JSON.stringify(byId, null, 2));
-
-    Logger.log('hasAnyTeachingAssignment=' + hasAnyTeachingAssignmentByTeacherId_(user.teacherId));
+    Logger.log('teacher by id=' + JSON.stringify(byId, null, 2));
   }
 }
