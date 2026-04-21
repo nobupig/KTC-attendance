@@ -25,3 +25,17 @@ function setHeader(sheet, headers) {
 function formatDateToYmd(date) {
   return Utilities.formatDate(new Date(date), 'Asia/Tokyo', 'yyyy-MM-dd');
 }
+
+
+function logPerf_(label, startedAtMs, extra) {
+  const elapsed = Date.now() - startedAtMs;
+  if (extra) {
+    console.log('[PERF] ' + label + ': ' + elapsed + 'ms | ' + extra);
+  } else {
+    console.log('[PERF] ' + label + ': ' + elapsed + 'ms');
+  }
+}
+
+function perfNow_() {
+  return Date.now();
+}

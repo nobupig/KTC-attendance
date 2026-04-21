@@ -51,6 +51,166 @@ function getHomeroomShrInitialData() {
   };
 }
 
+function getHomeroomShrUnsavedSummary(grade, unit) {
+  const targetGrade = String(grade || '').trim();
+  const targetUnit = String(unit || '').trim();
+
+  ensureHomeroomAccess_(targetGrade, targetUnit);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // 昨日以前の直近30日
+  const endDate = new Date(today);
+  endDate.setDate(endDate.getDate() - 1);
+
+  const startDate = new Date(endDate);
+  startDate.setDate(startDate.getDate() - 29);
+
+  const startYmd = formatDateToYmd(startDate);
+  const endYmd = formatDateToYmd(endDate);
+
+  const cacheKey = buildHomeroomShrUnsavedSummaryCacheKey_(targetGrade, targetUnit, endYmd);
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const classId = buildHomeroomShrClassId_(targetGrade, targetUnit);
+  const targetPeriod = String(HOMEROOM_SHR_CONFIG.PERIOD);
+
+  const classDayYmdList = getHomeroomShrClassDayYmdList_(startYmd, endYmd);
+
+  const sessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
+  const headers = Array.isArray(sessionsData && sessionsData.headers) ? sessionsData.headers : [];
+  const rows = Array.isArray(sessionsData && sessionsData.rows) ? sessionsData.rows : [];
+
+  const col = {
+    classId: headers.indexOf('classId'),
+    date: headers.indexOf('date'),
+    period: headers.indexOf('period'),
+    actionType: headers.indexOf('actionType')
+  };
+
+  ['classId', 'date', 'period'].forEach(function(key) {
+    if (col[key] === -1) {
+      throw new Error('attendanceSessions シートに ' + key + ' 列がありません');
+    }
+  });
+
+  const savedDateMap = {};
+
+  rows.forEach(function(row) {
+    const rowClassId = String(row[col.classId] || '').trim();
+    const rowDate = formatDateToYmd(row[col.date]);
+
+    // period=0 対応。|| '' を使わない
+    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
+
+    const actionType = col.actionType !== -1
+      ? String(row[col.actionType] || '').trim()
+      : '';
+
+    if (rowClassId !== classId) return;
+    if (!rowDate || rowDate < startYmd || rowDate > endYmd) return;
+    if (rowPeriod !== targetPeriod) return;
+    if (actionType && actionType !== HOMEROOM_SHR_CONFIG.ACTION_TYPE) return;
+
+    savedDateMap[rowDate] = true;
+  });
+
+  let unsavedCount = 0;
+  classDayYmdList.forEach(function(ymd) {
+    if (!savedDateMap[ymd]) {
+      unsavedCount += 1;
+    }
+  });
+
+  const result = {
+    ok: true,
+    classInfo: {
+      grade: targetGrade,
+      unit: targetUnit,
+      classLabel: buildHomeroomShrClassLabel_(targetGrade, targetUnit)
+    },
+    count: unsavedCount,
+    checkedDays: classDayYmdList.length,
+    checkedRange: {
+      start: startYmd,
+      end: endYmd
+    }
+  };
+
+  putScriptCacheJson_(cacheKey, result, 60);
+  return result;
+}
+
+function buildHomeroomShrUnsavedSummaryCacheKey_(grade, unit, endYmd) {
+  return 'homeroomShrUnsavedSummary__' +
+    String(grade || '').trim() + '__' +
+    String(unit || '').trim() + '__' +
+    String(endYmd || '').trim();
+}
+
+function getHomeroomShrClassDayYmdList_(startYmd, endYmd) {
+  const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 300);
+  const headers = Array.isArray(calendarData && calendarData.headers) ? calendarData.headers : [];
+  const rows = Array.isArray(calendarData && calendarData.rows) ? calendarData.rows : [];
+
+  const col = {
+    date: headers.indexOf('date'),
+    isClassDay: headers.indexOf('isClassDay')
+  };
+
+  // calendar が未整備でも止めず、平日ベースでフォールバック
+  if (col.date === -1 || col.isClassDay === -1 || !rows.length) {
+    return buildWeekdayYmdList_(startYmd, endYmd);
+  }
+
+  const result = [];
+
+  rows.forEach(function(row) {
+    const rowDate = formatDateToYmd(row[col.date]);
+    if (!rowDate) return;
+    if (rowDate < startYmd || rowDate > endYmd) return;
+
+    const raw = row[col.isClassDay];
+    const isClassDay = raw === true || String(raw || '').trim().toUpperCase() === 'TRUE' || String(raw || '').trim() === '1';
+
+    if (isClassDay) {
+      result.push(rowDate);
+    }
+  });
+
+  result.sort();
+  return result;
+}
+
+function buildWeekdayYmdList_(startYmd, endYmd) {
+  const startParts = String(startYmd || '').split('-').map(Number);
+  const endParts = String(endYmd || '').split('-').map(Number);
+
+  if (startParts.length !== 3 || endParts.length !== 3) {
+    return [];
+  }
+
+  const current = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+  const end = new Date(endParts[0], endParts[1] - 1, endParts[2]);
+
+  const result = [];
+
+  while (current <= end) {
+    const day = current.getDay();
+    if (day !== 0 && day !== 6) {
+      result.push(formatDateToYmd(current));
+    }
+    current.setDate(current.getDate() + 1);
+  }
+
+  return result;
+}
+
+
 function getHomeroomShrDailyData(grade, unit, date) {
   ensureHomeroomAccess_(grade, unit);
 
@@ -255,9 +415,16 @@ function saveHomeroomShrAttendance(payload) {
   HOMEROOM_SHR_CONFIG.MODE_LABEL
 ]);
 
-    invalidateAttendanceCaches_(classId, targetDate, period);
+     invalidateAttendanceCaches_(classId, targetDate, period);
+
+    const summaryBaseDate = new Date();
+    summaryBaseDate.setHours(0, 0, 0, 0);
+    summaryBaseDate.setDate(summaryBaseDate.getDate() - 1);
+    const summaryEndYmd = formatDateToYmd(summaryBaseDate);
+
     removeScriptCacheKeys_([
-      buildHomeroomShrDailyCacheKey_(grade, unit, targetDate)
+      buildHomeroomShrDailyCacheKey_(grade, unit, targetDate),
+      buildHomeroomShrUnsavedSummaryCacheKey_(grade, unit, summaryEndYmd)
     ]);
 
 return {

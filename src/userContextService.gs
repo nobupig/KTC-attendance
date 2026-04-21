@@ -19,9 +19,9 @@ function parseRoles_(rolesText) {
  */
 function getDevMasqueradeConfig_() {
   return {
-    enabled: false, 
+    enabled: true, 
     developerEmail: 'nyasui@ktc.ac.jp',
-    masqueradeEmail: 'bando@ktc.ac.jp'
+    masqueradeEmail: 'nasu.yukari@ktc.ac.jp'
   };
 }
 /**

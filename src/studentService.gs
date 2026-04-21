@@ -68,12 +68,17 @@ function getStudentsByClassId(classId) {
 }
 
 function getTeacherSessionDetailLight(classId, date, period, group) {
+  const totalStartedAt = perfNow_();
+
   const targetClassId = normalizeString_(classId);
   const targetGroup = normalizeString_(group);
 
+  const rosterStartedAt = perfNow_();
   let students = [];
   const rosterSource = getRosterSourceByClassId_(targetClassId);
+  logPerf_('getTeacherSessionDetailLight getRosterSourceByClassId_', rosterStartedAt, 'classId=' + targetClassId + ' rosterSource=' + rosterSource);
 
+  const studentsStartedAt = perfNow_();
   if (rosterSource === 'studentGroups') {
     if (isExperimentGroupTargetClass_(targetClassId)) {
       students = getStudentsByClassIdAndGroup(targetClassId, targetGroup);
@@ -83,34 +88,52 @@ function getTeacherSessionDetailLight(classId, date, period, group) {
   } else {
     students = getStudentsByClassId(targetClassId);
   }
+  logPerf_('getTeacherSessionDetailLight load students', studentsStartedAt, 'count=' + students.length + ' group=' + targetGroup);
 
+  const attendanceStartedAt = perfNow_();
   const attendanceMap = getAttendanceMap(targetClassId, date, period);
+  logPerf_('getTeacherSessionDetailLight getAttendanceMap', attendanceStartedAt, 'attendanceCount=' + Object.keys(attendanceMap || {}).length);
+
+  const savedInfoStartedAt = perfNow_();
   const lastSavedInfo = getLatestAttendanceSessionInfo_(
     targetClassId,
     date,
     period,
     ['normal', 'past-edit']
   );
+  logPerf_('getTeacherSessionDetailLight getLatestAttendanceSessionInfo_', savedInfoStartedAt, 'hasSaved=' + (!!lastSavedInfo));
 
-const safeLastSavedInfo = lastSavedInfo ? {
-  teacherEmail: lastSavedInfo.teacherEmail || '',
-  savedAtText: lastSavedInfo.savedAtText || '',
-  actionType: lastSavedInfo.actionType || '',
-  targetSessionKey: lastSavedInfo.targetSessionKey || '',
-  savedModeLabel: lastSavedInfo.savedModeLabel || '',
-  savedByCurrentUser: !!lastSavedInfo.savedByCurrentUser
-} : null;
-
-return {
-  students: students,
-  attendanceMap: attendanceMap,
-  hasSavedSession: !!safeLastSavedInfo,
-  lastSavedInfo: safeLastSavedInfo,
-  group: targetGroup,
-  availableGroups: (rosterSource === 'studentGroups' && isExperimentGroupTargetClass_(targetClassId))
+  const groupsStartedAt = perfNow_();
+  const availableGroups = (rosterSource === 'studentGroups' && isExperimentGroupTargetClass_(targetClassId))
     ? getGroupsByClassId(targetClassId)
-    : []
-};
+    : [];
+  logPerf_('getTeacherSessionDetailLight get availableGroups', groupsStartedAt, 'count=' + availableGroups.length);
+
+  const safeLastSavedInfo = lastSavedInfo ? {
+    teacherEmail: lastSavedInfo.teacherEmail || '',
+    savedAtText: lastSavedInfo.savedAtText || '',
+    actionType: lastSavedInfo.actionType || '',
+    targetSessionKey: lastSavedInfo.targetSessionKey || '',
+    savedModeLabel: lastSavedInfo.savedModeLabel || '',
+    savedByCurrentUser: !!lastSavedInfo.savedByCurrentUser
+  } : null;
+
+  const result = {
+    students: students,
+    attendanceMap: attendanceMap,
+    hasSavedSession: !!safeLastSavedInfo,
+    lastSavedInfo: safeLastSavedInfo,
+    group: targetGroup,
+    availableGroups: availableGroups
+  };
+
+  logPerf_(
+    'getTeacherSessionDetailLight total',
+    totalStartedAt,
+    'classId=' + targetClassId + ' period=' + period + ' students=' + students.length
+  );
+
+  return result;
 }
 
 function getTeacherSessionDetail(classId, date, period, group) {
@@ -134,13 +157,55 @@ function getStudentRiskMapForTeacherSession(classId, studentIds) {
   }
 
   let students = [];
+
   if (ids.length > 0) {
-    const classStudents = getStudentsByClassId(targetClassId);
     const allowMap = {};
-    ids.forEach(function(id) { allowMap[id] = true; });
-    students = classStudents.filter(function(student) {
-      return !!allowMap[normalizeString_(student.studentId)];
+    ids.forEach(function(id) {
+      allowMap[id] = true;
     });
+
+    if (isExperimentGroupTargetClass_(targetClassId)) {
+      const studentData = getSheetDataCached_('MASTER', CONFIG.SHEETS.STUDENTS, 300);
+      const studentHeaders = studentData.headers;
+      const studentRows = studentData.rows;
+
+      const studentCol = {
+        studentId: findColumnIndex_(studentHeaders, ['studentId', 'StudentID']),
+        grade: findColumnIndex_(studentHeaders, ['grade', '学年']),
+        unit: findColumnIndex_(studentHeaders, ['unit', '組・コース', '対象区分']),
+        attendanceNumber: findColumnIndex_(studentHeaders, ['attendanceNumber', '出席番号']),
+        name: findColumnIndex_(studentHeaders, ['name', '氏名'])
+      };
+
+      ['studentId', 'grade', 'unit', 'attendanceNumber', 'name'].forEach(function(key) {
+        if (studentCol[key] === -1) {
+          throw new Error('students シートに必要な列がありません: ' + key);
+        }
+      });
+
+      const targetGrade = normalizeString_(classInfo.grade);
+
+      students = studentRows
+        .map(function(row) {
+          return {
+            studentId: normalizeString_(row[studentCol.studentId]),
+            grade: normalizeString_(row[studentCol.grade]),
+            unit: normalizeString_(row[studentCol.unit]),
+            attendanceNumber: normalizeString_(row[studentCol.attendanceNumber]),
+            name: normalizeString_(row[studentCol.name])
+          };
+        })
+        .filter(function(student) {
+          return !!student.studentId &&
+                 student.grade === targetGrade &&
+                 !!allowMap[student.studentId];
+        });
+    } else {
+      const classStudents = getStudentsByClassId(targetClassId);
+      students = classStudents.filter(function(student) {
+        return !!allowMap[normalizeString_(student.studentId)];
+      });
+    }
   }
 
   const result = getStudentRiskMapForClass(targetClassId, students);
@@ -236,6 +301,28 @@ function isActiveStudentStatus_(status) {
 
   return ['active', '在籍', '有効'].includes(s);
 }
+
+function compareStudentsByUnitAndAttendanceNumber_(a, b) {
+  const unitA = normalizeString_(a && a.unit);
+  const unitB = normalizeString_(b && b.unit);
+
+  const numA = parseInt(String(unitA || '').replace(/[^\d]/g, ''), 10);
+  const numB = parseInt(String(unitB || '').replace(/[^\d]/g, ''), 10);
+
+  const hasNumA = !Number.isNaN(numA);
+  const hasNumB = !Number.isNaN(numB);
+
+  if (hasNumA && hasNumB && numA !== numB) {
+    return numA - numB;
+  }
+
+  if (unitA !== unitB) {
+    return unitA.localeCompare(unitB, 'ja');
+  }
+
+  return compareStudentsByAttendanceNumber_(a, b);
+}
+
 
 function compareStudentsByAttendanceNumber_(a, b) {
   const aNum = Number(a.attendanceNumber);
@@ -398,10 +485,45 @@ function getStudentsByClassIdAndGroup(classId, group) {
 
   if (!targetGroup) return [];
 
-  const baseStudents = getStudentsByClassId(targetClassId);
+  const classInfo = getClassRecordById_(targetClassId);
+  if (!classInfo) return [];
+
+  const targetGrade = normalizeString_(classInfo.grade);
+
+  // 学生マスタから「対象学年の全学生」を土台にする
+  const studentData = getSheetDataCached_('MASTER', CONFIG.SHEETS.STUDENTS, 300);
+  const studentHeaders = studentData.headers;
+  const studentRows = studentData.rows;
+
+  const studentCol = {
+    studentId: findColumnIndex_(studentHeaders, ['studentId', 'StudentID']),
+    grade: findColumnIndex_(studentHeaders, ['grade', '学年']),
+    unit: findColumnIndex_(studentHeaders, ['unit', '組・コース', '対象区分']),
+    attendanceNumber: findColumnIndex_(studentHeaders, ['attendanceNumber', '出席番号']),
+    name: findColumnIndex_(studentHeaders, ['name', '氏名'])
+  };
+
+  ['studentId', 'grade', 'unit', 'attendanceNumber', 'name'].forEach(function(key) {
+    if (studentCol[key] === -1) {
+      throw new Error('students シートに必要な列がありません: ' + key);
+    }
+  });
+
   const activeStudentMap = {};
-  baseStudents.forEach(function(student) {
-    activeStudentMap[normalizeString_(student.studentId)] = student;
+  studentRows.forEach(function(row) {
+    const studentId = normalizeString_(row[studentCol.studentId]);
+    const studentGrade = normalizeString_(row[studentCol.grade]);
+
+    if (!studentId) return;
+    if (studentGrade !== targetGrade) return;
+
+    activeStudentMap[studentId] = {
+      studentId: studentId,
+      grade: normalizeString_(row[studentCol.grade]),
+      unit: normalizeString_(row[studentCol.unit]),
+      attendanceNumber: normalizeString_(row[studentCol.attendanceNumber]),
+      name: normalizeString_(row[studentCol.name])
+    };
   });
 
   const data = getSheetDataCached_('OPERATION', CONFIG.SHEETS.STUDENT_GROUPS, 300);
@@ -434,7 +556,7 @@ function getStudentsByClassIdAndGroup(classId, group) {
       return activeStudentMap[studentId] || null;
     })
     .filter(Boolean)
-    .sort(compareStudentsByAttendanceNumber_);
+    .sort(compareStudentsByUnitAndAttendanceNumber_);
 }
 
 function hasStudentGroupRowsForClassId_(classId) {

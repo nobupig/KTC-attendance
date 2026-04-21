@@ -75,6 +75,50 @@
     .message.error { background: var(--danger-soft); color: var(--danger); }
     .message.success { background: var(--ok-soft); color: var(--ok); }
 
+        .unsaved-summary-box {
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      background: var(--card);
+      border: 1px solid var(--line);
+    }
+
+    .unsaved-summary-box.loading {
+      background: #f7f9fc;
+      color: var(--sub);
+    }
+
+    .unsaved-summary-box.ok {
+      background: #eef4ff;
+      color: #1f4fa3;
+      border-color: #d6e4ff;
+    }
+
+    .unsaved-summary-box.warn {
+      background: var(--warn-soft);
+      color: var(--warn);
+      border-color: #f0d59c;
+    }
+
+    .unsaved-summary-box.error {
+      background: var(--danger-soft);
+      color: var(--danger);
+      border-color: #efc2c2;
+    }
+
+    .unsaved-summary-title {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .unsaved-summary-sub {
+      font-size: 12px;
+      line-height: 1.6;
+      opacity: 0.95;
+    }
+
     .toolbar {
       display: grid;
       grid-template-columns: 1.2fr 220px auto auto;
@@ -402,6 +446,7 @@
         font-size: 12px;
       }
     }
+    
   </style>
 </head>
 <body>
@@ -427,6 +472,12 @@
       <button id="reloadBtn" class="main-btn secondary" type="button">再読込</button>
       <button id="saveBtnTop" class="main-btn" type="button">保存する</button>
     </div>
+
+        <div id="unsavedShrSummaryBox" class="unsaved-summary-box loading">
+      <div class="unsaved-summary-title">未保存のSHRを確認中...</div>
+      <div class="unsaved-summary-sub">昨日以前30日分を確認しています。</div>
+    </div>
+
 
     <div class="summary-grid">
       <div class="summary-card">
@@ -483,6 +534,7 @@
     let studentsState = [];
     let isLoading = false;
     let isSaving = false;
+    let unsavedSummaryRequestKey = "";
 
     function escapeHtml(str) {
       if (str == null) return "";
@@ -531,28 +583,97 @@
     }
 
     function renderHomeroomLastSavedInfo(info) {
-  const el = document.getElementById("lastSavedInfo");
-  if (!el) return;
+    const el = document.getElementById("lastSavedInfo");
+    if (!el) return;
 
-  if (!info) {
-    el.textContent = "この日の保存履歴はまだありません。";
-    return;
+    if (!info) {
+      el.textContent = "この日の保存履歴はまだありません。";
+      return;
+    }
+
+    let text = "最終保存: " + (info.savedAtText || "");
+
+    if (info.savedByCurrentUser) {
+      text += " / あなた";
+    } else if (info.teacherEmail) {
+      text += " / " + info.teacherEmail;
+    }
+
+    if (info.savedModeLabel) {
+      text += " / " + info.savedModeLabel;
+    }
+
+    el.textContent = text;
   }
 
-  let text = "最終保存: " + (info.savedAtText || "");
+      function renderUnsavedShrSummaryLoading() {
+      const el = document.getElementById("unsavedShrSummaryBox");
+      if (!el) return;
 
-  if (info.savedByCurrentUser) {
-    text += " / あなた";
-  } else if (info.teacherEmail) {
-    text += " / " + info.teacherEmail;
-  }
+      el.className = "unsaved-summary-box loading";
+      el.innerHTML = '' +
+        '<div class="unsaved-summary-title">未保存のSHRを確認中...</div>' +
+        '<div class="unsaved-summary-sub">昨日以前30日分を確認しています。</div>';
+    }
 
-  if (info.savedModeLabel) {
-    text += " / " + info.savedModeLabel;
-  }
+    function renderUnsavedShrSummaryError() {
+      const el = document.getElementById("unsavedShrSummaryBox");
+      if (!el) return;
 
-  el.textContent = text;
-}
+      el.className = "unsaved-summary-box error";
+      el.innerHTML = '' +
+        '<div class="unsaved-summary-title">未保存状況を取得できませんでした</div>' +
+        '<div class="unsaved-summary-sub">SHR入力自体はそのまま続けられます。</div>';
+    }
+
+    function renderUnsavedShrSummary(data) {
+      const el = document.getElementById("unsavedShrSummaryBox");
+      if (!el) return;
+
+      const classLabel = data && data.classInfo && data.classInfo.classLabel
+        ? data.classInfo.classLabel
+        : "担任クラス";
+
+      const count = data && typeof data.count === "number" ? data.count : 0;
+      const rangeText = data && data.checkedRange
+        ? (data.checkedRange.start + " ～ " + data.checkedRange.end)
+        : "昨日以前30日";
+
+      if (count > 0) {
+        el.className = "unsaved-summary-box warn";
+        el.innerHTML = '' +
+          '<div class="unsaved-summary-title">' + classLabel + ' の未保存SHRが ' + count + ' 件あります</div>' +
+          '<div class="unsaved-summary-sub">対象期間: ' + rangeText + '</div>';
+        return;
+      }
+
+      el.className = "unsaved-summary-box ok";
+      el.innerHTML = '' +
+        '<div class="unsaved-summary-title">' + classLabel + ' の未保存SHRはありません</div>' +
+        '<div class="unsaved-summary-sub">対象期間: ' + rangeText + '</div>';
+    }
+
+    function loadUnsavedShrSummary() {
+      if (!selectedGrade || !selectedUnit) return;
+
+      const requestKey = String(selectedGrade) + '__' + String(selectedUnit);
+      unsavedSummaryRequestKey = requestKey;
+
+      renderUnsavedShrSummaryLoading();
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          if (unsavedSummaryRequestKey !== requestKey) return;
+          renderUnsavedShrSummary(data || null);
+        })
+        .withFailureHandler(function(error) {
+          console.error(error);
+          if (unsavedSummaryRequestKey !== requestKey) return;
+          renderUnsavedShrSummaryError();
+        })
+        .getHomeroomShrUnsavedSummary(selectedGrade, selectedUnit);
+    }
+
 
     function renderClassChips() {
       const list = document.getElementById("classChipList");
@@ -569,11 +690,12 @@
       }).join("");
     }
 
-    function selectHomeroomClass(grade, unit) {
+       function selectHomeroomClass(grade, unit) {
       if (isLoading || isSaving) return;
       selectedGrade = String(grade || "");
       selectedUnit = String(unit || "");
       renderClassChips();
+      loadUnsavedShrSummary();
       loadDailyData();
     }
 
@@ -673,6 +795,7 @@
 
           document.getElementById("dateInput").value = currentDate;
           renderClassChips();
+          loadUnsavedShrSummary();
           loadDailyData();
         })
         .withFailureHandler(function(error) {
@@ -760,6 +883,7 @@
   showMessage("保存しました。", "success");
   document.getElementById("saveState").textContent = "保存済み";
   renderHomeroomLastSavedInfo(result && result.lastSavedInfo ? result.lastSavedInfo : null);
+  loadUnsavedShrSummary();
 })
         .withFailureHandler(function(error) {
           console.error(error);

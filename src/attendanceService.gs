@@ -212,21 +212,48 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
 }
 
 function getAttendanceMap(classId, date, period) {
+  const totalStartedAt = perfNow_();
+
   const targetClassId = String(classId || '').trim();
   const targetDate = formatDateToYmd(date);
   const targetPeriod = String(period || '').trim();
 
   const sessionCacheKey = buildAttendanceSessionCacheKey_(targetClassId, targetDate, targetPeriod);
+
+  const cacheStartedAt = perfNow_();
   const cached = getScriptCacheJson_(sessionCacheKey);
+  logPerf_(
+    'getAttendanceMap getScriptCacheJson_',
+    cacheStartedAt,
+    'cacheKey=' + sessionCacheKey + ' hit=' + (!!cached)
+  );
+
   if (cached) {
+    logPerf_(
+      'getAttendanceMap total',
+      totalStartedAt,
+      'cache=hit entries=' + Object.keys(cached).length + ' key=' + [targetClassId, targetDate, targetPeriod].join('__')
+    );
     return cached;
   }
 
+  const indexStartedAt = perfNow_();
   const attendanceIndex = buildAttendanceIndex_();
+  logPerf_('getAttendanceMap buildAttendanceIndex_', indexStartedAt);
+
   const key = [targetClassId, targetDate, targetPeriod].join('__');
   const result = attendanceIndex[key] || {};
 
+  const putCacheStartedAt = perfNow_();
   putScriptCacheJson_(sessionCacheKey, result, 60);
+  logPerf_('getAttendanceMap putScriptCacheJson_', putCacheStartedAt, 'entries=' + Object.keys(result).length);
+
+  logPerf_(
+    'getAttendanceMap total',
+    totalStartedAt,
+    'cache=miss entries=' + Object.keys(result).length + ' key=' + key
+  );
+
   return result;
 }
 
@@ -302,35 +329,180 @@ function formatDateTimeJst_(value) {
   return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
 }
 
-function getLatestAttendanceSessionInfo_(classId, date, period, actionTypes) {
-  const targetClassId = normalizeString_(classId);
+function getLatestAttendanceSessionInfo_(classId, date, period, allowedActionTypes) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const targetClassId = String(classId || '').trim();
   const targetDate = formatDateToYmd(date);
-  const targetPeriod = normalizeString_(period);
-  const allowedActionTypes = normalizeAttendanceActionTypes_(actionTypes);
-  const currentUserEmail = String(getCurrentUserEmail() || '').trim().toLowerCase();
+  const targetPeriod = String(period || '').trim();
 
   if (!targetClassId || !targetDate || !targetPeriod) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_('getLatestAttendanceSessionInfo_ total', totalStartedAt, 'invalid-args');
+    }
     return null;
   }
 
-  const index = buildAttendanceSessionLatestIndex_();
+  const mapStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const latestMap = getAttendanceSessionLatestMapByDateCached_(targetDate);
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getLatestAttendanceSessionInfo_ getAttendanceSessionLatestMapByDateCached_',
+      mapStartedAt,
+      'date=' + targetDate + ' keys=' + Object.keys(latestMap).length
+    );
+  }
+
   const key = [targetClassId, targetDate, targetPeriod].join('__');
-  const latest = index[key];
-
-  if (!latest) return null;
-  if (allowedActionTypes && allowedActionTypes.indexOf(latest.actionType) === -1) {
+  const latest = latestMap[key];
+  if (!latest) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_('getLatestAttendanceSessionInfo_ total', totalStartedAt, 'not-found key=' + key);
+    }
     return null;
   }
 
-return {
-  teacherEmail: latest.teacherEmail || '',
-  savedAtText: latest.savedAtText || '',
-  actionType: latest.actionType || '',
-  targetSessionKey: latest.targetSessionKey || '',
-  savedModeLabel: latest.savedModeLabel || '',
-  savedByCurrentUser: !!latest.teacherEmail && latest.teacherEmail.toLowerCase() === currentUserEmail
-};
+  const allowed = Array.isArray(allowedActionTypes) && allowedActionTypes.length
+    ? allowedActionTypes.map(function(v) { return String(v || '').trim(); })
+    : null;
+
+  if (allowed && allowed.indexOf(String(latest.actionType || '').trim()) === -1) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getLatestAttendanceSessionInfo_ total',
+        totalStartedAt,
+        'filtered-out actionType=' + String(latest.actionType || '')
+      );
+    }
+    return null;
+  }
+
+  const result = {
+    teacherEmail: latest.teacherEmail,
+    savedAt: latest.savedAt,
+    savedAtText: latest.savedAtText,
+    actionType: latest.actionType,
+    targetSessionKey: latest.targetSessionKey,
+    savedModeLabel: latest.savedModeLabel
+  };
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getLatestAttendanceSessionInfo_ total',
+      totalStartedAt,
+      'found key=' + key + ' actionType=' + (result.actionType || '')
+    );
+  }
+
+  return result;
 }
+
+function getAttendanceSessionLatestMapByDateCached_(ymd) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const cacheKey = 'attendanceSessionLatestMapByDate__' + ymd;
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getAttendanceSessionLatestMapByDateCached_ total',
+        totalStartedAt,
+        'cache=hit date=' + ymd + ' keys=' + Object.keys(cached).length
+      );
+    }
+    return cached;
+  }
+
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const attendanceSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getAttendanceSessionLatestMapByDateCached_ load attendanceSessionsData',
+      loadStartedAt,
+      'rows=' + attendanceSessionsData.rows.length
+    );
+  }
+
+  const headersStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const headers = attendanceSessionsData.headers;
+  const rows = attendanceSessionsData.rows;
+
+  const col = {
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    date: findColumnIndex_(headers, ['date', '日付']),
+    period: findColumnIndex_(headers, ['period', '時限']),
+    teacherEmail: findColumnIndex_(headers, ['teacherEmail', 'email']),
+    accessedAt: findColumnIndex_(headers, ['accessedAt', 'savedAt']),
+    actionType: findColumnIndex_(headers, ['actionType']),
+    targetSessionKey: findColumnIndex_(headers, ['targetSessionKey']),
+    savedModeLabel: findColumnIndex_(headers, ['savedModeLabel'])
+  };
+
+  ['classId', 'date', 'period'].forEach(function(key) {
+    if (col[key] === -1) {
+      throw new Error('attendanceSessions シートに ' + key + ' 列がありません');
+    }
+  });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getAttendanceSessionLatestMapByDateCached_ resolve headers', headersStartedAt);
+  }
+
+  const buildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const latestMap = {};
+
+  rows.forEach(function(row) {
+    const rowDate = formatDateToYmd(row[col.date]);
+    if (rowDate !== ymd) return;
+
+    const rowClassId = String(row[col.classId] || '').trim();
+    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
+    if (!rowClassId || !rowPeriod) return;
+
+    const key = [rowClassId, rowDate, rowPeriod].join('__');
+
+    const teacherEmail = col.teacherEmail !== -1
+      ? String(row[col.teacherEmail] || '').trim().toLowerCase()
+      : '';
+
+    const accessedAtRaw = col.accessedAt !== -1 ? row[col.accessedAt] : '';
+    const accessedAt = accessedAtRaw instanceof Date ? accessedAtRaw : new Date(accessedAtRaw);
+    const accessedAtMs = isNaN(accessedAt.getTime()) ? 0 : accessedAt.getTime();
+
+    if (!latestMap[key] || accessedAtMs >= latestMap[key]._ms) {
+      latestMap[key] = {
+        teacherEmail: teacherEmail,
+        savedAt: accessedAtRaw,
+        savedAtText: formatDateTimeJst_(accessedAtRaw),
+        actionType: col.actionType !== -1 ? String(row[col.actionType] || '').trim() : '',
+        targetSessionKey: col.targetSessionKey !== -1 ? String(row[col.targetSessionKey] || '').trim() : '',
+        savedModeLabel: col.savedModeLabel !== -1 ? String(row[col.savedModeLabel] || '').trim() : '',
+        _ms: accessedAtMs
+      };
+    }
+  });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getAttendanceSessionLatestMapByDateCached_ build latestMap',
+      buildStartedAt,
+      'date=' + ymd + ' keys=' + Object.keys(latestMap).length
+    );
+  }
+
+  putScriptCacheJson_(cacheKey, latestMap, 60);
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getAttendanceSessionLatestMapByDateCached_ total',
+      totalStartedAt,
+      'cache=miss date=' + ymd + ' keys=' + Object.keys(latestMap).length
+    );
+  }
+
+  return latestMap;
+}
+
 
 function hasAttendanceSessionRecord_(classId, date, period, actionTypes) {
   return !!getLatestAttendanceSessionInfo_(classId, date, period, actionTypes);

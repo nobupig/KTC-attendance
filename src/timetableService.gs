@@ -1,27 +1,33 @@
 function getClassesForCurrentUserByDate(targetDate) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const userStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const user = getCurrentUserContext();
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassesForCurrentUserByDate getCurrentUserContext', userStartedAt);
+  }
+
   if (!user || !user.teacherId) {
     throw new Error('ログインユーザー情報を取得できませんでした。');
   }
 
- const currentTeacherId = normalizeString_(user.teacherId);
-const currentUserEmail = normalizeString_(user.email).toLowerCase();
-const ymd = targetDate
+  const currentTeacherId = normalizeString_(user.teacherId);
+  const currentUserEmail = normalizeString_(user.email).toLowerCase();
+  const ymd = targetDate
   ? formatDateToYmd(targetDate)
   : formatDateToYmd(new Date());
 
-const classSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_SESSIONS, 300);
-const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 300);
-const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
-const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
-const attendanceSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
+  const loadSheetsStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 300);
+  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
+  const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassesForCurrentUserByDate load base sheet data', loadSheetsStartedAt);
+  }
 
-const classSessions = classSessionsData.rows;
-const timetable = timetableData.rows;
-const classes = classesData.rows;
-const teamRows = teamData.rows;
-const attendanceSessionRows = attendanceSessionsData.rows;
-const attendanceSessionHeaders = attendanceSessionsData.headers;
+  const timetable = timetableData.rows;
+  const classes = classesData.rows;
+  const teamRows = teamData.rows;
 
   const timetableHeaders = timetableData.headers;
   const ttCol = {
@@ -43,19 +49,7 @@ const attendanceSessionHeaders = attendanceSessionsData.headers;
     roleType: findColumnIndex_(teamHeaders, ['roleType', '役割'])
   };
 
-  const asCol = {
-  classId: findColumnIndex_(attendanceSessionHeaders, ['classId', 'ClassID']),
-  date: findColumnIndex_(attendanceSessionHeaders, ['date', '日付']),
-  period: findColumnIndex_(attendanceSessionHeaders, ['period', '時限']),
-  teacherEmail: findColumnIndex_(attendanceSessionHeaders, ['teacherEmail', 'email']),
-  accessedAt: findColumnIndex_(attendanceSessionHeaders, ['accessedAt', 'savedAt']),
-  actionType: findColumnIndex_(attendanceSessionHeaders, ['actionType']),
-  targetSessionKey: findColumnIndex_(attendanceSessionHeaders, ['targetSessionKey']),
-  savedModeLabel: findColumnIndex_(attendanceSessionHeaders, ['savedModeLabel'])
-};
-
-validateRequiredColumnsForTimetable_('attendanceSessions', asCol, ['classId', 'date', 'period']);
-
+  const timetableMapStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const timetableMap = {};
   timetable.forEach(function(row) {
     const classId = normalizeString_(row[ttCol.classId]);
@@ -72,7 +66,6 @@ validateRequiredColumnsForTimetable_('attendanceSessions', asCol, ['classId', 'd
     if (!classId || !period || !weekday) return;
 
     const key = classId + '__' + weekday + '__' + period;
-
     timetableMap[key] = {
       classId: classId,
       weekday: weekday,
@@ -87,7 +80,11 @@ validateRequiredColumnsForTimetable_('attendanceSessions', asCol, ['classId', 'd
       }] : []
     };
   });
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassesForCurrentUserByDate build timetableMap', timetableMapStartedAt, 'rows=' + timetable.length);
+  }
 
+  const teamMergeStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   teamRows.forEach(function(row) {
     const classId = teamCol.classId !== -1 ? normalizeString_(row[teamCol.classId]) : '';
     const period = teamCol.period !== -1 ? normalizeString_(row[teamCol.period]) : '';
@@ -106,7 +103,6 @@ validateRequiredColumnsForTimetable_('attendanceSessions', asCol, ['classId', 'd
     if (!classId || !period || !weekday || !teacherId) return;
 
     const key = classId + '__' + weekday + '__' + period;
-
     if (!timetableMap[key]) {
       timetableMap[key] = {
         classId: classId,
@@ -128,40 +124,42 @@ validateRequiredColumnsForTimetable_('attendanceSessions', asCol, ['classId', 'd
       });
     }
   });
-
-  const savedSessionMap = {};
-
-attendanceSessionRows.forEach(function(row) {
-  const rowClassId = normalizeString_(row[asCol.classId]);
-  const rowDate = formatDateToYmd(row[asCol.date]);
-  const rowPeriod = normalizeString_(row[asCol.period]);
-
-  if (!rowClassId || !rowDate || !rowPeriod) return;
-  if (rowDate !== ymd) return;
-
-  const key = [rowClassId, rowDate, rowPeriod].join('__');
-
-  const teacherEmail = asCol.teacherEmail !== -1
-    ? normalizeString_(row[asCol.teacherEmail]).toLowerCase()
-    : '';
-
-  const accessedAtRaw = asCol.accessedAt !== -1 ? row[asCol.accessedAt] : '';
-  const accessedAt = accessedAtRaw instanceof Date ? accessedAtRaw : new Date(accessedAtRaw);
-  const accessedAtMs = isNaN(accessedAt.getTime()) ? 0 : accessedAt.getTime();
-
-  if (!savedSessionMap[key] || accessedAtMs >= savedSessionMap[key]._ms) {
-savedSessionMap[key] = {
-  teacherEmail: teacherEmail,
-  savedAtText: formatDateTimeJst_(accessedAtRaw),
-  actionType: asCol.actionType !== -1 ? normalizeString_(row[asCol.actionType]) : '',
-  targetSessionKey: asCol.targetSessionKey !== -1 ? normalizeString_(row[asCol.targetSessionKey]) : '',
-  savedModeLabel: asCol.savedModeLabel !== -1 ? normalizeString_(row[asCol.savedModeLabel]) : '',
-  savedByCurrentUser: !!teacherEmail && teacherEmail === currentUserEmail,
-  _ms: accessedAtMs
-};
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassesForCurrentUserByDate merge classTeacherTeams', teamMergeStartedAt, 'rows=' + teamRows.length);
   }
-});
 
+  // 先に「この教員が担当する授業キー」だけを抽出
+  const teacherKeyStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const teacherSessionKeyMap = {};
+  Object.keys(timetableMap).forEach(function(key) {
+    const tt = timetableMap[key];
+    if (tt && Array.isArray(tt.teacherIds) && tt.teacherIds.includes(currentTeacherId)) {
+      teacherSessionKeyMap[key] = true;
+    }
+  });
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassesForCurrentUserByDate build teacherSessionKeyMap', teacherKeyStartedAt, 'keys=' + Object.keys(teacherSessionKeyMap).length);
+  }
+
+  const savedSessionStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const savedSessionMapBase = getSavedSessionMapByDateCached_(ymd);
+  const savedSessionMap = {};
+  Object.keys(savedSessionMapBase).forEach(function(key) {
+    const raw = savedSessionMapBase[key];
+    savedSessionMap[key] = {
+      teacherEmail: raw.teacherEmail || '',
+      savedAtText: raw.savedAtText || '',
+      actionType: raw.actionType || '',
+      targetSessionKey: raw.targetSessionKey || '',
+      savedModeLabel: raw.savedModeLabel || '',
+      savedByCurrentUser: !!raw.teacherEmail && raw.teacherEmail === currentUserEmail
+    };
+  });
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassesForCurrentUserByDate build savedSessionMap', savedSessionStartedAt, 'rows=' + Object.keys(savedSessionMap).length);
+  }
+
+  const classMapStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const classHeaders = classesData.headers;
   const clsCol = {
     classId: findColumnIndex_(classHeaders, ['classId', 'ClassID']),
@@ -191,7 +189,124 @@ savedSessionMap[key] = {
       allowedAbsences: clsCol.allowedAbsences !== -1 ? row[clsCol.allowedAbsences] : ''
     };
   });
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassesForCurrentUserByDate build classMap', classMapStartedAt, 'rows=' + classes.length);
+  }
 
+  // classSessions は日付単位で小さくキャッシュしたものを使う
+  const daySessionsStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const daySessions = getClassSessionsByDateCached_(ymd);
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassesForCurrentUserByDate getClassSessionsByDateCached_', daySessionsStartedAt, 'rows=' + daySessions.length);
+  }
+
+  const resultBuildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const result = [];
+
+  daySessions.forEach(function(session) {
+    const classId = session.classId;
+    const period = session.period;
+    const sessionNumber = session.sessionNumber;
+    const sessionYmd = session.date;
+    const weekday = session.weekday;
+
+    const teacherKey = classId + '__' + weekday + '__' + period;
+    if (!teacherSessionKeyMap[teacherKey]) {
+      return;
+    }
+
+    const tt = timetableMap[teacherKey];
+    if (!tt) {
+      return;
+    }
+
+    const cls = classMap[classId];
+    const saveInfo = savedSessionMap[[classId, sessionYmd, period].join('__')] || null;
+
+    result.push({
+      classId: classId,
+      date: sessionYmd,
+      period: period,
+      sessionNumber: sessionNumber,
+      subjectId: cls ? cls.subjectId : '',
+      subjectName: cls ? cls.subjectName : '',
+      grade: cls ? cls.grade : '',
+      unit: cls ? cls.unit : '',
+      term: cls ? cls.term : '',
+      curriculumUnit: cls ? cls.curriculumUnit : '',
+      allowedAbsences: cls ? cls.allowedAbsences : '',
+      teacherId: tt.teacherId,
+      teacherName: tt.teacherName,
+      teacherIds: tt.teacherIds,
+      teachers: tt.teachers,
+      weekday: tt.weekday,
+      isSaved: !!saveInfo,
+      lastSavedInfo: saveInfo
+    });
+  });
+
+  result.sort(function(a, b) {
+    return Number(a.period) - Number(b.period);
+  });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassesForCurrentUserByDate build result', resultBuildStartedAt, 'result=' + result.length);
+    logPerf_('getClassesForCurrentUserByDate total', totalStartedAt, 'date=' + ymd);
+  }
+
+  return result;
+}
+
+/**
+ * classSessions を日付単位で小さくキャッシュする
+ */
+function getClassSessionsByDateCached_(ymd) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const cacheKey = 'classSessionsByDate__' + ymd;
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_('getClassSessionsByDateCached_ total', totalStartedAt, 'cache=hit rows=' + cached.length + ' ymd=' + ymd);
+    }
+    return cached;
+  }
+
+  const indexStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const byDateMap = getClassSessionsByDateIndexCached_();
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassSessionsByDateCached_ getClassSessionsByDateIndexCached_', indexStartedAt, 'dates=' + Object.keys(byDateMap).length);
+  }
+
+  const result = byDateMap[ymd] || [];
+  putScriptCacheJson_(cacheKey, result, 300);
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassSessionsByDateCached_ total', totalStartedAt, 'cache=miss rows=' + result.length + ' ymd=' + ymd);
+  }
+
+  return result;
+}
+
+function getClassSessionsByDateIndexCached_() {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const cacheKey = 'classSessionsByDateIndex__v1';
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_('getClassSessionsByDateIndexCached_ total', totalStartedAt, 'cache=hit dates=' + Object.keys(cached).length);
+    }
+    return cached;
+  }
+
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const classSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_SESSIONS, 300);
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassSessionsByDateIndexCached_ load classSessionsData', loadStartedAt, 'rows=' + classSessionsData.rows.length);
+  }
+
+  const headerStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const classSessionHeaders = classSessionsData.headers;
   const csCol = {
     classId: findColumnIndex_(classSessionHeaders, ['classId', 'ClassID']),
@@ -200,60 +315,112 @@ savedSessionMap[key] = {
     sessionNumber: findColumnIndex_(classSessionHeaders, ['sessionNumber', '回', '回数'])
   };
   validateRequiredColumnsForTimetable_('classSessions', csCol, ['classId', 'date', 'period']);
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassSessionsByDateIndexCached_ resolve headers', headerStartedAt);
+  }
 
-  return classSessions
-    .filter(function(row) {
-      return formatDateToYmd(row[csCol.date]) === ymd;
-    })
-    .map(function(row) {
-      const classId = normalizeString_(row[csCol.classId]);
-      const period = normalizeString_(row[csCol.period]);
-      const sessionNumber = csCol.sessionNumber !== -1 ? row[csCol.sessionNumber] : '';
-      const sessionYmd = formatDateToYmd(row[csCol.date]);
-      const weekday = getWeekdayFromYmdJst_(sessionYmd);
+  const buildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const byDateMap = {};
 
-      const tt = timetableMap[classId + '__' + weekday + '__' + period];
-      const cls = classMap[classId];
-      const saveInfoRaw = savedSessionMap[[classId, sessionYmd, period].join('__')] || null;
+  classSessionsData.rows.forEach(function(row) {
+    const rowYmd = formatDateToYmd(row[csCol.date]);
+    if (!rowYmd) return;
 
-const saveInfo = saveInfoRaw ? {
-  teacherEmail: saveInfoRaw.teacherEmail || '',
-  savedAtText: saveInfoRaw.savedAtText || '',
-  actionType: saveInfoRaw.actionType || '',
-  targetSessionKey: saveInfoRaw.targetSessionKey || '',
-  savedModeLabel: saveInfoRaw.savedModeLabel || '',
-  savedByCurrentUser: !!saveInfoRaw.savedByCurrentUser
-} : null;
+    if (!byDateMap[rowYmd]) {
+      const weekday = getWeekdayFromYmdJst_(rowYmd);
+      byDateMap[rowYmd] = {
+        _weekday: weekday,
+        _rows: []
+      };
+    }
 
-      if (!tt || !Array.isArray(tt.teacherIds) || !tt.teacherIds.includes(currentTeacherId)) {
-        return null;
-      }
-
-     return {
-  classId: classId,
-  date: sessionYmd,
-  period: period,
-  sessionNumber: sessionNumber,
-  subjectId: cls ? cls.subjectId : '',
-  subjectName: cls ? cls.subjectName : '',
-  grade: cls ? cls.grade : '',
-  unit: cls ? cls.unit : '',
-  term: cls ? cls.term : '',
-  curriculumUnit: cls ? cls.curriculumUnit : '',
-  allowedAbsences: cls ? cls.allowedAbsences : '',
-  teacherId: tt.teacherId,
-  teacherName: tt.teacherName,
-  teacherIds: tt.teacherIds,
-  teachers: tt.teachers,
-  weekday: tt.weekday,
-  isSaved: !!saveInfo,
-  lastSavedInfo: saveInfo
-};
-    })
-    .filter(Boolean)
-    .sort(function(a, b) {
-      return Number(a.period) - Number(b.period);
+    byDateMap[rowYmd]._rows.push({
+      classId: normalizeString_(row[csCol.classId]),
+      date: rowYmd,
+      period: normalizeString_(row[csCol.period]),
+      sessionNumber: csCol.sessionNumber !== -1 ? row[csCol.sessionNumber] : '',
+      weekday: byDateMap[rowYmd]._weekday
     });
+  });
+
+  const normalizedMap = {};
+  Object.keys(byDateMap).forEach(function(dateKey) {
+    normalizedMap[dateKey] = byDateMap[dateKey]._rows;
+  });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassSessionsByDateIndexCached_ build index', buildStartedAt, 'dates=' + Object.keys(normalizedMap).length);
+  }
+
+  putScriptCacheJson_(cacheKey, normalizedMap, 300);
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassSessionsByDateIndexCached_ total', totalStartedAt, 'cache=miss dates=' + Object.keys(normalizedMap).length);
+  }
+
+  return normalizedMap;
+}
+
+/**
+ * attendanceSessions を日付単位で小さくキャッシュする
+ * savedByCurrentUser は呼び出し側で付与する
+ */
+function getSavedSessionMapByDateCached_(ymd) {
+  const cacheKey = 'savedSessionMapByDate__' + ymd;
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const attendanceSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
+  const headers = attendanceSessionsData.headers;
+  const rows = attendanceSessionsData.rows;
+
+  const asCol = {
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    date: findColumnIndex_(headers, ['date', '日付']),
+    period: findColumnIndex_(headers, ['period', '時限']),
+    teacherEmail: findColumnIndex_(headers, ['teacherEmail', 'email']),
+    accessedAt: findColumnIndex_(headers, ['accessedAt', 'savedAt']),
+    actionType: findColumnIndex_(headers, ['actionType']),
+    targetSessionKey: findColumnIndex_(headers, ['targetSessionKey']),
+    savedModeLabel: findColumnIndex_(headers, ['savedModeLabel'])
+  };
+  validateRequiredColumnsForTimetable_('attendanceSessions', asCol, ['classId', 'date', 'period']);
+
+  const map = {};
+
+  rows.forEach(function(row) {
+    const rowDate = formatDateToYmd(row[asCol.date]);
+    if (rowDate !== ymd) return;
+
+    const rowClassId = normalizeString_(row[asCol.classId]);
+    const rowPeriod = normalizeString_(row[asCol.period]);
+    if (!rowClassId || !rowPeriod) return;
+
+    const key = [rowClassId, rowDate, rowPeriod].join('__');
+    const teacherEmail = asCol.teacherEmail !== -1
+      ? normalizeString_(row[asCol.teacherEmail]).toLowerCase()
+      : '';
+
+    const accessedAtRaw = asCol.accessedAt !== -1 ? row[asCol.accessedAt] : '';
+    const accessedAt = accessedAtRaw instanceof Date ? accessedAtRaw : new Date(accessedAtRaw);
+    const accessedAtMs = isNaN(accessedAt.getTime()) ? 0 : accessedAt.getTime();
+
+    if (!map[key] || accessedAtMs >= map[key]._ms) {
+      map[key] = {
+        teacherEmail: teacherEmail,
+        savedAtText: formatDateTimeJst_(accessedAtRaw),
+        actionType: asCol.actionType !== -1 ? normalizeString_(row[asCol.actionType]) : '',
+        targetSessionKey: asCol.targetSessionKey !== -1 ? normalizeString_(row[asCol.targetSessionKey]) : '',
+        savedModeLabel: asCol.savedModeLabel !== -1 ? normalizeString_(row[asCol.savedModeLabel]) : '',
+        _ms: accessedAtMs
+      };
+    }
+  });
+
+  putScriptCacheJson_(cacheKey, map, 60);
+  return map;
 }
 
 function getWeekdayFromDate_(value) {
@@ -262,7 +429,10 @@ function getWeekdayFromDate_(value) {
 }
 
 function getTodayClassesForCurrentUser(targetDate) {
-  return getClassesForCurrentUserByDate(targetDate);
+  const totalStartedAt = perfNow_();
+  const result = getClassesForCurrentUserByDate(targetDate);
+  logPerf_('getTodayClassesForCurrentUser total', totalStartedAt, 'result=' + (Array.isArray(result) ? result.length : 0));
+  return result;
 }
 
 function testGetTodayClassesForCurrentUser() {
