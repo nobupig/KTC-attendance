@@ -447,6 +447,112 @@
       }
     }
     
+        .unsaved-summary-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .unsaved-summary-texts {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .unsaved-toggle-btn {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .unsaved-toggle-btn:hover {
+      opacity: 0.9;
+    }
+
+    .unsaved-details-box {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .unsaved-details-content {
+      display: grid;
+      gap: 8px;
+    }
+
+    .unsaved-detail-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.65);
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      border-radius: 10px;
+    }
+
+    .unsaved-detail-date {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .unsaved-detail-sub {
+      font-size: 12px;
+      color: var(--sub);
+      margin-top: 2px;
+    }
+
+    .unsaved-open-btn {
+      appearance: none;
+      border: none;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .unsaved-open-btn:hover {
+      opacity: 0.92;
+    }
+
+    .unsaved-empty-note {
+      font-size: 13px;
+      color: var(--sub);
+      padding: 4px 0;
+    }
+
+    @media (max-width: 720px) {
+      .unsaved-summary-head {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .unsaved-toggle-btn {
+        align-self: flex-start;
+      }
+
+      .unsaved-detail-item {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .unsaved-open-btn {
+        align-self: flex-start;
+      }
+    }
+
   </style>
 </head>
 <body>
@@ -473,10 +579,23 @@
       <button id="saveBtnTop" class="main-btn" type="button">保存する</button>
     </div>
 
-        <div id="unsavedShrSummaryBox" class="unsaved-summary-box loading">
-      <div class="unsaved-summary-title">未保存のSHRを確認中...</div>
-      <div class="unsaved-summary-sub">昨日以前30日分を確認しています。</div>
+  
+  <div id="unsavedShrSummaryBox" class="unsaved-summary-box loading">
+  <div class="unsaved-summary-head">
+    <div class="unsaved-summary-texts">
+      <div id="unsavedShrSummaryTitle" class="unsaved-summary-title">未保存のSHRを確認中...</div>
+      <div id="unsavedShrSummarySub" class="unsaved-summary-sub">4月7日以降の未保存状況を確認しています。</div>
     </div>
+    <button id="unsavedShrToggleBtn" class="unsaved-toggle-btn" type="button" hidden>
+      <span id="unsavedShrToggleLabel">詳細を見る</span>
+      <span id="unsavedShrToggleIcon">▼</span>
+    </button>
+  </div>
+
+  <div id="unsavedShrDetailsBox" class="unsaved-details-box" hidden>
+    <div id="unsavedShrDetailsContent" class="unsaved-details-content"></div>
+  </div>
+</div>
 
 
     <div class="summary-grid">
@@ -535,6 +654,9 @@
     let isLoading = false;
     let isSaving = false;
     let unsavedSummaryRequestKey = "";
+    let unsavedShrDetailsRequestKey = "";
+    let unsavedShrDetailsLoadedKey = "";
+    let unsavedShrDetailsOpen = false;
 
     function escapeHtml(str) {
       if (str == null) return "";
@@ -606,51 +728,66 @@
     el.textContent = text;
   }
 
-      function renderUnsavedShrSummaryLoading() {
-      const el = document.getElementById("unsavedShrSummaryBox");
-      if (!el) return;
+      function closeUnsavedShrDetails() {
+      unsavedShrDetailsOpen = false;
 
-      el.className = "unsaved-summary-box loading";
-      el.innerHTML = '' +
-        '<div class="unsaved-summary-title">未保存のSHRを確認中...</div>' +
-        '<div class="unsaved-summary-sub">昨日以前30日分を確認しています。</div>';
+      const detailsBox = document.getElementById("unsavedShrDetailsBox");
+      const toggleLabel = document.getElementById("unsavedShrToggleLabel");
+      const toggleIcon = document.getElementById("unsavedShrToggleIcon");
+
+      if (detailsBox) detailsBox.hidden = true;
+      if (toggleLabel) toggleLabel.textContent = "詳細を見る";
+      if (toggleIcon) toggleIcon.textContent = "▼";
     }
 
-    function renderUnsavedShrSummaryError() {
-      const el = document.getElementById("unsavedShrSummaryBox");
-      if (!el) return;
+    function openUnsavedShrDetails() {
+      unsavedShrDetailsOpen = true;
 
-      el.className = "unsaved-summary-box error";
-      el.innerHTML = '' +
-        '<div class="unsaved-summary-title">未保存状況を取得できませんでした</div>' +
-        '<div class="unsaved-summary-sub">SHR入力自体はそのまま続けられます。</div>';
+      const detailsBox = document.getElementById("unsavedShrDetailsBox");
+      const toggleLabel = document.getElementById("unsavedShrToggleLabel");
+      const toggleIcon = document.getElementById("unsavedShrToggleIcon");
+
+      if (detailsBox) detailsBox.hidden = false;
+      if (toggleLabel) toggleLabel.textContent = "詳細を閉じる";
+      if (toggleIcon) toggleIcon.textContent = "▲";
+    }
+    
+
+    function renderUnsavedShrDetailsLoading() {
+      const detailsContent = document.getElementById("unsavedShrDetailsContent");
+      if (!detailsContent) return;
+      detailsContent.innerHTML = '<div class="unsaved-empty-note">未保存日一覧を読み込んでいます...</div>';
     }
 
-    function renderUnsavedShrSummary(data) {
-      const el = document.getElementById("unsavedShrSummaryBox");
-      if (!el) return;
+    function renderUnsavedShrDetailsError() {
+      const detailsContent = document.getElementById("unsavedShrDetailsContent");
+      if (!detailsContent) return;
+      detailsContent.innerHTML = '<div class="unsaved-empty-note">未保存日一覧の取得に失敗しました。</div>';
+    }
 
-      const classLabel = data && data.classInfo && data.classInfo.classLabel
-        ? data.classInfo.classLabel
-        : "担任クラス";
+    function renderUnsavedShrDetails(data) {
+      const detailsContent = document.getElementById("unsavedShrDetailsContent");
+      if (!detailsContent) return;
 
-      const count = data && typeof data.count === "number" ? data.count : 0;
-      const rangeText = data && data.checkedRange
-        ? (data.checkedRange.start + " ～ " + data.checkedRange.end)
-        : "昨日以前30日";
+      const items = Array.isArray(data && data.items) ? data.items : [];
 
-      if (count > 0) {
-        el.className = "unsaved-summary-box warn";
-        el.innerHTML = '' +
-          '<div class="unsaved-summary-title">' + classLabel + ' の未保存SHRが ' + count + ' 件あります</div>' +
-          '<div class="unsaved-summary-sub">対象期間: ' + rangeText + '</div>';
+      if (!items.length) {
+        detailsContent.innerHTML = '<div class="unsaved-empty-note">未保存日はありません。</div>';
         return;
       }
 
-      el.className = "unsaved-summary-box ok";
-      el.innerHTML = '' +
-        '<div class="unsaved-summary-title">' + classLabel + ' の未保存SHRはありません</div>' +
-        '<div class="unsaved-summary-sub">対象期間: ' + rangeText + '</div>';
+      detailsContent.innerHTML = items.map(function(item) {
+        const safeDate = escapeHtml(item.date || "");
+        const safeWeekday = escapeHtml(item.weekday || "");
+        return '' +
+          '<div class="unsaved-detail-item">' +
+            '<div>' +
+              '<div class="unsaved-detail-date">' + safeDate + '（' + safeWeekday + '）</div>' +
+              '<div class="unsaved-detail-sub">この日のSHR記録を開けます</div>' +
+            '</div>' +
+            '<button class="unsaved-open-btn" type="button" onclick="openUnsavedShrDate(\'' + escapeJs(item.date || "") + '\')">この日を開く</button>' +
+          '</div>';
+      }).join("");
     }
 
     function loadUnsavedShrSummary() {
@@ -658,7 +795,8 @@
 
       const requestKey = String(selectedGrade) + '__' + String(selectedUnit);
       unsavedSummaryRequestKey = requestKey;
-
+      unsavedShrDetailsRequestKey = requestKey;
+      unsavedShrDetailsLoadedKey = "";
       renderUnsavedShrSummaryLoading();
 
       google.script.run
@@ -674,7 +812,126 @@
         .getHomeroomShrUnsavedSummary(selectedGrade, selectedUnit);
     }
 
+    function loadUnsavedShrDetails(forceReload) {
+      if (!selectedGrade || !selectedUnit) return;
 
+      const requestKey = String(selectedGrade) + '__' + String(selectedUnit);
+      const currentLoadedKey = requestKey;
+
+      if (!forceReload && unsavedShrDetailsLoadedKey === currentLoadedKey) {
+        return;
+      }
+
+      unsavedShrDetailsRequestKey = requestKey;
+      renderUnsavedShrDetailsLoading();
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          if (unsavedShrDetailsRequestKey !== requestKey) return;
+          unsavedShrDetailsLoadedKey = currentLoadedKey;
+          renderUnsavedShrDetails(data || null);
+        })
+        .withFailureHandler(function(error) {
+          console.error(error);
+          if (unsavedShrDetailsRequestKey !== requestKey) return;
+          renderUnsavedShrDetailsError();
+        })
+        .getHomeroomShrUnsavedDetails(selectedGrade, selectedUnit);
+    }
+
+    function toggleUnsavedShrDetails() {
+      const detailsBox = document.getElementById("unsavedShrDetailsBox");
+      const toggleBtn = document.getElementById("unsavedShrToggleBtn");
+
+      if (!detailsBox || !toggleBtn || toggleBtn.hidden) return;
+
+      if (unsavedShrDetailsOpen) {
+        closeUnsavedShrDetails();
+        return;
+      }
+
+      openUnsavedShrDetails();
+      loadUnsavedShrDetails(false);
+    }
+
+    function openUnsavedShrDate(dateStr) {
+      if (!dateStr) return;
+      document.getElementById("dateInput").value = dateStr;
+      currentDate = dateStr;
+      loadDailyData();
+    }
+
+     function renderUnsavedShrSummaryLoading() {
+  const box = document.getElementById("unsavedShrSummaryBox");
+  const title = document.getElementById("unsavedShrSummaryTitle");
+  const sub = document.getElementById("unsavedShrSummarySub");
+  const toggleBtn = document.getElementById("unsavedShrToggleBtn");
+  const detailsContent = document.getElementById("unsavedShrDetailsContent");
+
+  if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
+
+  box.className = "unsaved-summary-box loading";
+  title.textContent = "未保存のSHRを確認中...";
+  sub.textContent = "4月7日以降の未保存状況を確認しています。";
+  toggleBtn.hidden = true;
+  detailsContent.innerHTML = "";
+  closeUnsavedShrDetails();
+  unsavedShrDetailsLoadedKey = "";
+}
+
+function renderUnsavedShrSummaryError() {
+  const box = document.getElementById("unsavedShrSummaryBox");
+  const title = document.getElementById("unsavedShrSummaryTitle");
+  const sub = document.getElementById("unsavedShrSummarySub");
+  const toggleBtn = document.getElementById("unsavedShrToggleBtn");
+  const detailsContent = document.getElementById("unsavedShrDetailsContent");
+
+  if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
+
+  box.className = "unsaved-summary-box error";
+  title.textContent = "未保存状況を取得できませんでした";
+  sub.textContent = "SHR入力自体はそのまま続けられます。";
+  toggleBtn.hidden = true;
+  detailsContent.innerHTML = "";
+  closeUnsavedShrDetails();
+  unsavedShrDetailsLoadedKey = "";
+}
+
+function renderUnsavedShrSummary(data) {
+  const box = document.getElementById("unsavedShrSummaryBox");
+  const title = document.getElementById("unsavedShrSummaryTitle");
+  const sub = document.getElementById("unsavedShrSummarySub");
+  const toggleBtn = document.getElementById("unsavedShrToggleBtn");
+  const detailsContent = document.getElementById("unsavedShrDetailsContent");
+
+  if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
+
+  const classLabel = data && data.classInfo && data.classInfo.classLabel
+    ? data.classInfo.classLabel
+    : "担任クラス";
+
+  const count = data && typeof data.count === "number" ? data.count : 0;
+  const rangeText = data && data.checkedRange
+    ? (data.checkedRange.start + " ～ " + data.checkedRange.end)
+    : "4月7日以降";
+
+  if (count > 0) {
+    box.className = "unsaved-summary-box warn";
+    title.textContent = classLabel + " の未保存SHRが " + count + " 件あります";
+    sub.textContent = "対象期間: " + rangeText;
+    toggleBtn.hidden = false;
+    return;
+  }
+
+  box.className = "unsaved-summary-box ok";
+  title.textContent = classLabel + " の未保存SHRはありません";
+  sub.textContent = "対象期間: " + rangeText;
+  toggleBtn.hidden = true;
+  detailsContent.innerHTML = "";
+  closeUnsavedShrDetails();
+  unsavedShrDetailsLoadedKey = "";
+}
+   
     function renderClassChips() {
       const list = document.getElementById("classChipList");
       const classes = Array.isArray(initialData && initialData.homeroomClasses)
@@ -690,14 +947,14 @@
       }).join("");
     }
 
-       function selectHomeroomClass(grade, unit) {
-      if (isLoading || isSaving) return;
-      selectedGrade = String(grade || "");
-      selectedUnit = String(unit || "");
-      renderClassChips();
-      loadUnsavedShrSummary();
-      loadDailyData();
-    }
+    function selectHomeroomClass(grade, unit) {
+  if (isLoading || isSaving) return;
+  selectedGrade = String(grade || "");
+  selectedUnit = String(unit || "");
+  renderClassChips();
+  loadUnsavedShrSummary();
+  loadDailyData();
+}
 
     function renderSummaryCounts() {
       let present = 0;
@@ -884,6 +1141,9 @@
   document.getElementById("saveState").textContent = "保存済み";
   renderHomeroomLastSavedInfo(result && result.lastSavedInfo ? result.lastSavedInfo : null);
   loadUnsavedShrSummary();
+  if (unsavedShrDetailsOpen) {
+    loadUnsavedShrDetails(true);
+  }
 })
         .withFailureHandler(function(error) {
           console.error(error);
@@ -894,10 +1154,11 @@
     }
 
     document.getElementById("reloadBtn").addEventListener("click", loadDailyData);
-    document.getElementById("saveBtnTop").addEventListener("click", saveAttendance);
-    document.getElementById("saveBtnBottom").addEventListener("click", saveAttendance);
-    document.getElementById("dateInput").addEventListener("change", loadDailyData);
-    document.getElementById("backBtn").addEventListener("click", function() {
+document.getElementById("saveBtnTop").addEventListener("click", saveAttendance);
+document.getElementById("saveBtnBottom").addEventListener("click", saveAttendance);
+document.getElementById("dateInput").addEventListener("change", loadDailyData);
+document.getElementById("unsavedShrToggleBtn").addEventListener("click", toggleUnsavedShrDetails);
+document.getElementById("backBtn").addEventListener("click", function() {
       google.script.run
         .withSuccessHandler(function(baseUrl) {
           window.location.href = baseUrl + "?page=index";

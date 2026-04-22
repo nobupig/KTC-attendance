@@ -19,7 +19,7 @@ function parseRoles_(rolesText) {
  */
 function getDevMasqueradeConfig_() {
   return {
-    enabled: true, 
+    enabled: false, 
     developerEmail: 'nyasui@ktc.ac.jp',
     masqueradeEmail: 'nasu.yukari@ktc.ac.jp'
   };
