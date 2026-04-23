@@ -5,25 +5,29 @@ function parseRoles_(rolesText) {
     .filter(Boolean);
 }
 
-/**
- * 開発者なりすまし設定
- *
- * enabled: true にすると有効
- * developerEmail: 実際にログインしている開発者メール
- * masqueradeEmail: テスト対象の教員メール
- *
- * 例:
- * enabled: true →通常利用の場合: falseにすればいい
- * developerEmail: 'nyasui@ktc.ac.jp'
- * masqueradeEmail: 'oono@ktc.ac.jp'
- */
+
 function getDevMasqueradeConfig_() {
   return {
-    enabled: false, 
+    enabled: true,
     developerEmail: 'nyasui@ktc.ac.jp',
-    masqueradeEmail: 'nasu.yukari@ktc.ac.jp'
+    propertyKey: 'devMasqueradeEmail'
   };
 }
+
+function getMasqueradePropertyKey_() {
+  const config = getDevMasqueradeConfig_();
+  return normalizeString_(config.propertyKey) || 'devMasqueradeEmail';
+}
+
+function isMasqueradeDeveloper_(actualEmail) {
+  const config = getDevMasqueradeConfig_();
+  return !!(
+    config &&
+    config.enabled === true &&
+    normalizeString_(config.developerEmail).toLowerCase() === normalizeString_(actualEmail).toLowerCase()
+  );
+}
+
 /**
  * 実際のログインメールアドレスを取得
  */
@@ -43,22 +47,69 @@ function getActualCurrentUserEmail_() {
   return email;
 }
 
+function getStoredMasqueradeEmail_() {
+  const actualEmail = getActualCurrentUserEmail_();
+  if (!isMasqueradeDeveloper_(actualEmail)) {
+    return '';
+  }
+
+  const value = PropertiesService.getUserProperties().getProperty(getMasqueradePropertyKey_()) || '';
+  return normalizeString_(value).toLowerCase();
+}
+
+function getMasqueradeSelectableTeachers() {
+  const actualEmail = getActualCurrentUserEmail_();
+  if (!isMasqueradeDeveloper_(actualEmail)) {
+    return [];
+  }
+
+  const seen = new Set();
+
+  return getTeachersSheetObjectsCached_(300)
+    .map(function(row) {
+      return {
+        teacherId: normalizeString_(row.teacherId),
+        name: normalizeString_(row.name),
+        email: normalizeString_(row.email).toLowerCase(),
+        roles: parseRoles_(row.roles)
+      };
+    })
+    .filter(function(row) {
+      if (!row.email) return false;
+      if (row.email === actualEmail) return false;
+      if (seen.has(row.email)) return false;
+      seen.add(row.email);
+      return true;
+    })
+    .sort(function(a, b) {
+      const nameCompare = String(a.name || '').localeCompare(String(b.name || ''), 'ja');
+      if (nameCompare !== 0) return nameCompare;
+      return String(a.email || '').localeCompare(String(b.email || ''), 'ja');
+    });
+}
+
+function isValidMasqueradeTeacherEmail_(email) {
+  const target = normalizeString_(email).toLowerCase();
+  if (!target) return false;
+
+  return getMasqueradeSelectableTeachers().some(function(row) {
+    return row.email === target;
+  });
+}
+
 /**
  * 開発者なりすまし適用後のメールアドレスを返す
  */
 function getCurrentUserEmail() {
   const actualEmail = getActualCurrentUserEmail_();
-  const config = getDevMasqueradeConfig_();
 
-  if (
-    config &&
-    config.enabled === true &&
-    normalizeString_(config.developerEmail).toLowerCase() === actualEmail
-  ) {
-    const masqueradeEmail = normalizeString_(config.masqueradeEmail).toLowerCase();
-    if (masqueradeEmail) {
-      return masqueradeEmail;
-    }
+  if (!isMasqueradeDeveloper_(actualEmail)) {
+    return actualEmail;
+  }
+
+  const storedEmail = getStoredMasqueradeEmail_();
+  if (storedEmail && isValidMasqueradeTeacherEmail_(storedEmail)) {
+    return storedEmail;
   }
 
   return actualEmail;
@@ -94,20 +145,6 @@ function getHomeroomAssignmentsSheetObjectsCached_(ttlSeconds) {
 
 /**
  * 現在ユーザーのコンテキストを返す
- *
- * 返却例:
- * {
- *   teacherId: 'T018',
- *   name: '安井 宣仁',
- *   email: 'nyasui@ktc.ac.jp',
- *   actualEmail: 'nyasui@ktc.ac.jp',
- *   isMasquerading: false,
- *   roles: ['teacher','homeroom','admin'],
- *   homeroomClasses: [{ grade:'3', unit:'CA' }],
- *   isTeacher: true,
- *   isHomeroom: true,
- *   isAdmin: true
- * }
  */
 function getCurrentUserContext() {
   const actualEmail = getActualCurrentUserEmail_();
@@ -141,6 +178,7 @@ function getCurrentUserContext() {
     email: resolvedEmail,
     actualEmail: actualEmail,
     isMasquerading: resolvedEmail !== actualEmail,
+    canMasquerade: isMasqueradeDeveloper_(actualEmail),
     roles: roles,
     homeroomClasses: homeroomClasses,
     isTeacher: roles.includes('teacher'),
@@ -179,7 +217,7 @@ function getHomeroomClassesByTeacherId_(teacherId) {
     });
   });
 
-  results.sort((a, b) => {
+  results.sort(function(a, b) {
     const gradeA = Number(a.grade);
     const gradeB = Number(b.grade);
     if (gradeA !== gradeB) return gradeA - gradeB;
@@ -202,21 +240,86 @@ function readSheetAsObjects_(ss, sheetName) {
   const values = sheet.getDataRange().getValues();
   if (values.length < 2) return [];
 
-  const headers = values[0].map(h => normalizeString_(h));
+  const headers = values[0].map(function(h) {
+    return normalizeString_(h);
+  });
 
-  return values.slice(1).map(row => {
+  return values.slice(1).map(function(row) {
     const obj = {};
-    headers.forEach((header, i) => {
+    headers.forEach(function(header, i) {
       obj[header] = row[i];
     });
     return obj;
   });
 }
 
+function getMasqueradeUiState() {
+  const actualEmail = getActualCurrentUserEmail_();
+  const context = getCurrentUserContext();
+  const canMasquerade = isMasqueradeDeveloper_(actualEmail);
+
+  return {
+    canMasquerade: canMasquerade,
+    actualEmail: actualEmail,
+    currentEmail: context ? context.email : getCurrentUserEmail(),
+    currentName: context ? context.name : '',
+    isMasquerading: context ? !!context.isMasquerading : false,
+    options: canMasquerade ? getMasqueradeSelectableTeachers() : []
+  };
+}
+
+function setMasqueradeEmail(email) {
+  const actualEmail = getActualCurrentUserEmail_();
+  if (!isMasqueradeDeveloper_(actualEmail)) {
+    throw new Error('なりすまし変更権限がありません。');
+  }
+
+  const nextEmail = normalizeString_(email).toLowerCase();
+  if (!nextEmail) {
+    throw new Error('なりすまし先の教員を選択してください。');
+  }
+
+  if (!isValidMasqueradeTeacherEmail_(nextEmail)) {
+    throw new Error('指定した教員メールが教員名簿に存在しません。');
+  }
+
+  const oldResolvedEmail = getCurrentUserEmail();
+
+  PropertiesService.getUserProperties().setProperty(getMasqueradePropertyKey_(), nextEmail);
+
+  removeScriptCacheKeys_([
+    buildCurrentUserContextCacheKey_(actualEmail, actualEmail),
+    buildCurrentUserContextCacheKey_(actualEmail, oldResolvedEmail),
+    buildCurrentUserContextCacheKey_(actualEmail, nextEmail)
+  ]);
+
+  return getMasqueradeUiState();
+}
+
+function clearMasqueradeEmail() {
+  const actualEmail = getActualCurrentUserEmail_();
+  if (!isMasqueradeDeveloper_(actualEmail)) {
+    throw new Error('なりすまし解除権限がありません。');
+  }
+
+  const oldResolvedEmail = getCurrentUserEmail();
+
+  PropertiesService.getUserProperties().deleteProperty(getMasqueradePropertyKey_());
+
+  removeScriptCacheKeys_([
+    buildCurrentUserContextCacheKey_(actualEmail, actualEmail),
+    buildCurrentUserContextCacheKey_(actualEmail, oldResolvedEmail)
+  ]);
+
+  return getMasqueradeUiState();
+}
+
 function clearCurrentUserContextCacheForTest() {
   const actualEmail = getActualCurrentUserEmail_();
   const resolvedEmail = getCurrentUserEmail();
+
   removeScriptCacheKeys_([
+    buildCurrentUserContextCacheKey_(actualEmail, actualEmail),
     buildCurrentUserContextCacheKey_(actualEmail, resolvedEmail)
   ]);
 }

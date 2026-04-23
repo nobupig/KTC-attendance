@@ -23,6 +23,82 @@
 
     .page-header { margin-bottom: 16px; }
 
+        .page-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .page-header-main {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .page-header-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .header-link-btn {
+      appearance: none;
+      border: 1px solid #ccd5e3;
+      background: #fff;
+      color: #334;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .masquerade-box {
+      display: none;
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid #d9e0ee;
+      background: #fff;
+    }
+
+    .masquerade-status {
+      font-size: 13px;
+      color: #445;
+      line-height: 1.7;
+      margin-bottom: 10px;
+    }
+
+    .masquerade-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .masquerade-select {
+      min-width: 280px;
+      border: 1px solid #ccd5e3;
+      border-radius: 10px;
+      padding: 9px 10px;
+      font-size: 14px;
+      background: #fff;
+    }
+
+    @media (max-width: 768px) {
+      .page-header-actions {
+        width: 100%;
+      }
+
+      .header-link-btn,
+      .masquerade-select {
+        width: 100%;
+      }
+    }
+
     .sub-text {
       color: #666;
       font-size: 14px;
@@ -599,8 +675,27 @@
 </head>
 <body>
   <div class="page-header">
-    <h1>科目担当画面</h1>
-    <div class="sub-text" id="pageSubText">読み込み中...</div>
+    <div class="page-header-row">
+      <div class="page-header-main">
+        <h1>科目担当画面</h1>
+        <div class="sub-text" id="pageSubText">読み込み中...</div>
+      </div>
+      <div class="page-header-actions">
+        <button id="goHomeButton" type="button" class="header-link-btn">ホームへ戻る</button>
+      </div>
+    </div>
+
+    <div id="masqueradeBox" class="masquerade-box">
+      <div id="masqueradeStatus" class="masquerade-status"></div>
+      <div class="masquerade-row">
+        <select id="masqueradeSelect" class="masquerade-select">
+          <option value="">教員を選択してください</option>
+        </select>
+        <button id="masqueradeApplyButton" type="button" class="header-link-btn">適用</button>
+        <button id="masqueradeClearButton" type="button" class="header-link-btn">解除</button>
+      </div>
+    </div>
+
     <div id="messageArea" class="message"></div>
   </div>
 
@@ -750,6 +845,105 @@
       const el = document.getElementById("messageArea");
       el.textContent = "";
       el.className = "message";
+    }
+
+        function goHome() {
+      google.script.run
+        .withSuccessHandler(function(baseUrl) {
+          window.location.href = baseUrl + "?page=index";
+        })
+        .getAppBaseUrl();
+    }
+
+    function renderMasqueradeUi(state) {
+      const box = document.getElementById("masqueradeBox");
+      const status = document.getElementById("masqueradeStatus");
+      const select = document.getElementById("masqueradeSelect");
+      const clearBtn = document.getElementById("masqueradeClearButton");
+
+      if (!box || !status || !select || !clearBtn) return;
+
+      if (!state || !state.canMasquerade) {
+        box.style.display = "none";
+        return;
+      }
+
+      box.style.display = "block";
+
+      const actualEmail = String(state.actualEmail || "");
+      const currentEmail = String(state.currentEmail || "");
+      const currentName = String(state.currentName || "");
+
+      status.innerHTML =
+        "実ログイン: <strong>" + escapeHtml(actualEmail) + "</strong><br>" +
+        "現在の表示ユーザー: <strong>" + escapeHtml(currentName || currentEmail) + "</strong>" +
+        (currentName && currentEmail ? " / " + escapeHtml(currentEmail) : "");
+
+      const options = Array.isArray(state.options) ? state.options : [];
+      let html = '<option value="">教員を選択してください</option>';
+
+      options.forEach(function(item) {
+        const email = String(item.email || "");
+        const name = String(item.name || "");
+        const selected = currentEmail && currentEmail === email ? ' selected' : '';
+        html += '<option value="' + escapeHtml(email) + '"' + selected + '>' +
+          escapeHtml(name ? (name + " / " + email) : email) +
+          '</option>';
+      });
+
+      select.innerHTML = html;
+      clearBtn.disabled = !state.isMasquerading;
+
+      if (!state.isMasquerading) {
+        select.value = "";
+      }
+    }
+
+    function loadMasqueradeUiState() {
+      google.script.run
+        .withSuccessHandler(function(state) {
+          renderMasqueradeUi(state || null);
+        })
+        .withFailureHandler(function(error) {
+          console.error(error);
+        })
+        .getMasqueradeUiState();
+    }
+
+    function applyMasqueradeFromUi() {
+      const select = document.getElementById("masqueradeSelect");
+      const nextEmail = select ? String(select.value || "") : "";
+
+      if (!nextEmail) {
+        showMessage("なりすまし先の教員を選択してください。", "warn");
+        return;
+      }
+
+      showMessage("なりすましを切り替えています...", "warn");
+
+      google.script.run
+        .withSuccessHandler(function() {
+          window.location.reload();
+        })
+        .withFailureHandler(function(error) {
+          console.error(error);
+          showMessage("なりすまし切替に失敗しました。", "error");
+        })
+        .setMasqueradeEmail(nextEmail);
+    }
+
+    function clearMasqueradeFromUi() {
+      showMessage("なりすましを解除しています...", "warn");
+
+      google.script.run
+        .withSuccessHandler(function() {
+          window.location.reload();
+        })
+        .withFailureHandler(function(error) {
+          console.error(error);
+          showMessage("なりすまし解除に失敗しました。", "error");
+        })
+        .clearMasqueradeEmail();
     }
 
     function setSaveStateText(text) {
@@ -1287,13 +1481,39 @@ function getSortedStudents() {
         map[periodKey].push(cls);
       });
 
-      Object.keys(map).forEach(function(periodKey) {
-        map[periodKey].sort(function(a, b) {
-          const unitA = String(a.unit || "");
-          const unitB = String(b.unit || "");
-          return unitA.localeCompare(unitB, "ja");
-        });
-      });
+Object.keys(map).forEach(function(periodKey) {
+  map[periodKey].sort(function(a, b) {
+    const unitOrderMap = {
+      "1": 1,
+      "2": 2,
+      "3": 3,
+      "4": 4,
+      "5": 5,
+      "M": 11,
+      "E": 12,
+      "I": 13,
+      "C": 14,
+      "A": 15
+    };
+
+    function getUnitSortWeight(unit) {
+      const normalized = String(unit || "").trim().toUpperCase();
+      if (Object.prototype.hasOwnProperty.call(unitOrderMap, normalized)) {
+        return unitOrderMap[normalized];
+      }
+      return 999;
+    }
+
+    const weightA = getUnitSortWeight(a.unit);
+    const weightB = getUnitSortWeight(b.unit);
+
+    if (weightA !== weightB) {
+      return weightA - weightB;
+    }
+
+    return String(a.subjectName || "").localeCompare(String(b.subjectName || ""), "ja");
+  });
+});
 
       return map;
     }
@@ -2405,6 +2625,9 @@ function isExperimentSubject(cls) {
     }
 
   function initButtons() {
+  const goHomeButton = document.getElementById("goHomeButton");
+  const masqueradeApplyButton = document.getElementById("masqueradeApplyButton");
+  const masqueradeClearButton = document.getElementById("masqueradeClearButton");
   const resetBtn = document.getElementById("resetPresentButton");
   const saveTopBtn = document.getElementById("saveButtonTop");
   const saveBottomBtn = document.getElementById("saveButtonBottom");
@@ -2413,6 +2636,18 @@ function isExperimentSubject(cls) {
   const searchPastButton = document.getElementById("searchPastButton");
   const pastDateInput = document.getElementById("pastDateInput");
   const teacherUnsavedToggleBtn = document.getElementById("teacherUnsavedToggleBtn");
+
+    if (goHomeButton) {
+    goHomeButton.addEventListener("click", goHome);
+  }
+
+  if (masqueradeApplyButton) {
+    masqueradeApplyButton.addEventListener("click", applyMasqueradeFromUi);
+  }
+
+  if (masqueradeClearButton) {
+    masqueradeClearButton.addEventListener("click", clearMasqueradeFromUi);
+  }
 
   if (resetBtn) {
     resetBtn.addEventListener("click", function() {
@@ -2569,6 +2804,7 @@ function isExperimentSubject(cls) {
       });
 
         initButtons();
+         loadMasqueradeUiState();
 
       const linkedDate = (preSelectedSession && preSelectedSession.date) ? preSelectedSession.date : "";
       const todayYmd = getTodayDateKeyJst();

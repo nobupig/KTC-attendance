@@ -60,6 +60,26 @@
       opacity: 0.96;
     }
 
+        .hero-actions {
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .hero-actions .main-btn {
+      width: auto;
+    }
+
+    @media (max-width: 768px) {
+      .hero-actions {
+        justify-content: stretch;
+      }
+
+      .hero-actions .main-btn {
+        width: 100%;
+      }
+    }
+
     .message {
       display: none;
       margin-bottom: 16px;
@@ -560,6 +580,10 @@
     <div class="hero">
       <h1>担任出席管理（SHR）</h1>
       <p>未変更の学生は「出席」として保存されます。欠席・遅刻・早退学生だけを切り替えて保存してください。</p>
+    </div>
+
+        <div class="hero-actions">
+      <button id="backHomeTopBtn" class="main-btn secondary" type="button">トップへ戻る</button>
     </div>
 
     <div id="messageArea" class="message"></div>
@@ -1153,18 +1177,22 @@ function renderUnsavedShrSummary(data) {
         .saveHomeroomShrAttendance(payload);
     }
 
-    document.getElementById("reloadBtn").addEventListener("click", loadDailyData);
-document.getElementById("saveBtnTop").addEventListener("click", saveAttendance);
-document.getElementById("saveBtnBottom").addEventListener("click", saveAttendance);
-document.getElementById("dateInput").addEventListener("change", loadDailyData);
-document.getElementById("unsavedShrToggleBtn").addEventListener("click", toggleUnsavedShrDetails);
-document.getElementById("backBtn").addEventListener("click", function() {
+        function goShrHome() {
       google.script.run
         .withSuccessHandler(function(baseUrl) {
           window.location.href = baseUrl + "?page=index";
         })
         .getAppBaseUrl();
-    });
+    }
+
+
+    document.getElementById("reloadBtn").addEventListener("click", loadDailyData);
+document.getElementById("saveBtnTop").addEventListener("click", saveAttendance);
+document.getElementById("saveBtnBottom").addEventListener("click", saveAttendance);
+document.getElementById("dateInput").addEventListener("change", loadDailyData);
+document.getElementById("unsavedShrToggleBtn").addEventListener("click", toggleUnsavedShrDetails);
+document.getElementById("backBtn").addEventListener("click", goShrHome);
+document.getElementById("backHomeTopBtn").addEventListener("click", goShrHome);
 
     loadInitialData();
   </script>
