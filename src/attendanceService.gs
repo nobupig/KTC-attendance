@@ -183,6 +183,25 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
   savedModeLabel
 ]);
     invalidateAttendanceCaches_(targetClassId, targetDate, targetPeriod);
+    const currentUser = getCurrentUserContext();
+    const currentTeacherId = currentUser && currentUser.teacherId
+      ? normalizeString_(currentUser.teacherId)
+      : '';
+
+    if (currentTeacherId) {
+      const summaryBaseDate = new Date();
+      summaryBaseDate.setHours(0, 0, 0, 0);
+      summaryBaseDate.setDate(summaryBaseDate.getDate() - 1);
+
+      const summaryEndYmd = formatDateToYmd(summaryBaseDate);
+      const summaryStartYmd = formatDateToYmd(getTeacherUnsavedStartDate_(summaryBaseDate));
+
+      removeScriptCacheKeys_([
+        buildTeacherUnsavedSummaryCacheKey_(currentTeacherId, summaryEndYmd),
+        buildTeacherUnsavedDetailsCacheKey_(currentTeacherId, summaryEndYmd),
+        'savedSessionKeySetByRange__' + summaryStartYmd + '__' + summaryEndYmd
+      ]);
+    }
 
     const lastSavedInfo = {
       teacherEmail: currentUserEmail,
@@ -302,12 +321,16 @@ function isSequentialRows_(rowNumbers) {
 
 
 function invalidateAttendanceCaches_(classId, date, period) {
+  const targetDate = formatDateToYmd(date);
+
   removeScriptCacheKeys_([
     getAttendanceSheetCacheKey_(),
     getAttendanceSessionsSheetCacheKey_(),
-    buildAttendanceSessionCacheKey_(classId, date, period),
+    buildAttendanceSessionCacheKey_(classId, targetDate, period),
     'attendanceIndex__all',
-    'attendanceSessionLatestIndex__all'
+    'attendanceSessionLatestIndex__all',
+    'savedSessionMapByDate__' + targetDate,
+    'attendanceSessionLatestMapByDate__' + targetDate
   ]);
 }
 

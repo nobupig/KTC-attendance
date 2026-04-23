@@ -423,6 +423,42 @@ function getSavedSessionMapByDateCached_(ymd) {
   return map;
 }
 
+function getSavedSessionKeySetByRangeCached_(startYmd, endYmd) {
+  const cacheKey = 'savedSessionKeySetByRange__' + String(startYmd || '') + '__' + String(endYmd || '');
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const attendanceSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
+  const headers = attendanceSessionsData.headers;
+  const rows = attendanceSessionsData.rows;
+
+  const asCol = {
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    date: findColumnIndex_(headers, ['date', '日付']),
+    period: findColumnIndex_(headers, ['period', '時限'])
+  };
+  validateRequiredColumnsForTimetable_('attendanceSessions', asCol, ['classId', 'date', 'period']);
+
+  const keySet = {};
+
+  rows.forEach(function(row) {
+    const rowDate = formatDateToYmd(row[asCol.date]);
+    if (!rowDate || rowDate < startYmd || rowDate > endYmd) return;
+
+    const classId = normalizeString_(row[asCol.classId]);
+    const period = normalizeString_(row[asCol.period]);
+    if (!classId || !period) return;
+
+    const key = [classId, rowDate, period].join('__');
+    keySet[key] = true;
+  });
+
+  putScriptCacheJson_(cacheKey, keySet, 60);
+  return keySet;
+}
+
 function getWeekdayFromDate_(value) {
   const date = value instanceof Date ? value : new Date(value);
   return Utilities.formatDate(date, 'Asia/Tokyo', 'EEE'); // Sun, Mon, Tue...
@@ -433,6 +469,363 @@ function getTodayClassesForCurrentUser(targetDate) {
   const result = getClassesForCurrentUserByDate(targetDate);
   logPerf_('getTodayClassesForCurrentUser total', totalStartedAt, 'result=' + (Array.isArray(result) ? result.length : 0));
   return result;
+}
+
+function getTeacherUnsavedSummary() {
+  const user = getCurrentUserContext();
+  if (!user || !user.teacherId) {
+    throw new Error('ログインユーザー情報を取得できませんでした。');
+  }
+
+  const teacherId = normalizeString_(user.teacherId);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const endDate = new Date(today);
+  endDate.setDate(endDate.getDate() - 1);
+
+  const startDate = getTeacherUnsavedStartDate_(today);
+  const startYmd = formatDateToYmd(startDate);
+  const endYmd = formatDateToYmd(endDate);
+
+  const cacheKey = buildTeacherUnsavedSummaryCacheKey_(teacherId, endYmd);
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  if (!startYmd || !endYmd || endYmd < startYmd) {
+    const emptyResult = {
+      ok: true,
+      count: 0,
+      checkedRange: {
+        start: startYmd || '',
+        end: endYmd || ''
+      }
+    };
+    putScriptCacheJson_(cacheKey, emptyResult, 60);
+    return emptyResult;
+  }
+
+  const count = getTeacherUnsavedCount_(teacherId, startYmd, endYmd);
+
+const result = {
+  ok: true,
+  count: count,
+  checkedRange: {
+    start: startYmd,
+    end: endYmd
+  }
+};
+
+  putScriptCacheJson_(cacheKey, result, 60);
+  return result;
+}
+
+function getTeacherUnsavedDetails() {
+  const user = getCurrentUserContext();
+  if (!user || !user.teacherId) {
+    throw new Error('ログインユーザー情報を取得できませんでした。');
+  }
+
+  const teacherId = normalizeString_(user.teacherId);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const endDate = new Date(today);
+  endDate.setDate(endDate.getDate() - 1);
+
+  const startDate = getTeacherUnsavedStartDate_(today);
+  const startYmd = formatDateToYmd(startDate);
+  const endYmd = formatDateToYmd(endDate);
+
+  const cacheKey = buildTeacherUnsavedDetailsCacheKey_(teacherId, endYmd);
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  if (!startYmd || !endYmd || endYmd < startYmd) {
+    const emptyResult = {
+      ok: true,
+      items: [],
+      checkedRange: {
+        start: startYmd || '',
+        end: endYmd || ''
+      }
+    };
+    putScriptCacheJson_(cacheKey, emptyResult, 60);
+    return emptyResult;
+  }
+
+  const items = getTeacherUnsavedSessionItems_(teacherId, startYmd, endYmd);
+
+  const result = {
+    ok: true,
+    items: items,
+    checkedRange: {
+      start: startYmd,
+      end: endYmd
+    }
+  };
+
+  putScriptCacheJson_(cacheKey, result, 60);
+  return result;
+}
+
+function getTeacherUnsavedCount_(teacherId, startYmd, endYmd) {
+  if (!teacherId || !startYmd || !endYmd || endYmd < startYmd) {
+    return 0;
+  }
+
+  const context = getTeacherUnsavedContext_(teacherId);
+  const byDateMap = getClassSessionsByDateIndexCached_();
+  const savedKeySet = getSavedSessionKeySetByRangeCached_(startYmd, endYmd);
+  const dateKeys = Object.keys(byDateMap).sort();
+
+  let count = 0;
+
+  dateKeys.forEach(function(ymd) {
+    if (ymd < startYmd || ymd > endYmd) return;
+
+    const daySessions = byDateMap[ymd] || [];
+    daySessions.forEach(function(session) {
+      const classId = normalizeString_(session.classId);
+      const period = normalizeString_(session.period);
+      const weekday = normalizeWeekday_(session.weekday);
+      const teacherKey = [classId, weekday, period].join('__');
+
+      if (!context.teacherSessionKeyMap[teacherKey]) return;
+
+      const saveKey = [classId, ymd, period].join('__');
+      if (savedKeySet[saveKey]) return;
+
+      count += 1;
+    });
+  });
+
+  return count;
+}
+
+function getTeacherUnsavedSessionItems_(teacherId, startYmd, endYmd) {
+  if (!teacherId || !startYmd || !endYmd || endYmd < startYmd) {
+    return [];
+  }
+
+  const context = getTeacherUnsavedContext_(teacherId);
+  const byDateMap = getClassSessionsByDateIndexCached_();
+  const savedKeySet = getSavedSessionKeySetByRangeCached_(startYmd, endYmd);
+  const dateKeys = Object.keys(byDateMap).sort();
+  const result = [];
+
+dateKeys.forEach(function(ymd) {
+  if (ymd < startYmd || ymd > endYmd) return;
+
+  const daySessions = byDateMap[ymd] || [];
+
+    daySessions.forEach(function(session) {
+      const classId = normalizeString_(session.classId);
+      const period = normalizeString_(session.period);
+      const weekday = normalizeWeekday_(session.weekday);
+      const teacherKey = [classId, weekday, period].join('__');
+
+      if (!context.teacherSessionKeyMap[teacherKey]) return;
+
+      const saveKey = [classId, ymd, period].join('__');
+      if (savedKeySet[saveKey]) return;
+
+      const cls = context.classMap[classId] || {};
+      const isExperiment = isTeacherUnsavedExperimentClass_(classId);
+
+      let targetLabel = '';
+      if (isExperiment) {
+        targetLabel = '班選択して記録';
+      } else {
+        const gradeText = cls.grade ? String(cls.grade) + '年' : '';
+        const unitText = cls.unit ? String(cls.unit) + '組' : '';
+        targetLabel = (gradeText + ' ' + unitText).trim();
+      }
+
+      result.push({
+        classId: classId,
+        date: ymd,
+        period: period,
+        sessionNumber: session.sessionNumber || '',
+        subjectName: cls.subjectName || '',
+        targetLabel: targetLabel
+      });
+    });
+  });
+
+  result.sort(function(a, b) {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    return Number(a.period) - Number(b.period);
+  });
+
+  return result;
+}
+
+function getTeacherUnsavedContext_(teacherId) {
+  const cacheKey = buildTeacherUnsavedContextCacheKey_(teacherId);
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 300);
+  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
+  const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
+
+  const timetable = timetableData.rows;
+  const classes = classesData.rows;
+  const teamRows = teamData.rows;
+
+  const timetableHeaders = timetableData.headers;
+  const ttCol = {
+    classId: findColumnIndex_(timetableHeaders, ['classId', 'ClassID']),
+    weekday: findColumnIndex_(timetableHeaders, ['weekday', '曜日']),
+    period: findColumnIndex_(timetableHeaders, ['period', '時限']),
+    teacherName: findColumnIndex_(timetableHeaders, ['teacherName', '担当者名', 'name']),
+    teacherId: findColumnIndex_(timetableHeaders, ['teacherId', 'TeacherID'])
+  };
+  validateRequiredColumnsForTimetable_('timetable', ttCol, ['classId', 'weekday', 'period']);
+
+  const teamHeaders = teamData.headers;
+  const teamCol = {
+    classId: findColumnIndex_(teamHeaders, ['classId', 'ClassID']),
+    weekday: findColumnIndex_(teamHeaders, ['weekday', '曜日']),
+    period: findColumnIndex_(teamHeaders, ['period', '時限']),
+    teacherName: findColumnIndex_(teamHeaders, ['teacherName', '担当者名', 'name']),
+    teacherId: findColumnIndex_(teamHeaders, ['teacherId', 'TeacherID']),
+    roleType: findColumnIndex_(teamHeaders, ['roleType', '役割'])
+  };
+
+  const timetableMap = {};
+
+  timetable.forEach(function(row) {
+    const classId = normalizeString_(row[ttCol.classId]);
+    const period = normalizeString_(row[ttCol.period]);
+    const weekday = ttCol.weekday !== -1 ? normalizeWeekday_(row[ttCol.weekday]) : '';
+    const teacherName = ttCol.teacherName !== -1 ? normalizeString_(row[ttCol.teacherName]) : '';
+    let teacherIdInRow = ttCol.teacherId !== -1 ? normalizeString_(row[ttCol.teacherId]) : '';
+
+    if (!teacherIdInRow && teacherName) {
+      const teacher = getTeacherRecordByName_(teacherName);
+      teacherIdInRow = teacher ? teacher.teacherId : '';
+    }
+
+    if (!classId || !period || !weekday) return;
+
+    const key = classId + '__' + weekday + '__' + period;
+    timetableMap[key] = {
+      classId: classId,
+      weekday: weekday,
+      period: period,
+      teacherId: teacherIdInRow,
+      teacherName: teacherName,
+      teacherIds: teacherIdInRow ? [teacherIdInRow] : []
+    };
+  });
+
+  teamRows.forEach(function(row) {
+    const classId = teamCol.classId !== -1 ? normalizeString_(row[teamCol.classId]) : '';
+    const period = teamCol.period !== -1 ? normalizeString_(row[teamCol.period]) : '';
+    const weekday = teamCol.weekday !== -1 ? normalizeWeekday_(row[teamCol.weekday]) : '';
+    const teacherName = teamCol.teacherName !== -1 ? normalizeString_(row[teamCol.teacherName]) : '';
+    let teacherIdInRow = teamCol.teacherId !== -1 ? normalizeString_(row[teamCol.teacherId]) : '';
+
+    if (!teacherIdInRow && teacherName) {
+      const teacher = getTeacherRecordByName_(teacherName);
+      teacherIdInRow = teacher ? teacher.teacherId : '';
+    }
+
+    if (!classId || !period || !weekday || !teacherIdInRow) return;
+
+    const key = classId + '__' + weekday + '__' + period;
+    if (!timetableMap[key]) {
+      timetableMap[key] = {
+        classId: classId,
+        weekday: weekday,
+        period: period,
+        teacherId: '',
+        teacherName: '',
+        teacherIds: []
+      };
+    }
+
+    if (!timetableMap[key].teacherIds.includes(teacherIdInRow)) {
+      timetableMap[key].teacherIds.push(teacherIdInRow);
+    }
+  });
+
+  const teacherSessionKeyMap = {};
+  Object.keys(timetableMap).forEach(function(key) {
+    const tt = timetableMap[key];
+    if (tt && Array.isArray(tt.teacherIds) && tt.teacherIds.includes(teacherId)) {
+      teacherSessionKeyMap[key] = true;
+    }
+  });
+
+  const classHeaders = classesData.headers;
+  const clsCol = {
+    classId: findColumnIndex_(classHeaders, ['classId', 'ClassID']),
+    subjectName: findColumnIndex_(classHeaders, ['subjectName', '科目名']),
+    grade: findColumnIndex_(classHeaders, ['grade', '学年']),
+    unit: findColumnIndex_(classHeaders, ['unit', '対象区分', '組・コース'])
+  };
+  validateRequiredColumnsForTimetable_('classes', clsCol, ['classId', 'subjectName']);
+
+  const classMap = {};
+  classes.forEach(function(row) {
+    const classId = normalizeString_(row[clsCol.classId]);
+    if (!classId) return;
+
+    classMap[classId] = {
+      classId: classId,
+      subjectName: clsCol.subjectName !== -1 ? normalizeString_(row[clsCol.subjectName]) : '',
+      grade: clsCol.grade !== -1 ? normalizeString_(row[clsCol.grade]) : '',
+      unit: clsCol.unit !== -1 ? normalizeString_(row[clsCol.unit]) : ''
+    };
+  });
+
+  const result = {
+    timetableMap: timetableMap,
+    teacherSessionKeyMap: teacherSessionKeyMap,
+    classMap: classMap
+  };
+
+  putScriptCacheJson_(cacheKey, result, 300);
+  return result;
+}
+
+function buildTeacherUnsavedSummaryCacheKey_(teacherId, endYmd) {
+  return 'teacherUnsavedSummary__' + String(teacherId || '') + '__' + String(endYmd || '');
+}
+
+function buildTeacherUnsavedDetailsCacheKey_(teacherId, endYmd) {
+  return 'teacherUnsavedDetails__' + String(teacherId || '') + '__' + String(endYmd || '');
+}
+
+function buildTeacherUnsavedContextCacheKey_(teacherId) {
+  return 'teacherUnsavedContext__' + String(teacherId || '');
+}
+
+function getTeacherUnsavedStartDate_(baseDate) {
+  const d = new Date(baseDate);
+  d.setHours(0, 0, 0, 0);
+
+  const schoolYear = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  const start = new Date(schoolYear, 3, 7);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function isTeacherUnsavedExperimentClass_(classId) {
+  const value = String(classId || '').trim();
+  return (
+    value.indexOf('工学実験実習1') !== -1 ||
+    value.indexOf('工学実験実習2') !== -1
+  );
 }
 
 function testGetTodayClassesForCurrentUser() {

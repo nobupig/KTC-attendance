@@ -446,6 +446,155 @@
       border-color: #2f6feb;
       color: #fff;
     }
+
+        .teacher-unsaved-summary-box {
+      margin-bottom: 12px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid #d9e0ee;
+      background: #fff;
+    }
+
+    .teacher-unsaved-summary-box.loading {
+      background: #f7f9fc;
+      color: #667;
+    }
+
+    .teacher-unsaved-summary-box.ok {
+      background: #eef4ff;
+      color: #1f4fa3;
+      border-color: #d6e4ff;
+    }
+
+    .teacher-unsaved-summary-box.warn {
+      background: #fff4db;
+      color: #8a5a00;
+      border-color: #f0d59c;
+    }
+
+    .teacher-unsaved-summary-box.error {
+      background: #fdecec;
+      color: #a12622;
+      border-color: #efc2c2;
+    }
+
+    .teacher-unsaved-summary-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .teacher-unsaved-summary-texts {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .teacher-unsaved-summary-title {
+      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .teacher-unsaved-summary-sub {
+      font-size: 12px;
+      line-height: 1.6;
+      opacity: 0.95;
+    }
+
+    .teacher-unsaved-toggle-btn {
+      appearance: none;
+      border: 1px solid #ccd5e3;
+      background: #fff;
+      color: #334;
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .teacher-unsaved-details-box {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .teacher-unsaved-details-content {
+      display: grid;
+      gap: 8px;
+    }
+
+    .teacher-unsaved-detail-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .teacher-unsaved-detail-date {
+      font-size: 14px;
+      font-weight: bold;
+      color: #223;
+      margin-bottom: 3px;
+    }
+
+    .teacher-unsaved-detail-main {
+      font-size: 13px;
+      color: #334;
+    }
+
+    .teacher-unsaved-detail-sub {
+      font-size: 12px;
+      color: #667;
+      margin-top: 2px;
+    }
+
+    .teacher-unsaved-open-btn {
+      appearance: none;
+      border: none;
+      background: #2f6feb;
+      color: #fff;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .teacher-unsaved-empty-note {
+      font-size: 13px;
+      color: #667;
+      padding: 4px 0;
+    }
+
+    @media (max-width: 720px) {
+      .teacher-unsaved-summary-head {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .teacher-unsaved-toggle-btn,
+      .teacher-unsaved-open-btn {
+        align-self: flex-start;
+      }
+
+      .teacher-unsaved-detail-item {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+
+    .panel > .teacher-unsaved-summary-box:first-child {
+  margin-bottom: 14px;
+}
+
   </style>
 </head>
 <body>
@@ -458,6 +607,23 @@
   <div class="layout">
     <div class="panel">
       <h2>担当授業</h2>
+
+            <div id="teacherUnsavedSummaryBox" class="teacher-unsaved-summary-box loading">
+        <div class="teacher-unsaved-summary-head">
+          <div class="teacher-unsaved-summary-texts">
+            <div id="teacherUnsavedSummaryTitle" class="teacher-unsaved-summary-title">未保存の授業を確認中...</div>
+            <div id="teacherUnsavedSummarySub" class="teacher-unsaved-summary-sub">4月7日以降の未保存授業を確認しています。</div>
+          </div>
+          <button id="teacherUnsavedToggleBtn" class="teacher-unsaved-toggle-btn" type="button" hidden>
+            <span id="teacherUnsavedToggleLabel">詳細を見る</span>
+            <span id="teacherUnsavedToggleIcon">▼</span>
+          </button>
+        </div>
+
+        <div id="teacherUnsavedDetailsBox" class="teacher-unsaved-details-box" hidden>
+          <div id="teacherUnsavedDetailsContent" class="teacher-unsaved-details-content"></div>
+        </div>
+      </div>
 
       <div class="mode-tabs">
         <button id="modeTodayBtn" type="button" class="mode-tab active">本日の授業</button>
@@ -472,8 +638,8 @@
         <div class="search-note">最後に検索した日付を保持します。</div>
       </div>
       <div id="quickClassNav" class="quick-nav" style="display:none;"></div>
-
-      <div id="classListArea" class="class-list">
+            
+     <div id="classListArea" class="class-list">
         <div class="empty-box">授業情報を読み込み中...</div>
       </div>
     </div>
@@ -554,6 +720,14 @@
     let detailRequestToken = 0;
     let groupListRequestToken = 0;
     let riskRequestToken = 0;
+
+    let teacherUnsavedSummaryRequestKey = "";
+    let teacherUnsavedDetailsRequestKey = "";
+    let teacherUnsavedDetailsLoadedKey = "";
+    let teacherUnsavedDetailsOpen = false;
+    let pendingUnsavedTeacherSession = null;
+    let teacherUnsavedSummaryData = null;
+    let teacherUnsavedDetailsData = null;
 
     function debugLog(label, value) {
       try {
@@ -722,6 +896,303 @@
       renderPageSubText();
     }
 
+        function closeTeacherUnsavedDetails() {
+      teacherUnsavedDetailsOpen = false;
+
+      const detailsBox = document.getElementById("teacherUnsavedDetailsBox");
+      const toggleLabel = document.getElementById("teacherUnsavedToggleLabel");
+      const toggleIcon = document.getElementById("teacherUnsavedToggleIcon");
+
+      if (detailsBox) detailsBox.hidden = true;
+      if (toggleLabel) toggleLabel.textContent = "詳細を見る";
+      if (toggleIcon) toggleIcon.textContent = "▼";
+    }
+
+    function openTeacherUnsavedDetails() {
+      teacherUnsavedDetailsOpen = true;
+
+      const detailsBox = document.getElementById("teacherUnsavedDetailsBox");
+      const toggleLabel = document.getElementById("teacherUnsavedToggleLabel");
+      const toggleIcon = document.getElementById("teacherUnsavedToggleIcon");
+
+      if (detailsBox) detailsBox.hidden = false;
+      if (toggleLabel) toggleLabel.textContent = "詳細を閉じる";
+      if (toggleIcon) toggleIcon.textContent = "▲";
+    }
+
+    function renderTeacherUnsavedSummaryLoading() {
+      const box = document.getElementById("teacherUnsavedSummaryBox");
+      const title = document.getElementById("teacherUnsavedSummaryTitle");
+      const sub = document.getElementById("teacherUnsavedSummarySub");
+      const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
+      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+
+      if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
+
+      box.className = "teacher-unsaved-summary-box loading";
+      title.textContent = "未保存の授業を確認中...";
+      sub.textContent = "4月7日以降の未保存授業を確認しています。";
+      toggleBtn.hidden = true;
+      detailsContent.innerHTML = "";
+      closeTeacherUnsavedDetails();
+      teacherUnsavedDetailsLoadedKey = "";
+    }
+
+    function renderTeacherUnsavedSummaryError() {
+      const box = document.getElementById("teacherUnsavedSummaryBox");
+      const title = document.getElementById("teacherUnsavedSummaryTitle");
+      const sub = document.getElementById("teacherUnsavedSummarySub");
+      const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
+      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+
+      if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
+
+      box.className = "teacher-unsaved-summary-box error";
+      title.textContent = "未保存状況を取得できませんでした";
+      sub.textContent = "授業一覧や出席入力自体はそのまま使えます。";
+      toggleBtn.hidden = true;
+      detailsContent.innerHTML = "";
+      closeTeacherUnsavedDetails();
+      teacherUnsavedDetailsLoadedKey = "";
+    }
+
+    function renderTeacherUnsavedSummary(data) {
+      const box = document.getElementById("teacherUnsavedSummaryBox");
+      const title = document.getElementById("teacherUnsavedSummaryTitle");
+      const sub = document.getElementById("teacherUnsavedSummarySub");
+      const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
+      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+
+      if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
+
+      const count = data && typeof data.count === "number" ? data.count : 0;
+      const rangeText = data && data.checkedRange
+        ? (data.checkedRange.start + " ～ " + data.checkedRange.end)
+        : "4月7日以降";
+
+      if (count > 0) {
+        box.className = "teacher-unsaved-summary-box warn";
+        title.textContent = "未保存の授業が " + count + " 件あります";
+        sub.textContent = "対象期間: " + rangeText;
+        toggleBtn.hidden = false;
+        return;
+      }
+
+      box.className = "teacher-unsaved-summary-box ok";
+      title.textContent = "未保存の授業はありません";
+      sub.textContent = "対象期間: " + rangeText;
+      toggleBtn.hidden = true;
+      detailsContent.innerHTML = "";
+      closeTeacherUnsavedDetails();
+      teacherUnsavedDetailsLoadedKey = "";
+    }
+
+    function renderTeacherUnsavedDetailsLoading() {
+      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+      if (!detailsContent) return;
+      detailsContent.innerHTML = '<div class="teacher-unsaved-empty-note">未保存授業一覧を読み込んでいます...</div>';
+    }
+
+    function renderTeacherUnsavedDetailsError() {
+      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+      if (!detailsContent) return;
+      detailsContent.innerHTML = '<div class="teacher-unsaved-empty-note">未保存授業一覧の取得に失敗しました。</div>';
+    }
+
+    function renderTeacherUnsavedDetails(data) {
+      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+      if (!detailsContent) return;
+
+      const items = Array.isArray(data && data.items) ? data.items : [];
+
+      if (!items.length) {
+        detailsContent.innerHTML = '<div class="teacher-unsaved-empty-note">未保存授業はありません。</div>';
+        return;
+      }
+
+      detailsContent.innerHTML = items.map(function(item) {
+        const dateText = escapeHtml(formatDateJa(item.date || ""));
+        const subjectText = escapeHtml(item.subjectName || "");
+        const periodText = escapeHtml(String(item.period || ""));
+        const targetText = escapeHtml(item.targetLabel || "");
+        const sessionText = item.sessionNumber ? ('第' + escapeHtml(String(item.sessionNumber)) + '回') : '';
+
+        let subText = '';
+        if (targetText && sessionText) {
+          subText = targetText + ' / ' + sessionText;
+        } else if (targetText) {
+          subText = targetText;
+        } else if (sessionText) {
+          subText = sessionText;
+        }
+
+        return '' +
+          '<div class="teacher-unsaved-detail-item">' +
+            '<div>' +
+              '<div class="teacher-unsaved-detail-date">' + dateText + ' / ' + periodText + '限</div>' +
+              '<div class="teacher-unsaved-detail-main">' + subjectText + '</div>' +
+              '<div class="teacher-unsaved-detail-sub">' + subText + '</div>' +
+            '</div>' +
+            '<button class="teacher-unsaved-open-btn" type="button" data-date="' + escapeHtml(item.date || "") + '" data-class-id="' + escapeHtml(item.classId || "") + '" data-period="' + escapeHtml(String(item.period || "")) + '">この授業を開く</button>' +
+          '</div>';
+      }).join("");
+
+      detailsContent.querySelectorAll(".teacher-unsaved-open-btn").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+          openTeacherUnsavedSession(
+            btn.dataset.date || "",
+            btn.dataset.classId || "",
+            btn.dataset.period || ""
+          );
+        });
+      });
+    }
+
+    function loadTeacherUnsavedSummary() {
+      const requestKey = String(Date.now());
+      teacherUnsavedSummaryRequestKey = requestKey;
+      teacherUnsavedDetailsLoadedKey = "";
+      renderTeacherUnsavedSummaryLoading();
+
+      google.script.run
+       .withSuccessHandler(function(data) {
+        if (teacherUnsavedSummaryRequestKey !== requestKey) return;
+        teacherUnsavedSummaryData = data || { ok: true, count: 0, checkedRange: null };
+        renderTeacherUnsavedSummary(teacherUnsavedSummaryData);
+      })
+        .withFailureHandler(function(error) {
+          console.error(error);
+          if (teacherUnsavedSummaryRequestKey !== requestKey) return;
+          renderTeacherUnsavedSummaryError();
+        })
+        .getTeacherUnsavedSummary();
+    }
+
+    function loadTeacherUnsavedDetails(forceReload) {
+      const loadedKey = "teacher";
+
+      if (!forceReload && teacherUnsavedDetailsLoadedKey === loadedKey) {
+        return;
+      }
+
+      const requestKey = String(Date.now());
+      teacherUnsavedDetailsRequestKey = requestKey;
+      renderTeacherUnsavedDetailsLoading();
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          if (teacherUnsavedDetailsRequestKey !== requestKey) return;
+          teacherUnsavedDetailsLoadedKey = loadedKey;
+          teacherUnsavedDetailsData = data || { ok: true, items: [], checkedRange: null };
+          renderTeacherUnsavedDetails(teacherUnsavedDetailsData);
+        })
+          
+        .withFailureHandler(function(error) {
+          console.error(error);
+          if (teacherUnsavedDetailsRequestKey !== requestKey) return;
+          renderTeacherUnsavedDetailsError();
+        })
+        .getTeacherUnsavedDetails();
+    }
+
+    function getTeacherUnsavedStartYmdLocal() {
+  const today = new Date();
+  const schoolYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
+  return schoolYear + "-04-07";
+}
+
+function isTeacherUnsavedTargetDate(dateStr) {
+  const ymd = String(dateStr || "");
+  if (!ymd) return false;
+
+  const startYmd =
+    teacherUnsavedSummaryData &&
+    teacherUnsavedSummaryData.checkedRange &&
+    teacherUnsavedSummaryData.checkedRange.start
+      ? String(teacherUnsavedSummaryData.checkedRange.start)
+      : getTeacherUnsavedStartYmdLocal();
+
+  const todayYmd = getTodayDateKeyJst();
+  return ymd >= startYmd && ymd < todayYmd;
+}
+
+function patchTeacherUnsavedLocalAfterSave(classId, dateStr, period, forceDecrement) {
+  const targetClassId = String(classId || "");
+  const targetDate = String(dateStr || "");
+  const targetPeriod = String(period || "");
+
+  let removed = false;
+
+  if (teacherUnsavedDetailsData && Array.isArray(teacherUnsavedDetailsData.items)) {
+    const before = teacherUnsavedDetailsData.items.length;
+
+    teacherUnsavedDetailsData.items = teacherUnsavedDetailsData.items.filter(function(item) {
+      return !(
+        String(item.classId || "") === targetClassId &&
+        String(item.date || "") === targetDate &&
+        String(item.period || "") === targetPeriod
+      );
+    });
+
+    removed = teacherUnsavedDetailsData.items.length !== before;
+
+    if (teacherUnsavedDetailsOpen) {
+      renderTeacherUnsavedDetails(teacherUnsavedDetailsData);
+    }
+  }
+
+  if (
+    teacherUnsavedSummaryData &&
+    typeof teacherUnsavedSummaryData.count === "number" &&
+    (removed || forceDecrement)
+  ) {
+    teacherUnsavedSummaryData.count = Math.max(0, teacherUnsavedSummaryData.count - 1);
+    renderTeacherUnsavedSummary(teacherUnsavedSummaryData);
+  }
+}
+
+    function toggleTeacherUnsavedDetails() {
+      const detailsBox = document.getElementById("teacherUnsavedDetailsBox");
+      const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
+
+      if (!detailsBox || !toggleBtn || toggleBtn.hidden) return;
+
+      if (teacherUnsavedDetailsOpen) {
+        closeTeacherUnsavedDetails();
+        return;
+      }
+
+      openTeacherUnsavedDetails();
+      loadTeacherUnsavedDetails(false);
+    }
+
+    function openTeacherUnsavedSession(dateStr, classId, period) {
+      if (!dateStr || !classId || !period) return;
+
+      if (isDirty) {
+        const ok = window.confirm("保存されていない変更があります。授業を切り替えますか？");
+        if (!ok) return;
+      }
+
+      pendingUnsavedTeacherSession = {
+        date: String(dateStr || ""),
+        classId: String(classId || ""),
+        period: String(period || "")
+      };
+
+      currentMode = "past";
+      updateModeUI();
+      clearMessage();
+
+      const pastDateInput = document.getElementById("pastDateInput");
+      if (pastDateInput) {
+        pastDateInput.value = dateStr;
+      }
+
+      savePastSearchDate(dateStr);
+      loadPastClassesByDate(dateStr);
+    }
+
     function getRiskBadgeHtml(risk) {
       const level = String((risk && risk.riskLevel) || "normal");
       const label = String((risk && risk.riskLabel) || "正常");
@@ -749,23 +1220,37 @@
       return "risk-row-normal";
     }
 
-    function getSortedStudents() {
-  return (studentsCache || []).slice().sort(function(a, b) {
-    const unitA = String(a.unit || '');
-    const unitB = String(b.unit || '');
+function getSortedStudents() {
+  const unitOrderMap = {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "M": 11,
+    "E": 12,
+    "I": 13,
+    "C": 14,
+    "A": 15
+  };
 
-    const unitNumA = parseInt(unitA.replace(/[^\d]/g, ''), 10);
-    const unitNumB = parseInt(unitB.replace(/[^\d]/g, ''), 10);
-
-    const hasUnitNumA = !Number.isNaN(unitNumA);
-    const hasUnitNumB = !Number.isNaN(unitNumB);
-
-    if (hasUnitNumA && hasUnitNumB && unitNumA !== unitNumB) {
-      return unitNumA - unitNumB;
+  function getUnitSortWeight(unit) {
+    const normalized = String(unit || "").trim().toUpperCase();
+    if (Object.prototype.hasOwnProperty.call(unitOrderMap, normalized)) {
+      return unitOrderMap[normalized];
     }
+    return 999;
+  }
 
-    if (unitA !== unitB) {
-      return unitA.localeCompare(unitB, 'ja');
+  return (studentsCache || []).slice().sort(function(a, b) {
+    const unitA = String(a.unit || "").trim().toUpperCase();
+    const unitB = String(b.unit || "").trim().toUpperCase();
+
+    const weightA = getUnitSortWeight(unitA);
+    const weightB = getUnitSortWeight(unitB);
+
+    if (weightA !== weightB) {
+      return weightA - weightB;
     }
 
     const attA = Number(a.attendanceNumber);
@@ -778,9 +1263,10 @@
       return attA - attB;
     }
 
-    return String(a.attendanceNumber).localeCompare(String(b.attendanceNumber), 'ja');
+    return String(a.attendanceNumber).localeCompare(String(b.attendanceNumber), "ja");
   });
 }
+
     function renderSortNote() {
     const el = document.getElementById("sortNote");
     if (!studentsCache || studentsCache.length === 0) {
@@ -1626,6 +2112,12 @@ function renderSelectedClassInfo() {
         ? savingClass.classId + "__" + savingGroup
         : savingClass.classId;
 
+      const wasSavedBefore = !!(
+      savingClass.isSaved ||
+      savedSessionKeys[displaySessionKey] ||
+      savedSessionKeys[sessionKey]
+      );
+
       isSaving = true;
       markDirty(isDirty);
       showMessage("保存中です...", "warn");
@@ -1646,12 +2138,26 @@ function renderSelectedClassInfo() {
           savedSessionKeys[displaySessionKey] = true;
           savedSessionKeys[sessionKey] = true;
 
-          renderClassList();
-          renderLastSavedInfoBar(savingClass.lastSavedInfo);
-          markDirty(false);
-          setSaveStateText(savingMode === "past" ? "過去授業の修正を保存しました" : "保存しました");
-          showMessage(savingMode === "past" ? "過去授業の修正を保存しました" : "保存しました", "success");
-          console.log(result);
+            renderClassList();
+            renderLastSavedInfoBar(savingClass.lastSavedInfo);
+            markDirty(false);
+            setSaveStateText(savingMode === "past" ? "過去授業の修正を保存しました" : "保存しました");
+            showMessage(savingMode === "past" ? "過去授業の修正を保存しました" : "保存しました", "success");
+
+            const shouldPatchUnsaved =
+              !wasSavedBefore &&
+              isTeacherUnsavedTargetDate(savingClass.date);
+
+            if (shouldPatchUnsaved) {
+              patchTeacherUnsavedLocalAfterSave(
+                savingClass.classId,
+                savingClass.date,
+                savingClass.period,
+                true
+              );
+            }
+
+            console.log(result);
         })
         .withFailureHandler(function(error) {
           isSaving = false;
@@ -1861,6 +2367,26 @@ function isExperimentSubject(cls) {
           }
 
           renderClassList();
+
+          if (
+            pendingUnsavedTeacherSession &&
+            String(pendingUnsavedTeacherSession.date || "") === String(targetDate || "")
+          ) {
+            const matched = classesCache.find(function(cls) {
+              return (
+                String(cls.classId || "") === String(pendingUnsavedTeacherSession.classId || "") &&
+                String(cls.period || "") === String(pendingUnsavedTeacherSession.period || "")
+              );
+            });
+
+            pendingUnsavedTeacherSession = null;
+
+            if (matched) {
+              selectClass(matched);
+              return;
+            }
+          }
+
           selectClass(classesCache[0]);
         })
         .withFailureHandler(function(error) {
@@ -1878,117 +2404,124 @@ function isExperimentSubject(cls) {
         .getClassesForCurrentUserByDate(targetDate);
     }
 
-    function initButtons() {
-      const resetBtn = document.getElementById("resetPresentButton");
-      const saveTopBtn = document.getElementById("saveButtonTop");
-      const saveBottomBtn = document.getElementById("saveButtonBottom");
-      const modeTodayBtn = document.getElementById("modeTodayBtn");
-      const modePastBtn = document.getElementById("modePastBtn");
-      const searchPastButton = document.getElementById("searchPastButton");
-      const pastDateInput = document.getElementById("pastDateInput");
+  function initButtons() {
+  const resetBtn = document.getElementById("resetPresentButton");
+  const saveTopBtn = document.getElementById("saveButtonTop");
+  const saveBottomBtn = document.getElementById("saveButtonBottom");
+  const modeTodayBtn = document.getElementById("modeTodayBtn");
+  const modePastBtn = document.getElementById("modePastBtn");
+  const searchPastButton = document.getElementById("searchPastButton");
+  const pastDateInput = document.getElementById("pastDateInput");
+  const teacherUnsavedToggleBtn = document.getElementById("teacherUnsavedToggleBtn");
 
-      if (resetBtn) {
-        resetBtn.addEventListener("click", function() {
-          if (!studentsCache || studentsCache.length === 0) return;
+  if (resetBtn) {
+    resetBtn.addEventListener("click", function() {
+      if (!studentsCache || studentsCache.length === 0) return;
 
-          studentsCache.forEach(function(student) {
-            attendanceState[student.studentId] = "";
-          });
+      studentsCache.forEach(function(student) {
+        attendanceState[student.studentId] = "";
+      });
 
-          renderStudents();
-          renderSummary();
-          clearMessage();
-          markDirty(true);
-        });
+      renderStudents();
+      renderSummary();
+      clearMessage();
+      markDirty(true);
+    });
+  }
+
+  if (saveTopBtn) saveTopBtn.addEventListener("click", handleSaveClick);
+  if (saveBottomBtn) saveBottomBtn.addEventListener("click", handleSaveClick);
+
+  if (modeTodayBtn) {
+    modeTodayBtn.addEventListener("click", function() {
+      if (isDirty) {
+        const ok = window.confirm("保存されていない変更があります。切り替えますか？");
+        if (!ok) return;
       }
+      currentMode = "today";
+      updateModeUI();
+      clearMessage();
+      
+      loadTodayClasses();
+    });
+  }
 
-      if (saveTopBtn) saveTopBtn.addEventListener("click", handleSaveClick);
-      if (saveBottomBtn) saveBottomBtn.addEventListener("click", handleSaveClick);
-
-      if (modeTodayBtn) {
-        modeTodayBtn.addEventListener("click", function() {
-          if (isDirty) {
-            const ok = window.confirm("保存されていない変更があります。切り替えますか？");
-            if (!ok) return;
-          }
-          currentMode = "today";
-          updateModeUI();
-          clearMessage();
-          loadTodayClasses();
-        });
+  if (modePastBtn) {
+    modePastBtn.addEventListener("click", function() {
+      if (isDirty) {
+        const ok = window.confirm("保存されていない変更があります。切り替えますか？");
+        if (!ok) return;
       }
+      currentMode = "past";
+      updateModeUI();
+      clearMessage();
+      
 
-      if (modePastBtn) {
-        modePastBtn.addEventListener("click", function() {
-          if (isDirty) {
-            const ok = window.confirm("保存されていない変更があります。切り替えますか？");
-            if (!ok) return;
-          }
-          currentMode = "past";
-          updateModeUI();
-          clearMessage();
-
-          const savedDate = loadPastSearchDate();
-          if (pastDateInput) {
-            if (savedDate) {
-              pastDateInput.value = savedDate;
-            } else {
-              const today = new Date();
-              const yyyy = today.getFullYear();
-              const mm = String(today.getMonth() + 1).padStart(2, "0");
-              const dd = String(today.getDate()).padStart(2, "0");
-              pastDateInput.value = yyyy + "-" + mm + "-" + dd;
-            }
-          }
-
-          document.getElementById("quickClassNav").style.display = "none";
-          document.getElementById("classListArea").innerHTML = '<div class="empty-box">日付を選択して検索してください。</div>';
-          document.getElementById("selectedClassInfo").innerHTML = "過去授業を検索してください。";
-          document.getElementById("studentArea").innerHTML = '<div class="empty-box">修正対象授業を選択すると学生一覧を表示します。</div>';
-          document.getElementById("summaryArea").innerHTML = "";
-          document.getElementById("sortNote").textContent = "";
-          setSaveStateText("");
-          setTopActionButtonsDisabled(true);
-        });
-      }
-
-      if (searchPastButton) {
-        searchPastButton.addEventListener("click", function() {
-          const value = pastDateInput ? pastDateInput.value : "";
-          if (!value) {
-            showMessage("検索日を選択してください", "warn");
-            return;
-          }
-          savePastSearchDate(value);
-          clearMessage();
-          loadPastClassesByDate(value);
-        });
-      }
-
+      const savedDate = loadPastSearchDate();
       if (pastDateInput) {
-        pastDateInput.addEventListener("change", function() {
-          savePastSearchDate(pastDateInput.value || "");
-        });
+        if (savedDate) {
+          pastDateInput.value = savedDate;
+        } else {
+          const today = new Date();
+          const yyyy = today.getFullYear();
+          const mm = String(today.getMonth() + 1).padStart(2, "0");
+          const dd = String(today.getDate()).padStart(2, "0");
+          pastDateInput.value = yyyy + "-" + mm + "-" + dd;
+        }
       }
 
-      const groupSelect = document.getElementById("groupSelect");
-      if (groupSelect) {
-        groupSelect.addEventListener("change", function() {
-          if (!selectedClass) return;
+      document.getElementById("quickClassNav").style.display = "none";
+      document.getElementById("classListArea").innerHTML = '<div class="empty-box">日付を選択して検索してください。</div>';
+      document.getElementById("selectedClassInfo").innerHTML = "過去授業を検索してください。";
+      document.getElementById("studentArea").innerHTML = '<div class="empty-box">修正対象授業を選択すると学生一覧を表示します。</div>';
+      document.getElementById("summaryArea").innerHTML = "";
+      document.getElementById("sortNote").textContent = "";
+      setSaveStateText("");
+      setTopActionButtonsDisabled(true);
+    });
+  }
 
-          const nextGroup = groupSelect.value || "";
+  if (searchPastButton) {
+    searchPastButton.addEventListener("click", function() {
+      const value = pastDateInput ? pastDateInput.value : "";
+      if (!value) {
+        showMessage("検索日を選択してください", "warn");
+        return;
+      }
+      savePastSearchDate(value);
+      clearMessage();
+      loadPastClassesByDate(value);
+    });
+  }
 
-          if (isDirty) {
-            const ok = window.confirm("保存されていない変更があります。班を切り替えますか？");
-            if (!ok) {
-              groupSelect.value = selectedGroupByClassCache[selectedClass.classId] || "";
-              return;
-            }
-          }
+  if (pastDateInput) {
+    pastDateInput.addEventListener("change", function() {
+      savePastSearchDate(pastDateInput.value || "");
+    });
+  }
 
-          selectedGroupByClassCache[selectedClass.classId] = nextGroup;
+  if (teacherUnsavedToggleBtn) {
+    teacherUnsavedToggleBtn.addEventListener("click", toggleTeacherUnsavedDetails);
+  }
 
-       if (!nextGroup) {
+  const groupSelect = document.getElementById("groupSelect");
+  if (groupSelect) {
+    groupSelect.addEventListener("change", function() {
+      if (!selectedClass) return;
+
+      const nextGroup = groupSelect.value || "";
+
+      if (isDirty) {
+        const ok = window.confirm("保存されていない変更があります。班を切り替えますか？");
+        if (!ok) {
+          groupSelect.value = selectedGroupByClassCache[selectedClass.classId] || "";
+          return;
+        }
+      }
+
+      selectedGroupByClassCache[selectedClass.classId] = nextGroup;
+
+      if (!nextGroup) {
         studentsCache = [];
         attendanceState = {};
         riskMapState = {};
@@ -2006,10 +2539,10 @@ function isExperimentSubject(cls) {
         return;
       }
 
-          loadClassDetailWithGroup(selectedClass, nextGroup);
-        });
-      }
-    }
+      loadClassDetailWithGroup(selectedClass, nextGroup);
+    });
+  }
+}
 
     function chooseInitialClass(classes) {
       if (!classes || classes.length === 0) return null;
@@ -2050,6 +2583,7 @@ function isExperimentSubject(cls) {
         }
 
         savePastSearchDate(linkedDate);
+        loadTeacherUnsavedSummary();
         loadPastClassesByDate(linkedDate);
         return;
       }
@@ -2057,6 +2591,7 @@ function isExperimentSubject(cls) {
       currentMode = "today";
       updateModeUI();
       renderPageSubText();
+      loadTeacherUnsavedSummary();
       loadTodayClasses();
     }
 
