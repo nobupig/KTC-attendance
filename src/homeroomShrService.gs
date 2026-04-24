@@ -57,14 +57,13 @@ function getHomeroomShrUnsavedSummary(grade, unit) {
 
   ensureHomeroomAccess_(targetGrade, targetUnit);
 
-   const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // JST基準の今日を先に確定する
+  const todayYmd = formatDateToYmd(new Date());
+  const today = new Date(todayYmd + 'T12:00:00+09:00');
 
-  // 昨日以前
   const endDate = new Date(today);
   endDate.setDate(endDate.getDate() - 1);
 
-  // 当年度の 4/7 を開始日にする
   const schoolYearStart = getHomeroomShrSummaryStartDate_(today);
   const startDate = new Date(schoolYearStart);
 
@@ -104,10 +103,7 @@ function getHomeroomShrUnsavedSummary(grade, unit) {
   rows.forEach(function(row) {
     const rowClassId = String(row[col.classId] || '').trim();
     const rowDate = formatDateToYmd(row[col.date]);
-
-    // period=0 対応。|| '' を使わない
     const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
-
     const actionType = col.actionType !== -1
       ? String(row[col.actionType] || '').trim()
       : '';
@@ -152,8 +148,9 @@ function getHomeroomShrUnsavedDetails(grade, unit) {
 
   ensureHomeroomAccess_(targetGrade, targetUnit);
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // JST基準の今日を先に確定する
+  const todayYmd = formatDateToYmd(new Date());
+  const today = new Date(todayYmd + 'T12:00:00+09:00');
 
   const endDate = new Date(today);
   endDate.setDate(endDate.getDate() - 1);

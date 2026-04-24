@@ -375,6 +375,46 @@
     cursor: not-allowed;
   }
 
+  .range-panel-note {
+  font-size: 13px;
+  color: #667;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.range-grid {
+  display: grid;
+  grid-template-columns: 220px 220px auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.copy-area {
+  width: 100%;
+  min-height: 180px;
+  border: 1px solid #ccd5e3;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 14px;
+  line-height: 1.7;
+  resize: vertical;
+  background: #fbfcff;
+  font-family: sans-serif;
+}
+
+.copy-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  align-items: center;
+}
+
+.copy-help {
+  font-size: 13px;
+  color: #667;
+}
+
+
   </style>
 </head>
 <body>
@@ -417,6 +457,47 @@
   <div id="loadingText">未入力授業を検索中です...</div>
 </div>
   </div>
+
+
+  <div class="panel">
+    <h2>期間未保存一覧</h2>
+
+    <div class="range-panel-note">
+      2026年4月7日から、指定した終了日までの未保存授業を一覧化します。<br>
+      Slack等へ貼り付けやすい形式で出力します。
+    </div>
+
+    <div class="range-grid">
+      <div class="field">
+        <label for="rangeStartDate">開始日</label>
+        <input type="date" id="rangeStartDate" value="2026-04-07" disabled>
+      </div>
+
+      <div class="field">
+        <label for="rangeEndDate">終了日</label>
+        <input type="date" id="rangeEndDate">
+      </div>
+
+      <button id="rangeSummaryButton" type="button" class="btn btn-primary">
+        未保存一覧を作成
+      </button>
+    </div>
+
+    <div style="margin-top:14px;">
+      <label for="slackCopyText" style="display:block; font-size:13px; color:#555; font-weight:bold; margin-bottom:6px;">
+        Slack貼り付け用テキスト
+      </label>
+      <textarea id="slackCopyText" class="copy-area" readonly placeholder="ここに未保存一覧が表示されます。"></textarea>
+
+      <div class="copy-actions">
+        <button id="copySlackTextButton" type="button" class="btn btn-secondary">
+          コピー
+        </button>
+        <div id="copyStatusText" class="copy-help"></div>
+      </div>
+    </div>
+  </div>
+
 
   <div class="panel">
     <h2>サマリー</h2>
@@ -537,9 +618,11 @@
         document.getElementById("gradeFilter").value = "";
         searchData();
       });
+      document.getElementById("rangeSummaryButton").addEventListener("click", createRangeMissingSummary);
+      document.getElementById("copySlackTextButton").addEventListener("click", copySlackText);
     }
 
- function loadInitial() {
+    function loadInitial() {
   setLoading(true, "初期情報を読み込み中です...");
   clearMessage();
 
@@ -553,7 +636,9 @@
 
       document.getElementById("adminName").textContent = "管理者：" + (user.name || user.email || "");
       appBaseUrl = window.location.href.split("?")[0];
-      searchData();
+
+      setLoading(false, "");
+      showMessage("日付を選択して「検索」を押してください。", "info");
     })
     .withFailureHandler(function(error) {
       setLoading(false, "");
@@ -562,8 +647,6 @@
     })
     .getUserRoleInfo();
 }
-
-    
 
     function setToday() {
       const today = new Date();
@@ -613,6 +696,85 @@
       el.textContent = "";
       el.className = "message";
     }
+
+  function createRangeMissingSummary() {
+  const startDate = document.getElementById("rangeStartDate").value || "2026-04-07";
+  const endDate = document.getElementById("rangeEndDate").value;
+
+  if (!endDate) {
+    showMessage("期間未保存一覧の終了日を指定してください。", "warn");
+    return;
+  }
+
+  if (endDate < startDate) {
+    showMessage("終了日は開始日以降を指定してください。", "warn");
+    return;
+  }
+
+  setLoading(true, "期間未保存一覧を作成中です...");
+  clearMessage();
+  document.getElementById("copyStatusText").textContent = "";
+  document.getElementById("slackCopyText").value = "期間未保存一覧を作成中です...";
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      setLoading(false, "");
+
+      if (!result) {
+        document.getElementById("slackCopyText").value = "";
+        showMessage("期間未保存一覧の取得結果が空でした。", "warn");
+        return;
+      }
+
+      document.getElementById("slackCopyText").value = result.copyText || "";
+
+      const count = Number(result.count || 0);
+      if (count === 0) {
+        showMessage("指定期間内に未保存授業はありません。", "success");
+      } else {
+        showMessage("期間未保存一覧を作成しました。対象件数：" + count + "件", "success");
+      }
+    })
+    .withFailureHandler(function(error) {
+      setLoading(false, "");
+      document.getElementById("slackCopyText").value = "";
+      showMessage("期間未保存一覧の作成に失敗しました。", "error");
+      console.error(error);
+    })
+    .getAdminMissingSummaryRange(startDate, endDate);
+}
+
+function copySlackText() {
+  const textarea = document.getElementById("slackCopyText");
+  const text = textarea.value;
+
+  if (!text) {
+    showMessage("コピーする内容がありません。", "warn");
+    return;
+  }
+
+  textarea.select();
+  textarea.setSelectionRange(0, 999999);
+
+  try {
+    document.execCommand("copy");
+    document.getElementById("copyStatusText").textContent = "コピーしました。";
+  } catch (e) {
+    document.getElementById("copyStatusText").textContent = "コピーに失敗しました。手動で選択してコピーしてください。";
+  }
+}
+
+function setToday() {
+  const today = new Date();
+  const todayText = toInputDate(today);
+
+  document.getElementById("targetDate").value = todayText;
+
+  const rangeEndDate = document.getElementById("rangeEndDate");
+  if (rangeEndDate && !rangeEndDate.value) {
+    rangeEndDate.value = todayText;
+  }
+}
 
     function searchData() {
       const targetDate = document.getElementById("targetDate").value;

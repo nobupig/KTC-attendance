@@ -263,7 +263,7 @@ function getClassesForCurrentUserByDate(targetDate) {
 function getClassSessionsByDateCached_(ymd) {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
-  const cacheKey = 'classSessionsByDate__' + ymd;
+  const cacheKey = 'classSessionsByDate__v2__' + ymd;
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
     if (typeof logPerf_ === 'function') {
@@ -291,7 +291,7 @@ function getClassSessionsByDateCached_(ymd) {
 function getClassSessionsByDateIndexCached_() {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
-  const cacheKey = 'classSessionsByDateIndex__v1';
+  const cacheKey = 'classSessionsByDateIndex__v2';
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
     if (typeof logPerf_ === 'function') {
@@ -424,7 +424,7 @@ function getSavedSessionMapByDateCached_(ymd) {
 }
 
 function getSavedSessionKeySetByRangeCached_(startYmd, endYmd) {
-  const cacheKey = 'savedSessionKeySetByRange__' + String(startYmd || '') + '__' + String(endYmd || '');
+  const cacheKey = 'savedSessionKeySetByRange__v2__' + String(startYmd || '') + '__' + String(endYmd || '');
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
     return cached;
@@ -478,8 +478,10 @@ function getTeacherUnsavedSummary() {
   }
 
   const teacherId = normalizeString_(user.teacherId);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+
+  // JST基準の今日を先に確定する
+  const todayYmd = formatDateToYmd(new Date());
+  const today = new Date(todayYmd + 'T12:00:00+09:00');
 
   const endDate = new Date(today);
   endDate.setDate(endDate.getDate() - 1);
@@ -509,14 +511,14 @@ function getTeacherUnsavedSummary() {
 
   const count = getTeacherUnsavedCount_(teacherId, startYmd, endYmd);
 
-const result = {
-  ok: true,
-  count: count,
-  checkedRange: {
-    start: startYmd,
-    end: endYmd
-  }
-};
+  const result = {
+    ok: true,
+    count: count,
+    checkedRange: {
+      start: startYmd,
+      end: endYmd
+    }
+  };
 
   putScriptCacheJson_(cacheKey, result, 60);
   return result;
@@ -529,8 +531,10 @@ function getTeacherUnsavedDetails() {
   }
 
   const teacherId = normalizeString_(user.teacherId);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+
+  // JST基準の今日を先に確定する
+  const todayYmd = formatDateToYmd(new Date());
+  const today = new Date(todayYmd + 'T12:00:00+09:00');
 
   const endDate = new Date(today);
   endDate.setDate(endDate.getDate() - 1);
@@ -584,6 +588,7 @@ function getTeacherUnsavedCount_(teacherId, startYmd, endYmd) {
   const dateKeys = Object.keys(byDateMap).sort();
 
   let count = 0;
+  const seenSessionKeys = {};
 
   dateKeys.forEach(function(ymd) {
     if (ymd < startYmd || ymd > endYmd) return;
@@ -599,6 +604,12 @@ function getTeacherUnsavedCount_(teacherId, startYmd, endYmd) {
 
       const saveKey = [classId, ymd, period].join('__');
       if (savedKeySet[saveKey]) return;
+
+      const cls = context.classMap[classId] || {};
+      const displayKey = buildTeacherUnsavedDisplayKey_(cls, classId, ymd, period);
+
+      if (seenSessionKeys[displayKey]) return;
+      seenSessionKeys[displayKey] = true;
 
       count += 1;
     });
@@ -617,11 +628,12 @@ function getTeacherUnsavedSessionItems_(teacherId, startYmd, endYmd) {
   const savedKeySet = getSavedSessionKeySetByRangeCached_(startYmd, endYmd);
   const dateKeys = Object.keys(byDateMap).sort();
   const result = [];
+  const seenSessionKeys = {};
 
-dateKeys.forEach(function(ymd) {
-  if (ymd < startYmd || ymd > endYmd) return;
+  dateKeys.forEach(function(ymd) {
+    if (ymd < startYmd || ymd > endYmd) return;
 
-  const daySessions = byDateMap[ymd] || [];
+    const daySessions = byDateMap[ymd] || [];
 
     daySessions.forEach(function(session) {
       const classId = normalizeString_(session.classId);
@@ -635,6 +647,11 @@ dateKeys.forEach(function(ymd) {
       if (savedKeySet[saveKey]) return;
 
       const cls = context.classMap[classId] || {};
+      const displayKey = buildTeacherUnsavedDisplayKey_(cls, classId, ymd, period);
+
+      if (seenSessionKeys[displayKey]) return;
+      seenSessionKeys[displayKey] = true;
+
       const isExperiment = isTeacherUnsavedExperimentClass_(classId);
 
       let targetLabel = '';
@@ -769,23 +786,25 @@ function getTeacherUnsavedContext_(teacherId) {
   const classHeaders = classesData.headers;
   const clsCol = {
     classId: findColumnIndex_(classHeaders, ['classId', 'ClassID']),
+    subjectId: findColumnIndex_(classHeaders, ['subjectId', 'SubjectID']),
     subjectName: findColumnIndex_(classHeaders, ['subjectName', '科目名']),
     grade: findColumnIndex_(classHeaders, ['grade', '学年']),
     unit: findColumnIndex_(classHeaders, ['unit', '対象区分', '組・コース'])
   };
-  validateRequiredColumnsForTimetable_('classes', clsCol, ['classId', 'subjectName']);
+  validateRequiredColumnsForTimetable_('classes', clsCol, ['classId', 'subjectId', 'subjectName']);
 
   const classMap = {};
   classes.forEach(function(row) {
     const classId = normalizeString_(row[clsCol.classId]);
     if (!classId) return;
 
-    classMap[classId] = {
-      classId: classId,
-      subjectName: clsCol.subjectName !== -1 ? normalizeString_(row[clsCol.subjectName]) : '',
-      grade: clsCol.grade !== -1 ? normalizeString_(row[clsCol.grade]) : '',
-      unit: clsCol.unit !== -1 ? normalizeString_(row[clsCol.unit]) : ''
-    };
+  classMap[classId] = {
+    classId: classId,
+    subjectId: clsCol.subjectId !== -1 ? normalizeString_(row[clsCol.subjectId]) : '',
+    subjectName: clsCol.subjectName !== -1 ? normalizeString_(row[clsCol.subjectName]) : '',
+    grade: clsCol.grade !== -1 ? normalizeString_(row[clsCol.grade]) : '',
+    unit: clsCol.unit !== -1 ? normalizeString_(row[clsCol.unit]) : ''
+  };
   });
 
   const result = {
@@ -799,15 +818,15 @@ function getTeacherUnsavedContext_(teacherId) {
 }
 
 function buildTeacherUnsavedSummaryCacheKey_(teacherId, endYmd) {
-  return 'teacherUnsavedSummary__' + String(teacherId || '') + '__' + String(endYmd || '');
+  return 'teacherUnsavedSummary__v2__' + String(teacherId || '') + '__' + String(endYmd || '');
 }
 
 function buildTeacherUnsavedDetailsCacheKey_(teacherId, endYmd) {
-  return 'teacherUnsavedDetails__' + String(teacherId || '') + '__' + String(endYmd || '');
+  return 'teacherUnsavedDetails__v2__' + String(teacherId || '') + '__' + String(endYmd || '');
 }
 
 function buildTeacherUnsavedContextCacheKey_(teacherId) {
-  return 'teacherUnsavedContext__' + String(teacherId || '');
+  return 'teacherUnsavedContext__v2__' + String(teacherId || '');
 }
 
 function getTeacherUnsavedStartDate_(baseDate) {
@@ -826,6 +845,19 @@ function isTeacherUnsavedExperimentClass_(classId) {
     value.indexOf('工学実験実習1') !== -1 ||
     value.indexOf('工学実験実習2') !== -1
   );
+}
+
+function buildTeacherUnsavedDisplayKey_(cls, classId, ymd, period) {
+  const normalizedClassId = normalizeString_(classId);
+  const normalizedYmd = normalizeString_(ymd);
+  const normalizedPeriod = normalizeString_(period);
+  const subjectId = cls && cls.subjectId ? normalizeString_(cls.subjectId) : '';
+
+  if (isTeacherUnsavedExperimentClass_(normalizedClassId) && subjectId) {
+    return [subjectId, normalizedYmd, normalizedPeriod].join('__');
+  }
+
+  return [normalizedClassId, normalizedYmd, normalizedPeriod].join('__');
 }
 
 function testGetTodayClassesForCurrentUser() {

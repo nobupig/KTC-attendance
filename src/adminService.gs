@@ -60,6 +60,185 @@ function getAdminDashboardData(targetDate, gradeFilter) {
   };
 }
 
+function getAdminMissingSummaryRange(startDate, endDate) {
+  if (!canAccessAdminPage()) {
+    throw new Error('教務画面の権限がありません。');
+  }
+
+  const startYmd = formatDateToYmd(startDate || '2026-04-07');
+  const endYmd = formatDateToYmd(endDate);
+
+  if (!endYmd) {
+    throw new Error('終了日が指定されていません。');
+  }
+
+  if (endYmd < startYmd) {
+    throw new Error('終了日は開始日以降を指定してください。');
+  }
+
+  const grouped = {};
+  const dates = buildAdminDateRange_(startYmd, endYmd);
+
+  dates.forEach(function(ymd) {
+    const data = getAdminDashboardData(ymd, '');
+
+    (data.rows || []).forEach(function(row) {
+      const key = [
+        row.date,
+        row.classId,
+        row.subjectName,
+        row.teacherName
+      ].join('__');
+
+      if (!grouped[key]) {
+        grouped[key] = {
+          date: row.date,
+          classId: row.classId,
+          subjectName: row.subjectName || '(科目名未設定)',
+          teacherName: row.teacherName || '(担当者未設定)',
+          grade: row.grade || '',
+          unit: row.unit || '',
+          periods: []
+        };
+      }
+
+      grouped[key].periods.push(Number(row.period));
+    });
+  });
+
+  const rows = Object.keys(grouped).map(function(key) {
+    const item = grouped[key];
+
+    item.periods = item.periods
+      .filter(function(p) {
+        return !isNaN(p);
+      })
+      .sort(function(a, b) {
+        return a - b;
+      });
+
+    return {
+      date: item.date,
+      dateText: formatAdminDateForDisplay_(item.date),
+      classId: item.classId,
+      subjectName: item.subjectName,
+      teacherName: item.teacherName,
+      grade: item.grade,
+      unit: item.unit,
+      periodText: formatAdminPeriodRange_(item.periods)
+    };
+  });
+
+  rows.sort(function(a, b) {
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
+    if (a.teacherName !== b.teacherName) return a.teacherName.localeCompare(b.teacherName, 'ja');
+    if (a.subjectName !== b.subjectName) return a.subjectName.localeCompare(b.subjectName, 'ja');
+    return a.classId.localeCompare(b.classId);
+  });
+
+  const copyText = buildAdminMissingSummaryCopyText_(startYmd, endYmd, rows);
+
+  return {
+    startDate: startYmd,
+    endDate: endYmd,
+    count: rows.length,
+    rows: rows,
+    copyText: copyText
+  };
+}
+
+function buildAdminDateRange_(startYmd, endYmd) {
+  const dates = [];
+  let current = parseAdminYmd_(startYmd);
+  const end = parseAdminYmd_(endYmd);
+
+  while (current.getTime() <= end.getTime()) {
+    dates.push(Utilities.formatDate(current, 'Asia/Tokyo', 'yyyy-MM-dd'));
+    current.setDate(current.getDate() + 1);
+  }
+
+  return dates;
+}
+
+function parseAdminYmd_(ymd) {
+  const parts = String(ymd).split('-');
+  return new Date(
+    Number(parts[0]),
+    Number(parts[1]) - 1,
+    Number(parts[2])
+  );
+}
+
+function formatAdminDateForDisplay_(ymd) {
+  const date = parseAdminYmd_(ymd);
+  const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+
+  return Utilities.formatDate(date, 'Asia/Tokyo', 'M月d日') +
+    '(' + weekdays[date.getDay()] + ')';
+}
+
+function formatAdminPeriodRange_(periods) {
+  if (!Array.isArray(periods) || periods.length === 0) {
+    return '';
+  }
+
+  const unique = Array.from(new Set(periods)).sort(function(a, b) {
+    return a - b;
+  });
+
+  const parts = [];
+  let start = unique[0];
+  let prev = unique[0];
+
+  for (let i = 1; i < unique.length; i++) {
+    const current = unique[i];
+
+    if (current === prev + 1) {
+      prev = current;
+      continue;
+    }
+
+    parts.push(formatAdminPeriodPart_(start, prev));
+    start = current;
+    prev = current;
+  }
+
+  parts.push(formatAdminPeriodPart_(start, prev));
+
+  return parts.join('、') + '限';
+}
+
+function formatAdminPeriodPart_(start, end) {
+  if (start === end) {
+    return String(start);
+  }
+
+  return start + '～' + end;
+}
+
+function buildAdminMissingSummaryCopyText_(startYmd, endYmd, rows) {
+  const header = '【' +
+    formatAdminDateForDisplay_(startYmd) +
+    '～' +
+    formatAdminDateForDisplay_(endYmd) +
+    ' 未保存授業一覧】';
+
+  if (!rows || rows.length === 0) {
+    return header + '\n\n未保存の授業はありません。';
+  }
+
+  const lines = rows.map(function(row) {
+    return [
+      row.dateText,
+      row.subjectName,
+      row.periodText,
+      row.teacherName
+    ].join(' ｜ ');
+  });
+
+  return header + '\n\n' + lines.join('\n');
+}
+
 function getAdminTargetSessions_(targetDate) {
   const ymd = formatDateToYmd(targetDate);
   const weekday = getWeekdayFromYmdJst_(ymd);
