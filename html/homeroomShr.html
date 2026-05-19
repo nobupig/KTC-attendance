@@ -681,6 +681,9 @@
     let unsavedShrDetailsRequestKey = "";
     let unsavedShrDetailsLoadedKey = "";
     let unsavedShrDetailsOpen = false;
+    let currentShrHasSavedSession = false;
+    let currentShrLastSavedInfo = null;
+    let isShrStatusLoading = false;
 
     function escapeHtml(str) {
       if (str == null) return "";
@@ -975,12 +978,88 @@ function renderUnsavedShrSummary(data) {
   if (isLoading || isSaving) return;
   selectedGrade = String(grade || "");
   selectedUnit = String(unit || "");
+  currentShrHasSavedSession = false;
+  currentShrLastSavedInfo = null;
+
   renderClassChips();
   loadUnsavedShrSummary();
-  loadDailyData();
+  renderShrActionSelection();
+  loadShrDailyStatus();
+  setBusy(false);
 }
 
-    function renderSummaryCounts() {
+function renderShrActionSelection(lastSavedInfo) {
+  const hasSaved = !!lastSavedInfo || !!currentShrHasSavedSession;
+
+  document.getElementById("tableTitle").textContent =
+    selectedGrade + "年 " + selectedUnit + "組 のSHR出席";
+
+  document.getElementById("tableSub").textContent =
+    currentDate + " の記録です。欠席者がいない場合は名簿を開かず保存できます。";
+
+  document.getElementById("saveState").textContent =
+    isShrStatusLoading ? "保存状態を確認中..." : (hasSaved ? "保存済み" : "未保存");
+
+  renderHomeroomLastSavedInfo(
+    isShrStatusLoading ? null : (lastSavedInfo || currentShrLastSavedInfo || null)
+  );
+
+  document.getElementById("tableContainer").innerHTML =
+    '<div class="empty-box">' +
+      '<button type="button" class="main-btn" ' +
+        ((hasSaved || isShrStatusLoading) ? 'disabled ' : '') +
+        'onclick="saveShrNoAbsence()">' +
+        (isShrStatusLoading ? '保存状態確認中...' : (hasSaved ? '欠席者なし保存済み' : '欠席者なしで保存')) +
+      '</button>' +
+      '<button type="button" class="main-btn secondary" style="margin-left:10px;" ' +
+        (isShrStatusLoading ? 'disabled ' : '') +
+        'onclick="loadDailyData()">欠席者を入力</button>' +
+      '<br><br>' +
+      (isShrStatusLoading
+        ? '保存済みかどうかを確認しています。少しお待ちください。'
+        : (hasSaved
+          ? 'このSHRは保存済みです。欠席・遅刻・早退を修正する場合のみ「欠席者を入力」から名簿を表示してください。'
+          : '欠席・遅刻・早退がいる場合のみ「欠席者を入力」から名簿を表示してください。')) +
+    '</div>';
+}
+
+function loadShrDailyStatus() {
+  if (!selectedGrade || !selectedUnit) return;
+
+  const dateValue = document.getElementById("dateInput").value || currentDate;
+  if (!dateValue) return;
+
+  isShrStatusLoading = true;
+  renderShrActionSelection();
+
+  google.script.run
+    .withSuccessHandler(function(data) {
+      isShrStatusLoading = false;
+
+      if (!data) {
+        currentShrHasSavedSession = false;
+        currentShrLastSavedInfo = null;
+        renderShrActionSelection();
+        return;
+      }
+
+      currentShrHasSavedSession = !!data.hasSavedSession;
+      currentShrLastSavedInfo = data.lastSavedInfo || null;
+
+      renderShrActionSelection(currentShrLastSavedInfo);
+    })
+    .withFailureHandler(function(error) {
+      console.error(error);
+      isShrStatusLoading = false;
+      currentShrHasSavedSession = false;
+      currentShrLastSavedInfo = null;
+      document.getElementById("saveState").textContent = "保存状態を確認できませんでした";
+      renderShrActionSelection();
+    })
+    .getHomeroomShrDailyStatus(selectedGrade, selectedUnit, dateValue);
+}
+
+function renderSummaryCounts() {
       let present = 0;
       let absent = 0;
       let late = 0;
@@ -1077,7 +1156,9 @@ function renderUnsavedShrSummary(data) {
           document.getElementById("dateInput").value = currentDate;
           renderClassChips();
           loadUnsavedShrSummary();
-          loadDailyData();
+          renderShrActionSelection();
+          loadShrDailyStatus();
+          setBusy(false);
         })
         .withFailureHandler(function(error) {
           console.error(error);
@@ -1177,19 +1258,78 @@ function renderUnsavedShrSummary(data) {
         .saveHomeroomShrAttendance(payload);
     }
 
-        function goShrHome() {
-      google.script.run
-        .withSuccessHandler(function(baseUrl) {
-          window.location.href = baseUrl + "?page=index";
-        })
-        .getAppBaseUrl();
-    }
+function saveShrNoAbsence() {
+  if (isLoading || isSaving) return;
+
+  const dateValue = document.getElementById("dateInput").value;
+  if (!selectedGrade || !selectedUnit || !dateValue) {
+    showMessage("クラス・日付を確認してください。", "error");
+    return;
+  }
+
+  if (!window.confirm("このSHRを「欠席者なし」として保存します。よろしいですか？")) {
+    return;
+  }
+
+  setSaving(true);
+  clearMessage();
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      setSaving(false);
+      showMessage("欠席者なしとして保存しました。", "success");
+      document.getElementById("saveState").textContent = "保存済み";
+      renderHomeroomLastSavedInfo(result && result.lastSavedInfo ? result.lastSavedInfo : null);
+    currentShrHasSavedSession = true;
+    currentShrLastSavedInfo = result && result.lastSavedInfo ? result.lastSavedInfo : null;
+
+    loadUnsavedShrSummary();
+    renderShrActionSelection(currentShrLastSavedInfo);
+    })
+    .withFailureHandler(function(error) {
+      console.error(error);
+      setSaving(false);
+      showMessage("欠席者なし保存に失敗しました。 " + (error && error.message ? error.message : ""), "error");
+    })
+    .saveHomeroomShrNoAbsence({
+      grade: selectedGrade,
+      unit: selectedUnit,
+      date: dateValue
+    });
+}
+
+function goShrHome() {
+  showMessage("トップへ戻っています...", false);
+
+  google.script.run
+    .withSuccessHandler(function(baseUrl) {
+      const url = baseUrl || window.location.href.split("?")[0];
+      window.top.location.href = url + "?page=index";
+    })
+    .withFailureHandler(function(error) {
+      console.error(error);
+
+      const fallbackUrl =
+        window.location.href.split("?")[0] + "?page=index";
+
+      window.top.location.href = fallbackUrl;
+    })
+    .getAppBaseUrl();
+}
 
 
     document.getElementById("reloadBtn").addEventListener("click", loadDailyData);
 document.getElementById("saveBtnTop").addEventListener("click", saveAttendance);
 document.getElementById("saveBtnBottom").addEventListener("click", saveAttendance);
-document.getElementById("dateInput").addEventListener("change", loadDailyData);
+document.getElementById("dateInput").addEventListener("change", function() {
+  currentDate = document.getElementById("dateInput").value || currentDate;
+
+  currentShrHasSavedSession = false;
+  currentShrLastSavedInfo = null;
+
+  renderShrActionSelection();
+  loadShrDailyStatus();
+});
 document.getElementById("unsavedShrToggleBtn").addEventListener("click", toggleUnsavedShrDetails);
 document.getElementById("backBtn").addEventListener("click", goShrHome);
 document.getElementById("backHomeTopBtn").addEventListener("click", goShrHome);

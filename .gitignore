@@ -4,3 +4,4 @@
 .clasp.json
 *.txt
 config.gs
+src/config.js

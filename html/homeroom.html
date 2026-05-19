@@ -448,6 +448,12 @@
     <div id="messageArea" class="message"></div>
   </div>
 
+  <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+  <button id="backHomeBtn" type="button" class="main-btn secondary">
+    トップへ戻る
+  </button>
+</div>
+
   <div class="toolbar">
     <div class="toolbar-block">
       <div class="toolbar-label">担任クラス</div>
@@ -519,6 +525,25 @@
     let selectedStudentId = null;
     let detailData = null;
     let openedSubjectId = null;
+
+    function goHomeroomHome() {
+  showMessage("トップへ戻っています...", false);
+
+  google.script.run
+    .withSuccessHandler(function(baseUrl) {
+      const url = baseUrl || window.location.href.split("?")[0];
+      window.top.location.href = url + "?page=index";
+    })
+    .withFailureHandler(function(error) {
+      console.error(error);
+
+      const fallbackUrl =
+        window.location.href.split("?")[0] + "?page=index";
+
+      window.top.location.href = fallbackUrl;
+    })
+    .getAppBaseUrl();
+}
 
     function showMessage(text, isError) {
       const el = document.getElementById('messageArea');
@@ -942,6 +967,8 @@
           loadSummary(selectedClass.grade, selectedClass.unit);
         }
       });
+      document.getElementById('backHomeBtn')
+  .addEventListener('click', goHomeroomHome);
     }
 
     function init() {

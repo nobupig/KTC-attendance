@@ -384,7 +384,7 @@
 
 .range-grid {
   display: grid;
-  grid-template-columns: 220px 220px auto;
+  grid-template-columns: 220px 220px 160px auto;
   gap: 10px;
   align-items: end;
 }
@@ -467,21 +467,33 @@
       Slack等へ貼り付けやすい形式で出力します。
     </div>
 
-    <div class="range-grid">
-      <div class="field">
-        <label for="rangeStartDate">開始日</label>
-        <input type="date" id="rangeStartDate" value="2026-04-07" disabled>
-      </div>
+<div class="range-grid">
+  <div class="field">
+    <label for="rangeStartDate">開始日</label>
+    <input type="date" id="rangeStartDate" value="2026-04-07" disabled>
+  </div>
 
-      <div class="field">
-        <label for="rangeEndDate">終了日</label>
-        <input type="date" id="rangeEndDate">
-      </div>
+  <div class="field">
+    <label for="rangeEndDate">終了日</label>
+    <input type="date" id="rangeEndDate">
+  </div>
 
-      <button id="rangeSummaryButton" type="button" class="btn btn-primary">
-        未保存一覧を作成
-      </button>
-    </div>
+  <div class="field">
+    <label for="rangeGradeFilter">学年</label>
+    <select id="rangeGradeFilter">
+      <option value="">全て</option>
+      <option value="1">1年</option>
+      <option value="2">2年</option>
+      <option value="3">3年</option>
+      <option value="4">4年</option>
+      <option value="5">5年</option>
+    </select>
+  </div>
+
+  <button id="rangeSummaryButton" type="button" class="btn btn-primary">
+    未保存一覧を作成
+  </button>
+</div>
 
     <div style="margin-top:14px;">
       <label for="slackCopyText" style="display:block; font-size:13px; color:#555; font-weight:bold; margin-bottom:6px;">
@@ -700,6 +712,7 @@
   function createRangeMissingSummary() {
   const startDate = document.getElementById("rangeStartDate").value || "2026-04-07";
   const endDate = document.getElementById("rangeEndDate").value;
+  const gradeFilter = document.getElementById("rangeGradeFilter").value;
 
   if (!endDate) {
     showMessage("期間未保存一覧の終了日を指定してください。", "warn");
@@ -741,7 +754,7 @@
       showMessage("期間未保存一覧の作成に失敗しました。", "error");
       console.error(error);
     })
-    .getAdminMissingSummaryRange(startDate, endDate);
+    .getAdminMissingSummaryRangeGrouped(startDate, endDate, gradeFilter);
 }
 
 function copySlackText() {
