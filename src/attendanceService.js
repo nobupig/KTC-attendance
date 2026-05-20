@@ -404,47 +404,137 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
 }
 
 function getAttendanceMap(classId, date, period) {
-  const totalStartedAt = perfNow_();
+  return getAttendanceMapDirect_(classId, date, period);
+}
+
+function getAttendanceMapDirect_(classId, date, period) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
   const targetClassId = String(classId || '').trim();
   const targetDate = formatDateToYmd(date);
-  const targetPeriod = String(period || '').trim();
+  const targetPeriod = String(period == null ? '' : period).trim();
 
+  const sessionKey = [targetClassId, targetDate, targetPeriod].join('__');
   const sessionCacheKey = buildAttendanceSessionCacheKey_(targetClassId, targetDate, targetPeriod);
 
-  const cacheStartedAt = perfNow_();
+  const cacheStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const cached = getScriptCacheJson_(sessionCacheKey);
-  logPerf_(
-    'getAttendanceMap getScriptCacheJson_',
-    cacheStartedAt,
-    'cacheKey=' + sessionCacheKey + ' hit=' + (!!cached)
-  );
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getAttendanceMapDirect_ getScriptCacheJson_',
+      cacheStartedAt,
+      'cacheKey=' + sessionCacheKey + ' hit=' + (!!cached)
+    );
+  }
 
   if (cached) {
-    logPerf_(
-      'getAttendanceMap total',
-      totalStartedAt,
-      'cache=hit entries=' + Object.keys(cached).length + ' key=' + [targetClassId, targetDate, targetPeriod].join('__')
-    );
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getAttendanceMapDirect_ total',
+        totalStartedAt,
+        'cache=hit entries=' + Object.keys(cached).length + ' key=' + sessionKey
+      );
+    }
     return cached;
   }
 
-  const indexStartedAt = perfNow_();
-  const attendanceIndex = buildAttendanceIndex_();
-  logPerf_('getAttendanceMap buildAttendanceIndex_', indexStartedAt);
+  if (!targetClassId || !targetDate || !targetPeriod) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_('getAttendanceMapDirect_ total', totalStartedAt, 'invalid-args');
+    }
+    return {};
+  }
 
-  const key = [targetClassId, targetDate, targetPeriod].join('__');
-  const result = attendanceIndex[key] || {};
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE);
 
-  const putCacheStartedAt = perfNow_();
+  if (!sheet) {
+    throw new Error('attendance シートが見つかりません');
+  }
+
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const values = sheet.getDataRange().getValues();
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getAttendanceMapDirect_ load sheet',
+      loadStartedAt,
+      'rows=' + Math.max(values.length - 1, 0)
+    );
+  }
+
+  if (values.length <= 1) {
+    putScriptCacheJson_(sessionCacheKey, {}, 60);
+    return {};
+  }
+
+  const headers = values[0];
+  const rows = values.slice(1);
+
+  const col = {
+    classId: headers.indexOf('classId'),
+    date: headers.indexOf('date'),
+    period: headers.indexOf('period'),
+    studentId: headers.indexOf('studentId'),
+    statusCode: headers.indexOf('statusCode')
+  };
+
+  Object.keys(col).forEach(function(key) {
+    if (col[key] === -1) {
+      throw new Error('attendance シートに ' + key + ' 列がありません');
+    }
+  });
+
+  const scanStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const result = {};
+
+  rows.forEach(function(row) {
+    const rowClassId = String(row[col.classId] || '').trim();
+    if (rowClassId !== targetClassId) return;
+
+    const rowDate = formatDateToYmd(row[col.date]);
+    if (rowDate !== targetDate) return;
+
+    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
+    if (rowPeriod !== targetPeriod) return;
+
+    const studentId = String(row[col.studentId] || '').trim();
+    const statusCode = String(row[col.statusCode] || '').trim();
+
+    if (!studentId) return;
+
+    if (statusCode) {
+      result[studentId] = statusCode;
+    } else if (result[studentId]) {
+      delete result[studentId];
+    }
+  });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getAttendanceMapDirect_ scan rows',
+      scanStartedAt,
+      'entries=' + Object.keys(result).length + ' key=' + sessionKey
+    );
+  }
+
+  const putCacheStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   putScriptCacheJson_(sessionCacheKey, result, 60);
-  logPerf_('getAttendanceMap putScriptCacheJson_', putCacheStartedAt, 'entries=' + Object.keys(result).length);
 
-  logPerf_(
-    'getAttendanceMap total',
-    totalStartedAt,
-    'cache=miss entries=' + Object.keys(result).length + ' key=' + key
-  );
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getAttendanceMapDirect_ putScriptCacheJson_',
+      putCacheStartedAt,
+      'entries=' + Object.keys(result).length
+    );
+
+    logPerf_(
+      'getAttendanceMapDirect_ total',
+      totalStartedAt,
+      'cache=miss entries=' + Object.keys(result).length + ' key=' + sessionKey
+    );
+  }
 
   return result;
 }
@@ -526,71 +616,127 @@ function formatDateTimeJst_(value) {
 }
 
 function getLatestAttendanceSessionInfo_(classId, date, period, allowedActionTypes) {
+  return getLatestAttendanceSessionInfoDirect_(classId, date, period, allowedActionTypes);
+}
+
+function getLatestAttendanceSessionInfoDirect_(classId, date, period, allowedActionTypes) {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
   const targetClassId = String(classId || '').trim();
   const targetDate = formatDateToYmd(date);
-  const targetPeriod = String(period || '').trim();
+  const targetPeriod = String(period == null ? '' : period).trim();
 
   if (!targetClassId || !targetDate || !targetPeriod) {
     if (typeof logPerf_ === 'function') {
-      logPerf_('getLatestAttendanceSessionInfo_ total', totalStartedAt, 'invalid-args');
+      logPerf_('getLatestAttendanceSessionInfoDirect_ total', totalStartedAt, 'invalid-args');
     }
     return null;
   }
 
-  const mapStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const latestMap = getAttendanceSessionLatestMapByDateCached_(targetDate);
+  const allowed = normalizeAttendanceActionTypes_(allowedActionTypes);
+
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
+  if (!sheet) {
+    throw new Error('attendanceSessions シートが見つかりません');
+  }
+
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const values = sheet.getDataRange().getValues();
+
   if (typeof logPerf_ === 'function') {
     logPerf_(
-      'getLatestAttendanceSessionInfo_ getAttendanceSessionLatestMapByDateCached_',
-      mapStartedAt,
-      'date=' + targetDate + ' keys=' + Object.keys(latestMap).length
+      'getLatestAttendanceSessionInfoDirect_ load sheet',
+      loadStartedAt,
+      'rows=' + Math.max(values.length - 1, 0)
     );
   }
 
-  const key = [targetClassId, targetDate, targetPeriod].join('__');
-  const latest = latestMap[key];
-  if (!latest) {
-    if (typeof logPerf_ === 'function') {
-      logPerf_('getLatestAttendanceSessionInfo_ total', totalStartedAt, 'not-found key=' + key);
-    }
+  if (values.length <= 1) {
     return null;
   }
 
-  const allowed = Array.isArray(allowedActionTypes) && allowedActionTypes.length
-    ? allowedActionTypes.map(function(v) { return String(v || '').trim(); })
-    : null;
+  const headers = values[0];
+  const rows = values.slice(1);
 
-  if (allowed && allowed.indexOf(String(latest.actionType || '').trim()) === -1) {
-    if (typeof logPerf_ === 'function') {
-      logPerf_(
-        'getLatestAttendanceSessionInfo_ total',
-        totalStartedAt,
-        'filtered-out actionType=' + String(latest.actionType || '')
-      );
-    }
-    return null;
-  }
-
-  const result = {
-    teacherEmail: latest.teacherEmail,
-    savedAt: latest.savedAt,
-    savedAtText: latest.savedAtText,
-    actionType: latest.actionType,
-    targetSessionKey: latest.targetSessionKey,
-    savedModeLabel: latest.savedModeLabel
+  const col = {
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    date: findColumnIndex_(headers, ['date', '日付']),
+    period: findColumnIndex_(headers, ['period', '時限']),
+    teacherEmail: findColumnIndex_(headers, ['teacherEmail', 'email']),
+    accessedAt: findColumnIndex_(headers, ['accessedAt', 'savedAt']),
+    actionType: findColumnIndex_(headers, ['actionType']),
+    targetSessionKey: findColumnIndex_(headers, ['targetSessionKey']),
+    savedModeLabel: findColumnIndex_(headers, ['savedModeLabel'])
   };
 
+  ['classId', 'date', 'period'].forEach(function(key) {
+    if (col[key] === -1) {
+      throw new Error('attendanceSessions シートに ' + key + ' 列がありません');
+    }
+  });
+
+  let latest = null;
+  let latestMs = -1;
+
+  // 新しい行ほど下にある前提なので、下から探す
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+
+    const rowClassId = String(row[col.classId] || '').trim();
+    if (rowClassId !== targetClassId) continue;
+
+    const rowDate = formatDateToYmd(row[col.date]);
+    if (rowDate !== targetDate) continue;
+
+    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
+    if (rowPeriod !== targetPeriod) continue;
+
+    const actionType = col.actionType !== -1
+      ? String(row[col.actionType] || '').trim()
+      : '';
+
+    if (allowed && allowed.indexOf(actionType) === -1) {
+      continue;
+    }
+
+    const accessedAtRaw = col.accessedAt !== -1 ? row[col.accessedAt] : '';
+    const accessedAt = accessedAtRaw instanceof Date ? accessedAtRaw : new Date(accessedAtRaw);
+    const accessedAtMs = isNaN(accessedAt.getTime()) ? 0 : accessedAt.getTime();
+
+    if (!latest || accessedAtMs >= latestMs) {
+      latestMs = accessedAtMs;
+      latest = {
+        teacherEmail: col.teacherEmail !== -1
+          ? String(row[col.teacherEmail] || '').trim().toLowerCase()
+          : '',
+        savedAt: accessedAtRaw,
+        savedAtText: formatDateTimeJst_(accessedAtRaw),
+        actionType: actionType,
+        targetSessionKey: col.targetSessionKey !== -1
+          ? String(row[col.targetSessionKey] || '').trim()
+          : '',
+        savedModeLabel: col.savedModeLabel !== -1
+          ? String(row[col.savedModeLabel] || '').trim()
+          : ''
+      };
+
+      // 基本は最下行が最新なので、見つかった時点で抜けてOK
+      break;
+    }
+  }
+
   if (typeof logPerf_ === 'function') {
     logPerf_(
-      'getLatestAttendanceSessionInfo_ total',
+      'getLatestAttendanceSessionInfoDirect_ total',
       totalStartedAt,
-      'found key=' + key + ' actionType=' + (result.actionType || '')
+      latest
+        ? 'found key=' + [targetClassId, targetDate, targetPeriod].join('__')
+        : 'not-found key=' + [targetClassId, targetDate, targetPeriod].join('__')
     );
   }
 
-  return result;
+  return latest;
 }
 
 function getAttendanceSessionLatestMapByDateCached_(ymd) {

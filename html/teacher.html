@@ -969,27 +969,6 @@ function goHome() {
       }
     }
 
-    function loadTeacherUnsavedSummaryManual() {
-  const requestKey = Date.now() + '_' + Math.random();
-  teacherUnsavedSummaryRequestKey = requestKey;
-
-  renderTeacherUnsavedSummaryLoading();
-
-  google.script.run
-    .withSuccessHandler(function(data) {
-      if (teacherUnsavedSummaryRequestKey !== requestKey) return;
-      teacherUnsavedSummaryData = data || { ok: true, count: 0, checkedRange: null };
-      renderTeacherUnsavedSummary(teacherUnsavedSummaryData);
-    })
-    .withFailureHandler(function(error) {
-      console.error(error);
-      if (teacherUnsavedSummaryRequestKey !== requestKey) return;
-      renderTeacherUnsavedSummaryError();
-    })
-    .getTeacherUnsavedSummary();
-}
-
-
     function loadMasqueradeUiState() {
       google.script.run
         .withSuccessHandler(function(state) {

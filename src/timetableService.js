@@ -251,27 +251,7 @@ function getClassesForCurrentUserByDate(targetDate) {
 }
 
 
-function fastYmdFromCell_(value) {
-  if (!value) return '';
 
-  if (value instanceof Date) {
-    return Utilities.formatDate(value, 'Asia/Tokyo', 'yyyy-MM-dd');
-  }
-
-  const s = String(value).trim();
-
-  const m1 = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m1) {
-    return m1[1] + '-' + String(m1[2]).padStart(2, '0') + '-' + String(m1[3]).padStart(2, '0');
-  }
-
-  const m2 = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
-  if (m2) {
-    return m2[1] + '-' + String(m2[2]).padStart(2, '0') + '-' + String(m2[3]).padStart(2, '0');
-  }
-
-  return formatDateToYmd(value);
-}
 
 /**
  * classSessions を指定日だけ読み込む軽量版
@@ -281,7 +261,7 @@ function getClassSessionsByDateCached_(ymd) {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
   const targetYmd = formatDateToYmd(ymd);
-  const cacheKey = 'classSessionsByDate__v4__' + targetYmd;
+  const cacheKey = 'classSessionsByDate__v6__' + targetYmd;
 
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
@@ -295,18 +275,22 @@ function getClassSessionsByDateCached_(ymd) {
     return cached;
   }
 
-  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const classSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_SESSIONS, 300);
-  if (typeof logPerf_ === 'function') {
-    logPerf_(
-      'getClassSessionsByDateCached_ load classSessionsData',
-      loadStartedAt,
-      'rows=' + classSessionsData.rows.length
-    );
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.CLASS_SESSIONS);
+  if (!sheet) {
+    throw new Error('classSessions シートが見つかりません');
   }
 
-  const headers = classSessionsData.headers;
-  const rows = classSessionsData.rows;
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  if (lastRow <= 1 || lastCol <= 0) {
+    putScriptCacheJson_(cacheKey, [], 300);
+    return [];
+  }
+
+  const headerStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
 
   const csCol = {
     classId: findColumnIndex_(headers, ['classId', 'ClassID']),
@@ -314,13 +298,37 @@ function getClassSessionsByDateCached_(ymd) {
     period: findColumnIndex_(headers, ['period', '時限']),
     sessionNumber: findColumnIndex_(headers, ['sessionNumber', '回', '回数'])
   };
+
   validateRequiredColumnsForTimetable_('classSessions', csCol, ['classId', 'date', 'period']);
 
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getClassSessionsByDateCached_ resolve headers', headerStartedAt);
+  }
+
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const numRows = lastRow - 1;
+
+  const values = sheet.getRange(2, 1, numRows, lastCol).getValues();
+
+  // 日付列だけは表示値で読む。これが今回の安全ポイント。
+  const dateDisplayValues = sheet
+    .getRange(2, csCol.date + 1, numRows, 1)
+    .getDisplayValues();
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getClassSessionsByDateCached_ load sheet direct',
+      loadStartedAt,
+      'rows=' + numRows
+    );
+  }
+
+  const buildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const weekday = getWeekdayFromYmdJst_(targetYmd);
   const result = [];
 
-  rows.forEach(function(row) {
-    const rowYmd = fastYmdFromCell_(row[csCol.date]);
+  values.forEach(function(row, index) {
+    const rowYmd = normalizeYmdDisplayText_(dateDisplayValues[index][0]);
     if (rowYmd !== targetYmd) return;
 
     result.push({
@@ -331,6 +339,14 @@ function getClassSessionsByDateCached_(ymd) {
       weekday: weekday
     });
   });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getClassSessionsByDateCached_ build result',
+      buildStartedAt,
+      'rows=' + result.length + ' ymd=' + targetYmd
+    );
+  }
 
   putScriptCacheJson_(cacheKey, result, 300);
 
@@ -348,74 +364,111 @@ function getClassSessionsByDateCached_(ymd) {
 function getClassSessionsByDateIndexCached_() {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
-  const cacheKey = 'classSessionsByDateIndex__v2';
+  const cacheKey = 'classSessionsByDateIndex__v4';
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
     if (typeof logPerf_ === 'function') {
-      logPerf_('getClassSessionsByDateIndexCached_ total', totalStartedAt, 'cache=hit dates=' + Object.keys(cached).length);
+      logPerf_(
+        'getClassSessionsByDateIndexCached_ total',
+        totalStartedAt,
+        'cache=hit dates=' + Object.keys(cached).length
+      );
     }
     return cached;
   }
 
-  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const classSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_SESSIONS, 300);
-  if (typeof logPerf_ === 'function') {
-    logPerf_('getClassSessionsByDateIndexCached_ load classSessionsData', loadStartedAt, 'rows=' + classSessionsData.rows.length);
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.CLASS_SESSIONS);
+  if (!sheet) {
+    throw new Error('classSessions シートが見つかりません');
+  }
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  if (lastRow <= 1 || lastCol <= 0) {
+    return {};
   }
 
   const headerStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const classSessionHeaders = classSessionsData.headers;
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
   const csCol = {
-    classId: findColumnIndex_(classSessionHeaders, ['classId', 'ClassID']),
-    date: findColumnIndex_(classSessionHeaders, ['date', '日付']),
-    period: findColumnIndex_(classSessionHeaders, ['period', '時限']),
-    sessionNumber: findColumnIndex_(classSessionHeaders, ['sessionNumber', '回', '回数'])
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    date: findColumnIndex_(headers, ['date', '日付']),
+    period: findColumnIndex_(headers, ['period', '時限']),
+    sessionNumber: findColumnIndex_(headers, ['sessionNumber', '回', '回数'])
   };
+
   validateRequiredColumnsForTimetable_('classSessions', csCol, ['classId', 'date', 'period']);
+
   if (typeof logPerf_ === 'function') {
     logPerf_('getClassSessionsByDateIndexCached_ resolve headers', headerStartedAt);
   }
 
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const numRows = lastRow - 1;
+
+  const values = sheet.getRange(2, 1, numRows, lastCol).getValues();
+
+  // 日付列だけ表示値で読む。Utilities.formatDate の大量実行を避ける。
+  const dateDisplayValues = sheet
+    .getRange(2, csCol.date + 1, numRows, 1)
+    .getDisplayValues();
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getClassSessionsByDateIndexCached_ load sheet direct',
+      loadStartedAt,
+      'rows=' + numRows
+    );
+  }
+
   const buildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const byDateMap = {};
+  const weekdayCache = {};
 
-  classSessionsData.rows.forEach(function(row) {
-    const rowYmd = formatDateToYmd(row[csCol.date]);
+  values.forEach(function(row, index) {
+    const rowYmd = normalizeYmdDisplayText_(dateDisplayValues[index][0]);
     if (!rowYmd) return;
 
-    if (!byDateMap[rowYmd]) {
-      const weekday = getWeekdayFromYmdJst_(rowYmd);
-      byDateMap[rowYmd] = {
-        _weekday: weekday,
-        _rows: []
-      };
+    if (!weekdayCache[rowYmd]) {
+      weekdayCache[rowYmd] = getWeekdayFromYmdJst_(rowYmd);
     }
 
-    byDateMap[rowYmd]._rows.push({
+    if (!byDateMap[rowYmd]) {
+      byDateMap[rowYmd] = [];
+    }
+
+    byDateMap[rowYmd].push({
       classId: normalizeString_(row[csCol.classId]),
       date: rowYmd,
       period: normalizeString_(row[csCol.period]),
       sessionNumber: csCol.sessionNumber !== -1 ? row[csCol.sessionNumber] : '',
-      weekday: byDateMap[rowYmd]._weekday
+      weekday: weekdayCache[rowYmd]
     });
   });
 
-  const normalizedMap = {};
-  Object.keys(byDateMap).forEach(function(dateKey) {
-    normalizedMap[dateKey] = byDateMap[dateKey]._rows;
-  });
-
   if (typeof logPerf_ === 'function') {
-    logPerf_('getClassSessionsByDateIndexCached_ build index', buildStartedAt, 'dates=' + Object.keys(normalizedMap).length);
+    logPerf_(
+      'getClassSessionsByDateIndexCached_ build index',
+      buildStartedAt,
+      'dates=' + Object.keys(byDateMap).length
+    );
   }
 
-  putScriptCacheJson_(cacheKey, normalizedMap, 300);
+  // サイズが大きい場合は内部で skip されるが、入ればラッキー程度。
+  putScriptCacheJson_(cacheKey, byDateMap, 300);
 
   if (typeof logPerf_ === 'function') {
-    logPerf_('getClassSessionsByDateIndexCached_ total', totalStartedAt, 'cache=miss dates=' + Object.keys(normalizedMap).length);
+    logPerf_(
+      'getClassSessionsByDateIndexCached_ total',
+      totalStartedAt,
+      'cache=miss dates=' + Object.keys(byDateMap).length
+    );
   }
 
-  return normalizedMap;
+  return byDateMap;
 }
 
 /**
@@ -481,38 +534,112 @@ function getSavedSessionMapByDateCached_(ymd) {
 }
 
 function getSavedSessionKeySetByRangeCached_(startYmd, endYmd) {
-  const cacheKey = 'savedSessionKeySetByRange__v2__' + String(startYmd || '') + '__' + String(endYmd || '');
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const normalizedStartYmd = formatDateToYmd(startYmd);
+  const normalizedEndYmd = formatDateToYmd(endYmd);
+
+  const cacheKey =
+    'savedSessionKeySetByRange__v3__' +
+    String(normalizedStartYmd || '') +
+    '__' +
+    String(normalizedEndYmd || '');
+
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getSavedSessionKeySetByRangeCached_ total',
+        totalStartedAt,
+        'cache=hit keys=' + Object.keys(cached).length
+      );
+    }
     return cached;
   }
 
-  const attendanceSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
-  const headers = attendanceSessionsData.headers;
-  const rows = attendanceSessionsData.rows;
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
+  if (!sheet) {
+    throw new Error('attendanceSessions シートが見つかりません');
+  }
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  if (lastRow <= 1 || lastCol <= 0) {
+    return {};
+  }
+
+  const headerStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
 
   const asCol = {
     classId: findColumnIndex_(headers, ['classId', 'ClassID']),
     date: findColumnIndex_(headers, ['date', '日付']),
     period: findColumnIndex_(headers, ['period', '時限'])
   };
+
   validateRequiredColumnsForTimetable_('attendanceSessions', asCol, ['classId', 'date', 'period']);
 
+  if (typeof logPerf_ === 'function') {
+    logPerf_('getSavedSessionKeySetByRangeCached_ resolve headers', headerStartedAt);
+  }
+
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const numRows = lastRow - 1;
+
+  const values = sheet.getRange(2, 1, numRows, lastCol).getValues();
+
+  // attendanceSessions の日付も表示値で読む
+  const dateDisplayValues = sheet
+    .getRange(2, asCol.date + 1, numRows, 1)
+    .getDisplayValues();
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSavedSessionKeySetByRangeCached_ load sheet direct',
+      loadStartedAt,
+      'rows=' + numRows
+    );
+  }
+
+  const buildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const keySet = {};
 
-  rows.forEach(function(row) {
-    const rowDate = formatDateToYmd(row[asCol.date]);
-    if (!rowDate || rowDate < startYmd || rowDate > endYmd) return;
+  values.forEach(function(row, index) {
+    const rowDate = normalizeYmdDisplayText_(dateDisplayValues[index][0]);
+
+    if (!rowDate || rowDate < normalizedStartYmd || rowDate > normalizedEndYmd) {
+      return;
+    }
 
     const classId = normalizeString_(row[asCol.classId]);
     const period = normalizeString_(row[asCol.period]);
+
     if (!classId || !period) return;
 
     const key = [classId, rowDate, period].join('__');
     keySet[key] = true;
   });
 
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSavedSessionKeySetByRangeCached_ build keySet',
+      buildStartedAt,
+      'keys=' + Object.keys(keySet).length
+    );
+  }
+
   putScriptCacheJson_(cacheKey, keySet, 60);
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSavedSessionKeySetByRangeCached_ total',
+      totalStartedAt,
+      'cache=miss keys=' + Object.keys(keySet).length
+    );
+  }
+
   return keySet;
 }
 
@@ -1041,8 +1168,16 @@ function getWeekdayFromYmdJst_(ymd) {
 }
 
 function getSaveStatusForTeacherSessions(sessionItems) {
+  return getSaveStatusForTeacherSessionsDirect_(sessionItems);
+}
+
+function getSaveStatusForTeacherSessionsDirect_(sessionItems) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
   const items = Array.isArray(sessionItems) ? sessionItems : [];
   const result = {};
+  const targetKeySet = {};
+  const targetKeys = [];
 
   items.forEach(function(item) {
     const classId = normalizeString_(item.classId);
@@ -1051,16 +1186,153 @@ function getSaveStatusForTeacherSessions(sessionItems) {
 
     if (!classId || !date || !period) return;
 
-    const savedMap = getSavedSessionMapByDateCached_(date);
     const key = [classId, date, period].join('__');
-    const info = savedMap[key] || null;
+
+    if (!targetKeySet[key]) {
+      targetKeySet[key] = true;
+      targetKeys.push(key);
+    }
 
     result[key] = {
-      isSaved: !!info,
-      lastSavedInfo: info,
+      isSaved: false,
+      lastSavedInfo: null,
       saveStatusNotLoaded: false
     };
   });
+
+  if (targetKeys.length === 0) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_('getSaveStatusForTeacherSessionsDirect_ total', totalStartedAt, 'empty');
+    }
+    return result;
+  }
+
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
+
+  if (!sheet) {
+    throw new Error('attendanceSessions シートが見つかりません');
+  }
+
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const values = sheet.getDataRange().getValues();
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSaveStatusForTeacherSessionsDirect_ load sheet',
+      loadStartedAt,
+      'rows=' + Math.max(values.length - 1, 0) + ' targets=' + targetKeys.length
+    );
+  }
+
+  if (values.length <= 1) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getSaveStatusForTeacherSessionsDirect_ total',
+        totalStartedAt,
+        'no-data targets=' + targetKeys.length
+      );
+    }
+    return result;
+  }
+
+  const headers = values[0];
+  const rows = values.slice(1);
+
+  const col = {
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    date: findColumnIndex_(headers, ['date', '日付']),
+    period: findColumnIndex_(headers, ['period', '時限']),
+    teacherEmail: findColumnIndex_(headers, ['teacherEmail', 'email']),
+    accessedAt: findColumnIndex_(headers, ['accessedAt', 'savedAt']),
+    actionType: findColumnIndex_(headers, ['actionType']),
+    targetSessionKey: findColumnIndex_(headers, ['targetSessionKey']),
+    savedModeLabel: findColumnIndex_(headers, ['savedModeLabel'])
+  };
+
+  ['classId', 'date', 'period'].forEach(function(key) {
+    if (col[key] === -1) {
+      throw new Error('attendanceSessions シートに ' + key + ' 列がありません');
+    }
+  });
+
+  const scanStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  let foundCount = 0;
+  const foundKeySet = {};
+
+  // attendanceSessions は append 方式なので、下から見れば最新に近い
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+
+    const rowClassId = String(row[col.classId] || '').trim();
+    if (!rowClassId) continue;
+
+    const rowDate = formatDateToYmd(row[col.date]);
+    if (!rowDate) continue;
+
+    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
+    if (!rowPeriod) continue;
+
+    const sessionKey = [rowClassId, rowDate, rowPeriod].join('__');
+
+    if (!targetKeySet[sessionKey]) continue;
+    if (foundKeySet[sessionKey]) continue;
+
+    const accessedAtRaw = col.accessedAt !== -1 ? row[col.accessedAt] : '';
+    const teacherEmail = col.teacherEmail !== -1
+      ? String(row[col.teacherEmail] || '').trim().toLowerCase()
+      : '';
+
+    const actionType = col.actionType !== -1
+      ? String(row[col.actionType] || '').trim()
+      : '';
+
+    const targetSessionKey = col.targetSessionKey !== -1
+      ? String(row[col.targetSessionKey] || '').trim()
+      : sessionKey;
+
+    const savedModeLabel = col.savedModeLabel !== -1
+      ? String(row[col.savedModeLabel] || '').trim()
+      : '';
+
+    const lastSavedInfo = {
+      teacherEmail: teacherEmail,
+      savedAt: accessedAtRaw,
+      savedAtText: formatDateTimeJst_(accessedAtRaw),
+      actionType: actionType,
+      targetSessionKey: targetSessionKey,
+      savedModeLabel: savedModeLabel
+    };
+
+    result[sessionKey] = {
+      isSaved: true,
+      lastSavedInfo: lastSavedInfo,
+      saveStatusNotLoaded: false
+    };
+
+    foundKeySet[sessionKey] = true;
+    foundCount++;
+
+    if (foundCount >= targetKeys.length) {
+      break;
+    }
+  }
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSaveStatusForTeacherSessionsDirect_ scan rows',
+      scanStartedAt,
+      'found=' + foundCount + '/' + targetKeys.length
+    );
+
+    logPerf_(
+      'getSaveStatusForTeacherSessionsDirect_ total',
+      totalStartedAt,
+      'targets=' + targetKeys.length + ' found=' + foundCount
+    );
+  }
 
   return result;
 }
