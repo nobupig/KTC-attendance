@@ -969,6 +969,27 @@ function goHome() {
       }
     }
 
+    function loadTeacherUnsavedSummaryManual() {
+  const requestKey = Date.now() + '_' + Math.random();
+  teacherUnsavedSummaryRequestKey = requestKey;
+
+  renderTeacherUnsavedSummaryLoading();
+
+  google.script.run
+    .withSuccessHandler(function(data) {
+      if (teacherUnsavedSummaryRequestKey !== requestKey) return;
+      teacherUnsavedSummaryData = data || { ok: true, count: 0, checkedRange: null };
+      renderTeacherUnsavedSummary(teacherUnsavedSummaryData);
+    })
+    .withFailureHandler(function(error) {
+      console.error(error);
+      if (teacherUnsavedSummaryRequestKey !== requestKey) return;
+      renderTeacherUnsavedSummaryError();
+    })
+    .getTeacherUnsavedSummary();
+}
+
+
     function loadMasqueradeUiState() {
       google.script.run
         .withSuccessHandler(function(state) {
@@ -1185,25 +1206,23 @@ function goHome() {
     }
 
     function renderTeacherUnsavedSummaryLoading() {
-      const box = document.getElementById("teacherUnsavedSummaryBox");
-      const title = document.getElementById("teacherUnsavedSummaryTitle");
-      const sub = document.getElementById("teacherUnsavedSummarySub");
-      const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
-      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+  const box = document.getElementById("teacherUnsavedSummaryBox");
+  const title = document.getElementById("teacherUnsavedSummaryTitle");
+  const sub = document.getElementById("teacherUnsavedSummarySub");
+  const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
+  const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
 
-      if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
+  if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
 
-    box.className = "teacher-unsaved-summary-box loading";
-    title.textContent = "未保存授業は必要時に確認できます";
-    sub.textContent = "確認には数秒かかる場合があります。必要な時だけ実行してください。";
-    toggleBtn.hidden = false;
-    document.getElementById("teacherUnsavedToggleLabel").textContent = "未保存授業を確認";
-    document.getElementById("teacherUnsavedToggleIcon").textContent = "🔍";
-    detailsContent.innerHTML = "";
-    closeTeacherUnsavedDetails();
-    teacherUnsavedDetailsLoadedKey = "";
-    }
+  box.className = "teacher-unsaved-summary-box idle";
+  title.textContent = "未保存授業を確認中...";
+  sub.textContent = "本日の授業を優先して表示した後、過去の未保存授業を自動で確認しています。数秒かかる場合があります。";
 
+  toggleBtn.hidden = true;
+  detailsContent.innerHTML = "";
+  closeTeacherUnsavedDetails();
+}
+    
     function renderTeacherUnsavedSummaryError() {
       const box = document.getElementById("teacherUnsavedSummaryBox");
       const title = document.getElementById("teacherUnsavedSummaryTitle");
@@ -1223,35 +1242,68 @@ function goHome() {
     }
 
     function renderTeacherUnsavedSummary(data) {
-      const box = document.getElementById("teacherUnsavedSummaryBox");
-      const title = document.getElementById("teacherUnsavedSummaryTitle");
-      const sub = document.getElementById("teacherUnsavedSummarySub");
-      const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
-      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+  const box = document.getElementById("teacherUnsavedSummaryBox");
+  const title = document.getElementById("teacherUnsavedSummaryTitle");
+  const sub = document.getElementById("teacherUnsavedSummarySub");
+  const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
+  const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
 
-      if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
+  if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
 
-      const count = data && typeof data.count === "number" ? data.count : 0;
-      const rangeText = data && data.checkedRange
-        ? (data.checkedRange.start + " ～ " + data.checkedRange.end)
-        : "4月7日以降";
+  // 初期表示：未保存サマリーは自動取得しない
+  if (data && data.notLoaded) {
+  box.className = "teacher-unsaved-summary-box idle";
+  title.textContent = "未保存授業を確認します";
+  sub.textContent = "本日の授業を表示した後、過去の未保存授業を自動で確認します。";
 
-      if (count > 0) {
-        box.className = "teacher-unsaved-summary-box warn";
-        title.textContent = "未保存の授業が " + count + " 件あります";
-        sub.textContent = "対象期間: " + rangeText;
-        toggleBtn.hidden = false;
-        return;
-      }
+  toggleBtn.hidden = true;
+  detailsContent.innerHTML = "";
+  closeTeacherUnsavedDetails();
+  teacherUnsavedDetailsLoadedKey = "";
+  return;
+}
 
-      box.className = "teacher-unsaved-summary-box ok";
-      title.textContent = "未保存の授業はありません";
-      sub.textContent = "対象期間: " + rangeText;
-      toggleBtn.hidden = true;
-      detailsContent.innerHTML = "";
-      closeTeacherUnsavedDetails();
-      teacherUnsavedDetailsLoadedKey = "";
-    }
+  const count = data && typeof data.count === "number" ? data.count : 0;
+  const rangeText = data && data.checkedRange
+    ? (data.checkedRange.start + " ～ " + data.checkedRange.end)
+    : "4月7日以降";
+
+  if (count > 0) {
+    box.className = "teacher-unsaved-summary-box warn";
+    title.textContent = "未保存の授業が " + count + " 件あります";
+    sub.textContent = "対象期間: " + rangeText;
+    toggleBtn.hidden = false;
+    return;
+  }
+
+  box.className = "teacher-unsaved-summary-box ok";
+  title.textContent = "未保存の授業はありません";
+  sub.textContent = "対象期間: " + rangeText;
+  toggleBtn.hidden = true;
+  detailsContent.innerHTML = "";
+  closeTeacherUnsavedDetails();
+  teacherUnsavedDetailsLoadedKey = "";
+}
+
+function loadTeacherUnsavedSummaryManual() {
+  const requestKey = Date.now() + "_" + Math.random();
+  teacherUnsavedSummaryRequestKey = requestKey;
+
+  renderTeacherUnsavedSummaryLoading();
+
+  google.script.run
+    .withSuccessHandler(function(data) {
+      if (teacherUnsavedSummaryRequestKey !== requestKey) return;
+      teacherUnsavedSummaryData = data || { ok: true, count: 0, checkedRange: null };
+      renderTeacherUnsavedSummary(teacherUnsavedSummaryData);
+    })
+    .withFailureHandler(function(error) {
+      console.error(error);
+      if (teacherUnsavedSummaryRequestKey !== requestKey) return;
+      renderTeacherUnsavedSummaryError();
+    })
+    .getTeacherUnsavedSummary();
+}
 
     function renderTeacherUnsavedDetailsLoading() {
       const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
@@ -1320,18 +1372,23 @@ function goHome() {
       teacherUnsavedDetailsLoadedKey = "";
       renderTeacherUnsavedSummaryLoading();
 
-      google.script.run
-       .withSuccessHandler(function(data) {
-        if (teacherUnsavedSummaryRequestKey !== requestKey) return;
-        teacherUnsavedSummaryData = data || { ok: true, count: 0, checkedRange: null };
-        renderTeacherUnsavedSummary(teacherUnsavedSummaryData);
-      })
-        .withFailureHandler(function(error) {
-          console.error(error);
-          if (teacherUnsavedSummaryRequestKey !== requestKey) return;
-          renderTeacherUnsavedSummaryError();
-        })
-        .getTeacherUnsavedSummary();
+      // 初期表示では未保存サマリーを自動取得しない。
+      // 本日の授業一覧の表示を優先し、未保存確認はボタン押下時だけ実行する。
+        teacherUnsavedSummaryData = {
+          ok: true,
+          count: null,
+          checkedRange: null,
+          loading: true
+        };
+
+        renderTeacherUnsavedSummaryLoading();
+
+        // 本日の授業一覧・保存状態の描画を優先してから、未保存サマリーを後読みする
+        setTimeout(function() {
+          loadTeacherUnsavedSummaryManual();
+        }, 800);
+
+        return;
     }
 
     function loadTeacherUnsavedDetails(forceReload) {
