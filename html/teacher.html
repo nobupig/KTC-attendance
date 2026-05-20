@@ -242,6 +242,14 @@
 
     .class-status.saved { color: #1d6b37; }
 
+    .class-status.partial {
+        color: #8a5a00;
+      }
+
+      .class-status.checking {
+        color: #667;
+      }
+
     .class-title {
       font-size: 16px;
       font-weight: bold;
@@ -1730,6 +1738,119 @@ function buildQuickButtonLabel(cls, sameSubjectInPeriod) {
   });
 }
 
+function getSidebarClassesByKey(sidebarKey) {
+  return (classesCache || []).filter(function(cls) {
+    return getSidebarCardKey(cls) === sidebarKey;
+  });
+}
+
+function getLatestSavedInfoFromClasses(classList) {
+  let latestInfo = null;
+  let latestTime = 0;
+
+  (classList || []).forEach(function(cls) {
+    const info = cls && cls.lastSavedInfo ? cls.lastSavedInfo : null;
+    if (!info) return;
+
+    const raw = info.savedAt || info.savedAtText || "";
+    const d = raw ? new Date(raw) : null;
+    const t = d && !isNaN(d.getTime()) ? d.getTime() : 0;
+
+    if (!latestInfo || t >= latestTime) {
+      latestInfo = info;
+      latestTime = t;
+    }
+  });
+
+  return latestInfo;
+}
+
+function getSidebarSaveStatusInfo(cls) {
+  if (!cls) {
+    return {
+      isSaved: false,
+      label: "未保存",
+      className: "",
+      lastSavedInfo: null
+    };
+  }
+
+  const sidebarKey = getSidebarCardKey(cls);
+  const relatedClasses = getSidebarClassesByKey(sidebarKey);
+  const targets = relatedClasses.length ? relatedClasses : [cls];
+
+  // 通常授業は従来どおり1件判定
+  if (!isExperimentSubject(cls)) {
+    const sessionKey = getSessionKey(cls);
+    const isSaved = !!(cls.isSaved || savedSessionKeys[sessionKey]);
+    const label = cls.saveStatusNotLoaded && !isSaved
+      ? (currentMode === "past" ? "開くと確認" : "確認中...")
+      : (isSaved ? "保存済み" : "未保存");
+
+    return {
+      isSaved: isSaved,
+      label: label,
+      className: isSaved ? "saved" : (cls.saveStatusNotLoaded ? "checking" : ""),
+      lastSavedInfo: cls.lastSavedInfo || null
+    };
+  }
+
+  // 工学実験は同一カードにまとまる classId 群を集約判定する
+  let savedCount = 0;
+  let loadedCount = 0;
+
+  targets.forEach(function(item) {
+    const key = getSessionKey(item);
+    const isItemSaved = !!(item.isSaved || savedSessionKeys[key]);
+
+    if (!item.saveStatusNotLoaded || isItemSaved) {
+      loadedCount++;
+    }
+
+    if (isItemSaved) {
+      savedCount++;
+    }
+  });
+
+  const total = targets.length;
+  const latestInfo = getLatestSavedInfoFromClasses(targets);
+
+  if (loadedCount < total) {
+    return {
+      isSaved: savedCount > 0,
+      label: savedCount > 0 ? "一部確認中" : (currentMode === "past" ? "開くと確認" : "確認中..."),
+      className: savedCount > 0 ? "partial" : "checking",
+      lastSavedInfo: latestInfo
+    };
+  }
+
+  if (savedCount === total && total > 0) {
+    return {
+      isSaved: true,
+      label: "全保存済み",
+      className: "saved",
+      lastSavedInfo: latestInfo
+    };
+  }
+
+  if (savedCount > 0) {
+    return {
+      isSaved: true,
+      label: "一部保存済み",
+      className: "partial",
+      lastSavedInfo: latestInfo
+    };
+  }
+
+  return {
+    isSaved: false,
+    label: "未保存",
+    className: "",
+    lastSavedInfo: null
+  };
+}
+
+
 function renderClassList() {
   const area = document.getElementById("classListArea");
   const quickNav = document.getElementById("quickClassNav");
@@ -1771,17 +1892,14 @@ function renderClassList() {
   sidebarClasses.forEach(function(cls) {
     const key = getSidebarCardKey(cls);
     const activeClass = selectedClass && key === getSidebarCardKey(selectedClass);
-    const sessionKey = getSessionKey(cls);
-    const isSaved = !!(cls.isSaved || savedSessionKeys[sessionKey]);
+    const sidebarStatus = getSidebarSaveStatusInfo(cls);
+    const isSaved = !!sidebarStatus.isSaved;
+    const statusLabel = sidebarStatus.label;
+    const statusClassName = sidebarStatus.className || "";
 
-    html += '<div class="class-card' + (activeClass ? ' active' : '') + '" data-sidebar-key="' + key + '">';
-    html += '  <div class="class-card-top">';
-    html += '    <span class="period-badge">' + escapeHtml(cls.period) + '限</span>';
-    const statusLabel = cls.saveStatusNotLoaded && !isSaved
-      ? (currentMode === "past" ? "開くと確認" : "確認中...")
-      : (isSaved ? "保存済み" : "未保存");
+html += '    <span class="class-status ' + statusClassName + '">' + statusLabel + '</span>';
 
-html += '    <span class="class-status ' + (isSaved ? 'saved' : '') + '">' + statusLabel + '</span>';
+
     html += '  </div>';
     html += '  <div class="class-title">' + escapeHtml(cls.subjectName) + '</div>';
     html += '  <div class="class-meta">';
@@ -1798,8 +1916,8 @@ html += '    <span class="class-status ' + (isSaved ? 'saved' : '') + '">' + sta
       html += '<br>担当: ' + escapeHtml(cls.teacherName);
     }
 
-    if (cls.lastSavedInfo && cls.lastSavedInfo.savedAtText) {
-      html += '<br>最終保存: ' + escapeHtml(cls.lastSavedInfo.savedAtText);
+    if (sidebarStatus.lastSavedInfo && sidebarStatus.lastSavedInfo.savedAtText) {
+      html += '<br>最終保存: ' + escapeHtml(sidebarStatus.lastSavedInfo.savedAtText);
     }
 
       html += '  </div>';

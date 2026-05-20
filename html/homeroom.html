@@ -728,11 +728,12 @@
 
       subjects.forEach(function(subject) {
         const isOpen = String(openedSubjectId) === String(subject.subjectId);
-        const records = (subject.records || []).filter(function(record) {
-          return record.status === 'A' || record.status === 'O' || record.status === 'L';
-        });
-
-        html += '<tr>';
+        const records = (subject.records || [])
+          .filter(function(record) {
+            return record.status === 'A' || record.status === 'O' || record.status === 'L';
+          })
+          .sort(compareAttendanceHistoryRecord);
+                html += '<tr>';
         html += '<td class="left">';
         html += '<button type="button" class="subject-link-btn" onclick="toggleSubjectHistory(\'' + escapeJs(subject.subjectId) + '\')">';
         html += escapeHtml(subject.subjectName || '');
@@ -796,6 +797,56 @@
       }
       renderDetail();
     }
+
+    function compareAttendanceHistoryRecord(a, b) {
+  const dateA = getAttendanceHistoryDateKey(a);
+  const dateB = getAttendanceHistoryDateKey(b);
+
+  if (dateA !== dateB) {
+    return dateA.localeCompare(dateB);
+  }
+
+  const periodA = getAttendanceHistoryPeriodNumber(a);
+  const periodB = getAttendanceHistoryPeriodNumber(b);
+
+  if (periodA !== periodB) {
+    return periodA - periodB;
+  }
+
+  return getAttendanceHistoryStatusOrder(a) - getAttendanceHistoryStatusOrder(b);
+}
+
+function getAttendanceHistoryDateKey(record) {
+  const value = record && record.date != null ? record.date : "";
+  const text = String(value).trim();
+
+  const match = text.match(/(\d{4})[-\/年](\d{1,2})[-\/月](\d{1,2})/);
+  if (!match) {
+    return "9999-99-99";
+  }
+
+  const y = match[1];
+  const m = String(Number(match[2])).padStart(2, "0");
+  const d = String(Number(match[3])).padStart(2, "0");
+
+  return y + "-" + m + "-" + d;
+}
+
+function getAttendanceHistoryPeriodNumber(record) {
+  const value = record && record.period != null ? record.period : "";
+  const match = String(value).match(/\d+/);
+  return match ? Number(match[0]) : 999;
+}
+
+function getAttendanceHistoryStatusOrder(record) {
+  const status = record && record.status != null ? String(record.status) : "";
+
+  if (status === "A") return 1; // 欠席
+  if (status === "O") return 2; // 公欠
+  if (status === "L") return 3; // 遅刻
+
+  return 9;
+}
 
     function getStatusLabel(code) {
       if (code === 'A') return '欠席';
