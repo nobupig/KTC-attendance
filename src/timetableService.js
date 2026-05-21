@@ -471,6 +471,34 @@ function getClassSessionsByDateIndexCached_() {
   return byDateMap;
 }
 
+
+function getTimetableExperimentSubjectIdByClassId_(classId) {
+  const targetClassId = normalizeString_(classId);
+  if (!targetClassId) return '';
+
+  // 高速化のため、保存済み判定・未保存判定では classes 参照を行わない。
+  // この関数は attendanceSessions の全行スキャン中に大量実行されるため、
+  // getClassRecordById_ を呼ぶと極端に遅くなる。
+  if (targetClassId.indexOf('工学実験実習1') !== -1) {
+    return 'G1_G_工学実験実習1_FY';
+  }
+
+  if (targetClassId.indexOf('工学実験実習2') !== -1) {
+    return 'G2_G_工学実験実習2_FY';
+  }
+
+  return '';
+}
+
+function buildExperimentSessionKeyForTimetable_(classId, date, period) {
+  const subjectId = getTimetableExperimentSubjectIdByClassId_(classId);
+  const ymd = formatDateToYmd(date);
+  const targetPeriod = normalizeString_(period);
+
+  if (!subjectId || !ymd || !targetPeriod) return '';
+  return [subjectId, ymd, targetPeriod].join('__');
+}
+
 /**
  * attendanceSessions を日付単位で小さくキャッシュする
  * savedByCurrentUser は呼び出し側で付与する
@@ -540,7 +568,7 @@ function getSavedSessionKeySetByRangeCached_(startYmd, endYmd) {
   const normalizedEndYmd = formatDateToYmd(endYmd);
 
   const cacheKey =
-    'savedSessionKeySetByRange__v3__' +
+    'savedSessionKeySetByRange__v4__' +
     String(normalizedStartYmd || '') +
     '__' +
     String(normalizedEndYmd || '');
@@ -620,6 +648,12 @@ function getSavedSessionKeySetByRangeCached_(startYmd, endYmd) {
 
     const key = [classId, rowDate, period].join('__');
     keySet[key] = true;
+
+    // 工学実験は G2_1/G2_2/G2_3... のどれに保存されても、同一 subjectId・日付・時限として保存済み扱いにする
+    const experimentKey = buildExperimentSessionKeyForTimetable_(classId, rowDate, period);
+    if (experimentKey) {
+      keySet[experimentKey] = true;
+    }
   });
 
   if (typeof logPerf_ === 'function') {
@@ -786,11 +820,12 @@ function getTeacherUnsavedCount_(teacherId, startYmd, endYmd) {
 
       if (!context.teacherSessionKeyMap[teacherKey]) return;
 
-      const saveKey = [classId, ymd, period].join('__');
-      if (savedKeySet[saveKey]) return;
-
       const cls = context.classMap[classId] || {};
       const displayKey = buildTeacherUnsavedDisplayKey_(cls, classId, ymd, period);
+      const saveKey = [classId, ymd, period].join('__');
+
+      // 工学実験は同一 subjectId・日付・時限の保存ログでも保存済み扱いにする
+      if (savedKeySet[saveKey] || savedKeySet[displayKey]) return;
 
       if (seenSessionKeys[displayKey]) return;
       seenSessionKeys[displayKey] = true;
@@ -827,11 +862,12 @@ function getTeacherUnsavedSessionItems_(teacherId, startYmd, endYmd) {
 
       if (!context.teacherSessionKeyMap[teacherKey]) return;
 
-      const saveKey = [classId, ymd, period].join('__');
-      if (savedKeySet[saveKey]) return;
-
       const cls = context.classMap[classId] || {};
       const displayKey = buildTeacherUnsavedDisplayKey_(cls, classId, ymd, period);
+      const saveKey = [classId, ymd, period].join('__');
+
+      // 工学実験は同一 subjectId・日付・時限の保存ログでも保存済み扱いにする
+      if (savedKeySet[saveKey] || savedKeySet[displayKey]) return;
 
       if (seenSessionKeys[displayKey]) return;
       seenSessionKeys[displayKey] = true;
@@ -1002,15 +1038,15 @@ function getTeacherUnsavedContext_(teacherId) {
 }
 
 function buildTeacherUnsavedSummaryCacheKey_(teacherId, endYmd) {
-  return 'teacherUnsavedSummary__v2__' + String(teacherId || '') + '__' + String(endYmd || '');
+  return 'teacherUnsavedSummary__v3__' + String(teacherId || '') + '__' + String(endYmd || '');
 }
 
 function buildTeacherUnsavedDetailsCacheKey_(teacherId, endYmd) {
-  return 'teacherUnsavedDetails__v2__' + String(teacherId || '') + '__' + String(endYmd || '');
+  return 'teacherUnsavedDetails__v3__' + String(teacherId || '') + '__' + String(endYmd || '');
 }
 
 function buildTeacherUnsavedContextCacheKey_(teacherId) {
-  return 'teacherUnsavedContext__v2__' + String(teacherId || '');
+  return 'teacherUnsavedContext__v3__' + String(teacherId || '');
 }
 
 function getTeacherUnsavedStartDate_(baseDate) {
@@ -1178,6 +1214,7 @@ function getSaveStatusForTeacherSessionsDirect_(sessionItems) {
   const result = {};
   const targetKeySet = {};
   const targetKeys = [];
+  const targetExperimentKeyMap = {};
 
   items.forEach(function(item) {
     const classId = normalizeString_(item.classId);
@@ -1191,6 +1228,16 @@ function getSaveStatusForTeacherSessionsDirect_(sessionItems) {
     if (!targetKeySet[key]) {
       targetKeySet[key] = true;
       targetKeys.push(key);
+    }
+
+    const experimentKey = buildExperimentSessionKeyForTimetable_(classId, date, period);
+    if (experimentKey) {
+      if (!targetExperimentKeyMap[experimentKey]) {
+        targetExperimentKeyMap[experimentKey] = [];
+      }
+      if (targetExperimentKeyMap[experimentKey].indexOf(key) === -1) {
+        targetExperimentKeyMap[experimentKey].push(key);
+      }
     }
 
     result[key] = {
@@ -1276,9 +1323,20 @@ function getSaveStatusForTeacherSessionsDirect_(sessionItems) {
     if (!rowPeriod) continue;
 
     const sessionKey = [rowClassId, rowDate, rowPeriod].join('__');
+    const rowExperimentKey = buildExperimentSessionKeyForTimetable_(rowClassId, rowDate, rowPeriod);
 
-    if (!targetKeySet[sessionKey]) continue;
-    if (foundKeySet[sessionKey]) continue;
+    const matchedKeys = [];
+    if (targetKeySet[sessionKey]) {
+      matchedKeys.push(sessionKey);
+    }
+
+    if (rowExperimentKey && targetExperimentKeyMap[rowExperimentKey]) {
+      targetExperimentKeyMap[rowExperimentKey].forEach(function(key) {
+        if (matchedKeys.indexOf(key) === -1) matchedKeys.push(key);
+      });
+    }
+
+    if (!matchedKeys.length) continue;
 
     const accessedAtRaw = col.accessedAt !== -1 ? row[col.accessedAt] : '';
     const teacherEmail = col.teacherEmail !== -1
@@ -1306,14 +1364,18 @@ function getSaveStatusForTeacherSessionsDirect_(sessionItems) {
       savedModeLabel: savedModeLabel
     };
 
-    result[sessionKey] = {
-      isSaved: true,
-      lastSavedInfo: lastSavedInfo,
-      saveStatusNotLoaded: false
-    };
+    matchedKeys.forEach(function(key) {
+      if (foundKeySet[key]) return;
 
-    foundKeySet[sessionKey] = true;
-    foundCount++;
+      result[key] = {
+        isSaved: true,
+        lastSavedInfo: lastSavedInfo,
+        saveStatusNotLoaded: false
+      };
+
+      foundKeySet[key] = true;
+      foundCount++;
+    });
 
     if (foundCount >= targetKeys.length) {
       break;

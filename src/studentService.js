@@ -76,7 +76,16 @@ function getTeacherSessionDetailLight(classId, date, period, group) {
   const rosterStartedAt = perfNow_();
   let students = [];
   const rosterSource = getRosterSourceByClassId_(targetClassId);
-  logPerf_('getTeacherSessionDetailLight getRosterSourceByClassId_', rosterStartedAt, 'classId=' + targetClassId + ' rosterSource=' + rosterSource);
+  const isExperimentGroup = rosterSource === 'studentGroups' && isExperimentGroupTargetClass_(targetClassId);
+  const relatedClassIds = isExperimentGroup
+    ? getExperimentRelatedClassIdsByClassId_(targetClassId)
+    : [targetClassId];
+
+  logPerf_(
+    'getTeacherSessionDetailLight getRosterSourceByClassId_',
+    rosterStartedAt,
+    'classId=' + targetClassId + ' rosterSource=' + rosterSource + ' relatedClassIds=' + relatedClassIds.join(',')
+  );
 
   const studentsStartedAt = perfNow_();
   if (rosterSource === 'studentGroups') {
@@ -91,20 +100,27 @@ function getTeacherSessionDetailLight(classId, date, period, group) {
   logPerf_('getTeacherSessionDetailLight load students', studentsStartedAt, 'count=' + students.length + ' group=' + targetGroup);
 
   const attendanceStartedAt = perfNow_();
-  const attendanceMap = getAttendanceMap(targetClassId, date, period);
-  logPerf_('getTeacherSessionDetailLight getAttendanceMap', attendanceStartedAt, 'attendanceCount=' + Object.keys(attendanceMap || {}).length);
+  const targetStudentIds = getStudentIdsForAttendanceFilter_(students);
+
+  const attendanceMap = isExperimentGroup
+    ? getAttendanceMapForClassIds_(relatedClassIds, date, period, targetStudentIds)
+    : getAttendanceMap(targetClassId, date, period);
+
+  logPerf_(
+    'getTeacherSessionDetailLight getAttendanceMap',
+    attendanceStartedAt,
+    'attendanceCount=' + Object.keys(attendanceMap || {}).length + ' experiment=' + isExperimentGroup
+  );
 
   const savedInfoStartedAt = perfNow_();
-  const lastSavedInfo = getLatestAttendanceSessionInfo_(
-    targetClassId,
-    date,
-    period,
-    ['normal', 'past-edit']
-  );
+  const lastSavedInfo = isExperimentGroup
+    ? getLatestAttendanceSessionInfoForClassIds_(relatedClassIds, date, period, ['normal', 'past-edit'])
+    : getLatestAttendanceSessionInfo_(targetClassId, date, period, ['normal', 'past-edit']);
+
   logPerf_('getTeacherSessionDetailLight getLatestAttendanceSessionInfo_', savedInfoStartedAt, 'hasSaved=' + (!!lastSavedInfo));
 
   const groupsStartedAt = perfNow_();
-  const availableGroups = (rosterSource === 'studentGroups' && isExperimentGroupTargetClass_(targetClassId))
+  const availableGroups = isExperimentGroup
     ? getGroupsByClassId(targetClassId)
     : [];
   logPerf_('getTeacherSessionDetailLight get availableGroups', groupsStartedAt, 'count=' + availableGroups.length);
@@ -124,7 +140,8 @@ function getTeacherSessionDetailLight(classId, date, period, group) {
     hasSavedSession: !!safeLastSavedInfo,
     lastSavedInfo: safeLastSavedInfo,
     group: targetGroup,
-    availableGroups: availableGroups
+    availableGroups: availableGroups,
+    relatedClassIds: relatedClassIds
   };
 
   logPerf_(
@@ -421,6 +438,68 @@ function getStudentGroupKeyByClassId_(classId) {
   }
 
   return targetClassId;
+}
+
+function getExperimentRelatedClassIdsByClassId_(classId) {
+  const targetClassId = normalizeString_(classId);
+  if (!targetClassId) return [];
+
+  const classInfo = getClassRecordById_(targetClassId);
+  if (!classInfo) return [targetClassId];
+
+  const subjectId = normalizeString_(classInfo.subjectId);
+  if (!subjectId) return [targetClassId];
+
+  const isExperimentSubject =
+    subjectId === 'G1_G_工学実験実習1_FY' ||
+    subjectId === 'G2_G_工学実験実習2_FY';
+
+  if (!isExperimentSubject) {
+    return [targetClassId];
+  }
+
+  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
+  const headers = classesData.headers || [];
+  const rows = classesData.rows || [];
+
+  const col = {
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    subjectId: findColumnIndex_(headers, ['subjectId', 'SubjectID'])
+  };
+
+  if (col.classId === -1 || col.subjectId === -1) {
+    return [targetClassId];
+  }
+
+  const seen = {};
+  const result = [];
+
+  rows.forEach(function(row) {
+    const rowClassId = normalizeString_(row[col.classId]);
+    const rowSubjectId = normalizeString_(row[col.subjectId]);
+
+    if (!rowClassId || rowSubjectId !== subjectId) return;
+    if (seen[rowClassId]) return;
+
+    seen[rowClassId] = true;
+    result.push(rowClassId);
+  });
+
+  if (!seen[targetClassId]) {
+    result.push(targetClassId);
+  }
+
+  return result.sort(function(a, b) {
+    return String(a).localeCompare(String(b), 'ja');
+  });
+}
+
+function getStudentIdsForAttendanceFilter_(students) {
+  return (Array.isArray(students) ? students : [])
+    .map(function(student) {
+      return normalizeString_(student && student.studentId);
+    })
+    .filter(Boolean);
 }
 
 function getGroupsByClassId(classId) {

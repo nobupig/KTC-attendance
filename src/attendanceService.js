@@ -198,7 +198,13 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
     const targetClassId = String(payload.classId || "").trim();
     const targetDate = formatDateToYmd(payload.date);
     const targetPeriod = String(payload.period || "").trim();
-    const targetSessionKey = [targetClassId, targetDate, targetPeriod].join("__");
+    const targetGroup = String(payload.group || "").trim();
+
+    const baseSessionKey = [targetClassId, targetDate, targetPeriod].join("__");
+    const targetSessionKey = targetGroup
+      ? baseSessionKey + "__" + targetGroup
+      : baseSessionKey;
+
     const actionType = allowPastEdit ? "past-edit" : "normal";
     const savedModeLabel = allowPastEdit ? "過去修正" : "通常入力";
 
@@ -211,6 +217,25 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
       date: targetDate,
       period: targetPeriod
     };
+
+    const isExperimentGroupSave =
+      typeof isExperimentGroupTargetClass_ === 'function' &&
+      isExperimentGroupTargetClass_(targetClassId);
+
+    const relatedClassIds = isExperimentGroupSave
+      ? getExperimentRelatedClassIdsByClassId_(targetClassId)
+      : [targetClassId];
+
+    const relatedClassIdSet = {};
+    relatedClassIds.forEach(function(id) {
+      const normalizedId = String(id || '').trim();
+      if (normalizedId) relatedClassIdSet[normalizedId] = true;
+    });
+
+    if (!relatedClassIdSet[targetClassId]) {
+      relatedClassIdSet[targetClassId] = true;
+      relatedClassIds.push(targetClassId);
+    }
 
     if (!canEditAttendance(session)) {
       throw new Error("この授業の出席を編集する権限がありません");
@@ -248,10 +273,11 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
       period: headers.indexOf('period'),
       studentId: headers.indexOf('studentId'),
       statusCode: headers.indexOf('statusCode'),
-      recordedAt: headers.indexOf('recordedAt')
+      recordedAt: headers.indexOf('recordedAt'),
+      group: findColumnIndex_(headers, ['group', '班'])
     };
 
-    Object.keys(col).forEach(function(key) {
+    ['classId', 'date', 'period', 'studentId', 'statusCode', 'recordedAt'].forEach(function(key) {
       if (col[key] === -1) {
         throw new Error('attendance シートに ' + key + ' 列がありません');
       }
@@ -275,8 +301,12 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
       const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
       const rowStudentId = String(row[col.studentId] || '').trim();
 
+      const rowClassMatches = isExperimentGroupSave
+        ? !!relatedClassIdSet[rowClassId]
+        : rowClassId === targetClassId;
+
       if (
-        rowClassId === targetClassId &&
+        rowClassMatches &&
         rowDate === targetDate &&
         rowPeriod === targetPeriod &&
         targetStudentIds[rowStudentId]
@@ -306,7 +336,8 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
         period: Number(targetPeriod),
         studentId: studentId,
         statusCode: statusCode,
-        recordedAt: now
+        recordedAt: now,
+        group: targetGroup
       });
 
       if (existingRowNumber) {
@@ -353,9 +384,13 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
   now,
   actionType,
   targetSessionKey,
-  savedModeLabel
+  savedModeLabel,
+  targetGroup
 ]);
-    invalidateAttendanceCaches_(targetClassId, targetDate, targetPeriod);
+
+    relatedClassIds.forEach(function(classIdToClear) {
+      invalidateAttendanceCaches_(classIdToClear, targetDate, targetPeriod);
+    });
     const currentUser = getCurrentUserContext();
     const currentTeacherId = currentUser && currentUser.teacherId
       ? normalizeString_(currentUser.teacherId)
@@ -383,7 +418,8 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
       actionType: actionType,
       targetSessionKey: targetSessionKey,
       savedModeLabel: savedModeLabel,
-      savedByCurrentUser: true
+      savedByCurrentUser: true,
+      group: targetGroup
     };
 
     return {
@@ -539,6 +575,202 @@ function getAttendanceMapDirect_(classId, date, period) {
   return result;
 }
 
+
+function getAttendanceMapForClassIds_(classIds, date, period, studentIds) {
+  const targetDate = formatDateToYmd(date);
+  const targetPeriod = String(period == null ? '' : period).trim();
+
+  const classIdSet = {};
+  (Array.isArray(classIds) ? classIds : [classIds]).forEach(function(classId) {
+    const id = String(classId || '').trim();
+    if (id) classIdSet[id] = true;
+  });
+
+  const studentIdSet = {};
+  const hasStudentFilter = Array.isArray(studentIds) && studentIds.length > 0;
+  (Array.isArray(studentIds) ? studentIds : []).forEach(function(studentId) {
+    const id = String(studentId || '').trim();
+    if (id) studentIdSet[id] = true;
+  });
+
+  if (!targetDate || !targetPeriod || Object.keys(classIdSet).length === 0) {
+    return {};
+  }
+
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE);
+
+  if (!sheet) {
+    throw new Error('attendance シートが見つかりません');
+  }
+
+  const values = sheet.getDataRange().getValues();
+
+  if (values.length <= 1) {
+    return {};
+  }
+
+  const headers = values[0];
+  const rows = values.slice(1);
+
+  const col = {
+    classId: headers.indexOf('classId'),
+    date: headers.indexOf('date'),
+    period: headers.indexOf('period'),
+    studentId: headers.indexOf('studentId'),
+    statusCode: headers.indexOf('statusCode'),
+    recordedAt: headers.indexOf('recordedAt')
+  };
+
+  ['classId', 'date', 'period', 'studentId', 'statusCode'].forEach(function(key) {
+    if (col[key] === -1) {
+      throw new Error('attendance シートに ' + key + ' 列がありません');
+    }
+  });
+
+  const result = {};
+  const latestOrderByStudentId = {};
+
+  rows.forEach(function(row, index) {
+    const rowClassId = String(row[col.classId] || '').trim();
+    if (!classIdSet[rowClassId]) return;
+
+    const rowDate = formatDateToYmd(row[col.date]);
+    if (rowDate !== targetDate) return;
+
+    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
+    if (rowPeriod !== targetPeriod) return;
+
+    const studentId = String(row[col.studentId] || '').trim();
+    if (!studentId) return;
+    if (hasStudentFilter && !studentIdSet[studentId]) return;
+
+    const statusCode = String(row[col.statusCode] || '').trim();
+
+    const recordedAtRaw = col.recordedAt !== -1 ? row[col.recordedAt] : '';
+    const recordedAt = recordedAtRaw instanceof Date ? recordedAtRaw : new Date(recordedAtRaw);
+    const order = isNaN(recordedAt.getTime()) ? index : recordedAt.getTime();
+
+    if (latestOrderByStudentId[studentId] != null && order < latestOrderByStudentId[studentId]) {
+      return;
+    }
+
+    latestOrderByStudentId[studentId] = order;
+
+    if (statusCode) {
+      result[studentId] = statusCode;
+    } else if (result[studentId]) {
+      delete result[studentId];
+    }
+  });
+
+  return result;
+}
+
+function getLatestAttendanceSessionInfoForClassIds_(classIds, date, period, allowedActionTypes) {
+  const targetDate = formatDateToYmd(date);
+  const targetPeriod = String(period == null ? '' : period).trim();
+
+  const classIdSet = {};
+  (Array.isArray(classIds) ? classIds : [classIds]).forEach(function(classId) {
+    const id = String(classId || '').trim();
+    if (id) classIdSet[id] = true;
+  });
+
+  if (!targetDate || !targetPeriod || Object.keys(classIdSet).length === 0) {
+    return null;
+  }
+
+  const allowed = normalizeAttendanceActionTypes_(allowedActionTypes);
+
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
+  if (!sheet) {
+    throw new Error('attendanceSessions シートが見つかりません');
+  }
+
+  const values = sheet.getDataRange().getValues();
+
+  if (values.length <= 1) {
+    return null;
+  }
+
+  const headers = values[0];
+  const rows = values.slice(1);
+
+  const col = {
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    date: findColumnIndex_(headers, ['date', '日付']),
+    period: findColumnIndex_(headers, ['period', '時限']),
+    teacherEmail: findColumnIndex_(headers, ['teacherEmail', 'email']),
+    accessedAt: findColumnIndex_(headers, ['accessedAt', 'savedAt']),
+    actionType: findColumnIndex_(headers, ['actionType']),
+    targetSessionKey: findColumnIndex_(headers, ['targetSessionKey']),
+    savedModeLabel: findColumnIndex_(headers, ['savedModeLabel']),
+    group: findColumnIndex_(headers, ['group', '班'])
+  };
+
+  ['classId', 'date', 'period'].forEach(function(key) {
+    if (col[key] === -1) {
+      throw new Error('attendanceSessions シートに ' + key + ' 列がありません');
+    }
+  });
+
+  let latest = null;
+  let latestMs = -1;
+
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+
+    const rowClassId = String(row[col.classId] || '').trim();
+    if (!classIdSet[rowClassId]) continue;
+
+    const rowDate = formatDateToYmd(row[col.date]);
+    if (rowDate !== targetDate) continue;
+
+    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
+    if (rowPeriod !== targetPeriod) continue;
+
+    const actionType = col.actionType !== -1
+      ? String(row[col.actionType] || '').trim()
+      : '';
+
+    if (allowed && allowed.indexOf(actionType) === -1) {
+      continue;
+    }
+
+    const accessedAtRaw = col.accessedAt !== -1 ? row[col.accessedAt] : '';
+    const accessedAt = accessedAtRaw instanceof Date ? accessedAtRaw : new Date(accessedAtRaw);
+    const accessedAtMs = isNaN(accessedAt.getTime()) ? 0 : accessedAt.getTime();
+
+    if (!latest || accessedAtMs >= latestMs) {
+      latestMs = accessedAtMs;
+      latest = {
+        teacherEmail: col.teacherEmail !== -1
+          ? String(row[col.teacherEmail] || '').trim().toLowerCase()
+          : '',
+        savedAt: accessedAtRaw,
+        savedAtText: formatDateTimeJst_(accessedAtRaw),
+        actionType: actionType,
+        targetSessionKey: col.targetSessionKey !== -1
+          ? String(row[col.targetSessionKey] || '').trim()
+          : '',
+        savedModeLabel: col.savedModeLabel !== -1
+          ? String(row[col.savedModeLabel] || '').trim()
+          : '',
+        group: col.group !== -1
+          ? String(row[col.group] || '').trim()
+          : ''
+      };
+
+      break;
+    }
+  }
+
+  return latest;
+}
+
+
 /* =========================
  * 内部ヘルパー
  * ========================= */
@@ -551,6 +783,11 @@ function buildAttendanceSheetRow_(headerCount, col, record) {
   row[col.studentId] = record.studentId;
   row[col.statusCode] = record.statusCode;
   row[col.recordedAt] = record.recordedAt;
+
+  if (col.group !== -1 && col.group != null) {
+    row[col.group] = record.group || '';
+  }
+
   return row;
 }
 
