@@ -6,3 +6,5 @@
 config.gs
 src/config.js
 src/config.*.local.js
+
+src/config.*.local.js
