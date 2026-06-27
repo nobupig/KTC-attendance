@@ -5,3 +5,4 @@
 *.txt
 config.gs
 src/config.js
+src/config.*.local.js
