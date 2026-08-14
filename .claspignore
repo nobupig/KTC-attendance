@@ -1,0 +1,6 @@
+﻿src/config.prod.local.js
+src/config.*.local.js
+.git/**
+.vscode/**
+.gitignore
+.clasp.json
