@@ -3,6 +3,11 @@ const TEACHER_UNSAVED_CACHE_SHEETS_ = Object.freeze({
   DETAIL: 'teacherUnsavedDetailCache'
 });
 
+const TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HANDLER_ =
+  'runTeacherUnsavedSummaryCacheRebuildTrigger';
+const TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HOURS_ = Object.freeze([6, 12, 17, 21]);
+const TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_TIME_ZONE_ = 'Asia/Tokyo';
+
 const TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_ = Object.freeze([
   'snapshotId',
   'cacheDate',
@@ -86,12 +91,102 @@ function rebuildTeacherUnsavedSummaryCache() {
   }
 }
 
+function runTeacherUnsavedSummaryCacheRebuildTrigger() {
+  try {
+    const result = rebuildTeacherUnsavedSummaryCache();
+    Logger.log(JSON.stringify(result, null, 2));
+    return result;
+  } catch (error) {
+    Logger.log(JSON.stringify({
+      ok: false,
+      handlerFunction: TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HANDLER_,
+      errorName: error && error.name ? String(error.name) : '',
+      errorMessage: error && error.message ? String(error.message) : String(error),
+      errorStack: error && error.stack ? String(error.stack) : ''
+    }, null, 2));
+    throw error;
+  }
+}
+
+function getTeacherUnsavedCacheRebuildTriggerStatus() {
+  const triggers = getTeacherUnsavedCacheRebuildTriggers_();
+  return {
+    ok: true,
+    handlerFunction: TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HANDLER_,
+    triggerCount: triggers.length,
+    configuredHours: TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HOURS_.slice(),
+    timeZone: TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_TIME_ZONE_,
+    triggers: triggers.map(function(trigger) {
+      const triggerSourceId = trigger.getTriggerSourceId();
+      return {
+        handlerFunction: trigger.getHandlerFunction(),
+        eventType: String(trigger.getEventType()),
+        triggerSource: String(trigger.getTriggerSource()),
+        triggerSourceId: triggerSourceId == null ? '' : String(triggerSourceId),
+        uniqueId: trigger.getUniqueId()
+      };
+    })
+  };
+}
+
+function installTeacherUnsavedCacheRebuildTriggers() {
+  const existingTriggers = getTeacherUnsavedCacheRebuildTriggers_();
+  existingTriggers.forEach(function(trigger) {
+    ScriptApp.deleteTrigger(trigger);
+  });
+
+  let createdCount = 0;
+  TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HOURS_.forEach(function(hour) {
+    ScriptApp.newTrigger(TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HANDLER_)
+      .timeBased()
+      .atHour(hour)
+      .everyDays(1)
+      .inTimezone(TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_TIME_ZONE_)
+      .create();
+    createdCount++;
+  });
+
+  const status = getTeacherUnsavedCacheRebuildTriggerStatus();
+  status.removedCount = existingTriggers.length;
+  status.createdCount = createdCount;
+  return status;
+}
+
+function removeTeacherUnsavedCacheRebuildTriggers() {
+  const targetTriggers = getTeacherUnsavedCacheRebuildTriggers_();
+  targetTriggers.forEach(function(trigger) {
+    ScriptApp.deleteTrigger(trigger);
+  });
+
+  const status = getTeacherUnsavedCacheRebuildTriggerStatus();
+  return {
+    ok: true,
+    handlerFunction: TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HANDLER_,
+    deletedCount: targetTriggers.length,
+    remainingCount: status.triggerCount,
+    remainingTriggers: status.triggers
+  };
+}
+
+function debugLogTeacherUnsavedCacheRebuildTriggerStatus() {
+  const result = getTeacherUnsavedCacheRebuildTriggerStatus();
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
 function debugBuildTeacherUnsavedCachePreview() {
   const startedAt = Date.now();
   const snapshot = buildTeacherUnsavedCacheSnapshot_();
   const result = buildTeacherUnsavedCacheBuildResult_(snapshot, Date.now() - startedAt, false);
   result.cacheSheets = validateTeacherUnsavedCacheSheets();
   return result;
+}
+
+function getTeacherUnsavedCacheRebuildTriggers_() {
+  return ScriptApp.getProjectTriggers().filter(function(trigger) {
+    return trigger.getHandlerFunction() ===
+      TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HANDLER_;
+  });
 }
 
 function getTeacherUnsavedSummaryFast() {
