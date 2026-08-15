@@ -397,6 +397,48 @@ function debugCompareTeacherUnsavedCacheForCurrentUser() {
   };
 }
 
+function debugLogTeacherUnsavedSummaryFast() {
+  const result = getTeacherUnsavedSummaryFast();
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+function debugLogTeacherUnsavedDetailsFast() {
+  const result = getTeacherUnsavedDetailsFast({ limit: 10, offset: 0 });
+  const summary = {
+    ok: result.ok,
+    status: result.status,
+    totalCount: result.totalCount,
+    limit: result.limit,
+    offset: result.offset,
+    hasMore: result.hasMore,
+    checkedAt: result.checkedAt,
+    startYmd: result.startYmd,
+    endYmd: result.endYmd,
+    snapshotId: result.snapshotId
+  };
+  const items = (result.items || []).slice(0, 10).map(function(item) {
+    return {
+      date: item.date,
+      period: item.period,
+      classId: item.classId,
+      subjectName: item.subjectName,
+      displayKey: item.displayKey,
+      saveKey: item.saveKey
+    };
+  });
+
+  Logger.log(JSON.stringify(summary, null, 2));
+  Logger.log(JSON.stringify(items, null, 2));
+  return result;
+}
+
+function debugLogCompareTeacherUnsavedCacheForCurrentUser() {
+  const result = debugCompareTeacherUnsavedCacheForCurrentUser();
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
 function buildTeacherUnsavedCacheSnapshot_() {
   const checkedAt = new Date();
   const dateContext = getTeacherUnsavedCacheDateContext_(checkedAt);
