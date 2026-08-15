@@ -860,6 +860,7 @@
 
     const CLASS_LIST_EMPTY_RETRY_MS = 350;
     const CLASS_LIST_EMPTY_RETRY_MAX = 1;
+    const TEACHER_UNSAVED_DETAILS_LIMIT = 50;
 
     let currentMode = "today";
     let classesCache = [];
@@ -1228,6 +1229,94 @@ function goHome() {
       teacherUnsavedDetailsLoadedKey = "";
     }
 
+    function normalizeTeacherUnsavedSummaryFastData(data) {
+      const normalized = data && typeof data === "object"
+        ? Object.assign({}, data)
+        : { ok: false, status: "unavailable" };
+
+      if (normalized.ok === true && normalized.status === "ready") {
+        const count = typeof normalized.count === "number"
+          ? normalized.count
+          : (typeof normalized.unsavedCount === "number"
+            ? normalized.unsavedCount
+            : (typeof normalized.detailCount === "number" ? normalized.detailCount : null));
+
+        normalized.count = count;
+        normalized.unsavedCount = typeof normalized.unsavedCount === "number"
+          ? normalized.unsavedCount
+          : count;
+        normalized.detailCount = typeof normalized.detailCount === "number"
+          ? normalized.detailCount
+          : count;
+      }
+
+      normalized.firstDate = normalized.firstDate || "";
+      normalized.lastDate = normalized.lastDate || "";
+      normalized.checkedAt = normalized.checkedAt || "";
+
+      if (!normalized.checkedRange && (normalized.startYmd || normalized.endYmd)) {
+        normalized.checkedRange = {
+          start: normalized.startYmd || "",
+          end: normalized.endYmd || ""
+        };
+      }
+
+      return normalized;
+    }
+
+    function getTeacherUnsavedCacheStatusView(data) {
+      const status = String((data && data.status) || "");
+      const cacheStatus = String((data && data.cacheStatus) || "");
+
+      if (status === "missing") {
+        return {
+          className: "warn",
+          message: "過去未保存チェックのキャッシュがまだ作成されていません。"
+        };
+      }
+      if (status === "stale") {
+        return {
+          className: "warn",
+          message: "過去未保存チェックの情報が古い可能性があります。"
+        };
+      }
+      if (status === "error" || cacheStatus === "error") {
+        return {
+          className: "error",
+          message: "過去未保存チェックの再構築でエラーが発生しました。"
+        };
+      }
+      if (status === "building" || cacheStatus === "building") {
+        return {
+          className: "warn",
+          message: "過去未保存チェックのキャッシュを構築中です。"
+        };
+      }
+
+      return {
+        className: "error",
+        message: "過去未保存チェックを現在表示できません。"
+      };
+    }
+
+    function getTeacherUnsavedRangeText(data) {
+      const checkedRange = data && data.checkedRange ? data.checkedRange : null;
+      const start = checkedRange && checkedRange.start
+        ? String(checkedRange.start)
+        : String((data && data.startYmd) || "");
+      const end = checkedRange && checkedRange.end
+        ? String(checkedRange.end)
+        : String((data && data.endYmd) || "");
+
+      if (start && end) return start + " ～ " + end;
+      if (start) return start + " 以降";
+      return "4月7日以降";
+    }
+
+    function getTeacherUnsavedCheckedAtText(data) {
+      return data && data.checkedAt ? "最終確認：" + String(data.checkedAt) : "";
+    }
+
     function renderTeacherUnsavedSummary(data) {
   const box = document.getElementById("teacherUnsavedSummaryBox");
   const title = document.getElementById("teacherUnsavedSummaryTitle");
@@ -1250,22 +1339,38 @@ function goHome() {
   return;
 }
 
-  const count = data && typeof data.count === "number" ? data.count : 0;
-  const rangeText = data && data.checkedRange
-    ? (data.checkedRange.start + " ～ " + data.checkedRange.end)
-    : "4月7日以降";
+  if (!data || data.ok !== true || data.status !== "ready" || typeof data.count !== "number") {
+    const statusView = getTeacherUnsavedCacheStatusView(data);
+    const checkedAtText = getTeacherUnsavedCheckedAtText(data);
+
+    box.className = "teacher-unsaved-summary-box " + statusView.className;
+    title.textContent = statusView.message;
+    sub.textContent = checkedAtText || "授業一覧や出席入力はそのまま利用できます。";
+    toggleBtn.hidden = true;
+    detailsContent.innerHTML = "";
+    closeTeacherUnsavedDetails();
+    teacherUnsavedDetailsLoadedKey = "";
+    return;
+  }
+
+  const count = data.count;
+  const rangeText = getTeacherUnsavedRangeText(data);
+  const checkedAtText = getTeacherUnsavedCheckedAtText(data);
+  const summarySubText = ["対象期間: " + rangeText, checkedAtText]
+    .filter(function(text) { return Boolean(text); })
+    .join(" / ");
 
   if (count > 0) {
     box.className = "teacher-unsaved-summary-box warn";
     title.textContent = "未保存の授業が " + count + " 件あります";
-    sub.textContent = "対象期間: " + rangeText;
+    sub.textContent = summarySubText;
     toggleBtn.hidden = false;
     return;
   }
 
   box.className = "teacher-unsaved-summary-box ok";
   title.textContent = "未保存の授業はありません";
-  sub.textContent = "対象期間: " + rangeText;
+  sub.textContent = summarySubText;
   toggleBtn.hidden = true;
   detailsContent.innerHTML = "";
   closeTeacherUnsavedDetails();
@@ -1281,7 +1386,7 @@ function loadTeacherUnsavedSummaryManual() {
   google.script.run
     .withSuccessHandler(function(data) {
       if (teacherUnsavedSummaryRequestKey !== requestKey) return;
-      teacherUnsavedSummaryData = data || { ok: true, count: 0, checkedRange: null };
+      teacherUnsavedSummaryData = normalizeTeacherUnsavedSummaryFastData(data);
       renderTeacherUnsavedSummary(teacherUnsavedSummaryData);
     })
     .withFailureHandler(function(error) {
@@ -1289,7 +1394,7 @@ function loadTeacherUnsavedSummaryManual() {
       if (teacherUnsavedSummaryRequestKey !== requestKey) return;
       renderTeacherUnsavedSummaryError();
     })
-    .getTeacherUnsavedSummary();
+    .getTeacherUnsavedSummaryFast();
 }
 
     function renderTeacherUnsavedDetailsLoading() {
@@ -1308,6 +1413,14 @@ function loadTeacherUnsavedSummaryManual() {
       const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
       if (!detailsContent) return;
 
+      if (!data || data.ok !== true || data.status !== "ready") {
+        const statusView = getTeacherUnsavedCacheStatusView(data);
+        detailsContent.innerHTML = '<div class="teacher-unsaved-empty-note">' +
+          escapeHtml(statusView.message) +
+          '</div>';
+        return;
+      }
+
       const items = Array.isArray(data && data.items) ? data.items : [];
 
       if (!items.length) {
@@ -1315,7 +1428,7 @@ function loadTeacherUnsavedSummaryManual() {
         return;
       }
 
-      detailsContent.innerHTML = items.map(function(item) {
+      const itemsHtml = items.map(function(item) {
         const dateText = escapeHtml(formatDateJa(item.date || ""));
         const subjectText = escapeHtml(item.subjectName || "");
         const periodText = escapeHtml(String(item.period || ""));
@@ -1341,6 +1454,13 @@ function loadTeacherUnsavedSummaryManual() {
             '<button class="teacher-unsaved-open-btn" type="button" data-date="' + escapeHtml(item.date || "") + '" data-class-id="' + escapeHtml(item.classId || "") + '" data-period="' + escapeHtml(String(item.period || "")) + '">この授業を開く</button>' +
           '</div>';
       }).join("");
+      const moreNoteHtml = data.hasMore
+        ? '<div class="teacher-unsaved-empty-note">現在 ' + items.length +
+          ' 件を表示しています（全 ' + escapeHtml(String(data.totalCount || "")) +
+          ' 件）。残りは今後のページング対応で表示します。</div>'
+        : '';
+
+      detailsContent.innerHTML = itemsHtml + moreNoteHtml;
 
       detailsContent.querySelectorAll(".teacher-unsaved-open-btn").forEach(function(btn) {
         btn.addEventListener("click", function() {
@@ -1358,8 +1478,7 @@ function loadTeacherUnsavedSummaryManual() {
       teacherUnsavedSummaryRequestKey = requestKey;
       teacherUnsavedDetailsLoadedKey = "";
       renderTeacherUnsavedSummaryLoading();
-
-      // 初期表示では未保存サマリーを自動取得しない。
+// 本日の授業一覧の表示を優先し、未保存サマリーは少し遅らせてFast APIで後読みする。// 初期表示では未保存サマリーを自動取得しない。
       // 本日の授業一覧の表示を優先し、未保存確認はボタン押下時だけ実行する。
         teacherUnsavedSummaryData = {
           ok: true,
@@ -1392,8 +1511,11 @@ function loadTeacherUnsavedSummaryManual() {
       google.script.run
         .withSuccessHandler(function(data) {
           if (teacherUnsavedDetailsRequestKey !== requestKey) return;
-          teacherUnsavedDetailsLoadedKey = loadedKey;
-          teacherUnsavedDetailsData = data || { ok: true, items: [], checkedRange: null };
+          teacherUnsavedDetailsData = data || { ok: false, status: "unavailable", items: [] };
+          teacherUnsavedDetailsLoadedKey = teacherUnsavedDetailsData.ok === true &&
+            teacherUnsavedDetailsData.status === "ready"
+              ? loadedKey
+              : "";
           renderTeacherUnsavedDetails(teacherUnsavedDetailsData);
         })
           
@@ -1402,7 +1524,10 @@ function loadTeacherUnsavedSummaryManual() {
           if (teacherUnsavedDetailsRequestKey !== requestKey) return;
           renderTeacherUnsavedDetailsError();
         })
-        .getTeacherUnsavedDetails();
+        .getTeacherUnsavedDetailsFast({
+          limit: TEACHER_UNSAVED_DETAILS_LIMIT,
+          offset: 0
+        });
     }
 
     function getTeacherUnsavedStartYmdLocal() {
@@ -1446,17 +1571,37 @@ function patchTeacherUnsavedLocalAfterSave(classId, dateStr, period, forceDecrem
 
     removed = teacherUnsavedDetailsData.items.length !== before;
 
-    if (teacherUnsavedDetailsOpen) {
-      renderTeacherUnsavedDetails(teacherUnsavedDetailsData);
-    }
+  }
+
+  const shouldDecrement = removed || forceDecrement;
+
+  if (
+    teacherUnsavedDetailsData &&
+    typeof teacherUnsavedDetailsData.totalCount === "number" &&
+    shouldDecrement
+  ) {
+    teacherUnsavedDetailsData.totalCount = Math.max(
+      0,
+      teacherUnsavedDetailsData.totalCount - 1
+    );
+    teacherUnsavedDetailsData.hasMore =
+      teacherUnsavedDetailsData.items.length < teacherUnsavedDetailsData.totalCount;
+  }
+
+  if (teacherUnsavedDetailsOpen && teacherUnsavedDetailsData) {
+    renderTeacherUnsavedDetails(teacherUnsavedDetailsData);
   }
 
   if (
     teacherUnsavedSummaryData &&
     typeof teacherUnsavedSummaryData.count === "number" &&
-    (removed || forceDecrement)
+    shouldDecrement
   ) {
-    teacherUnsavedSummaryData.count = Math.max(0, teacherUnsavedSummaryData.count - 1);
+    ["count", "unsavedCount", "detailCount"].forEach(function(key) {
+      if (typeof teacherUnsavedSummaryData[key] === "number") {
+        teacherUnsavedSummaryData[key] = Math.max(0, teacherUnsavedSummaryData[key] - 1);
+      }
+    });
     renderTeacherUnsavedSummary(teacherUnsavedSummaryData);
   }
 }
