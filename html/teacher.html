@@ -2008,8 +2008,8 @@ function getSidebarSaveStatusInfo(cls) {
       : (isChecking ? "checking" : (isSaved ? "saved" : (cls.saveStatusNotLoaded ? "checking" : "unsaved")));
     const disableNoAbsenceQuickSave = statusLoadFailed || isChecking;
     const noAbsenceDisabledReason = statusLoadFailed
-      ? "保存状態を確認できないため、名簿を開いて確認してください。"
-      : (isChecking ? "保存状態を確認中のため、欠席者なしでは保存できません。" : "");
+      ? "保存状態を確認できませんでした。「欠席者を入力」から名簿を開いて確認してください。"
+      : (isChecking ? "保存状態を確認中です。確認後に「欠席者なしで保存」を利用できます。" : "");
 
     return {
       isSaved: isSaved,
@@ -2019,7 +2019,9 @@ function getSidebarSaveStatusInfo(cls) {
       isChecking: isChecking,
       disableNoAbsenceQuickSave: disableNoAbsenceQuickSave,
       noAbsenceDisabledReason: noAbsenceDisabledReason,
-      statusNote: statusLoadFailed ? "名簿を開いて保存状況を確認してください。" : ""
+      statusNote: statusLoadFailed
+        ? "保存状態を確認できませんでした。「欠席者を入力」から名簿を開いて確認してください。"
+        : ""
     };
   }
 
@@ -2176,11 +2178,13 @@ function renderClassList() {
       if (requiresGroupSelection(cls)) {
         html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '">班を選択して入力</button>';
       } else {
-        const noAbsenceDisabledAttributes = sidebarStatus.disableNoAbsenceQuickSave
-          ? ' disabled title="' + escapeHtml(sidebarStatus.noAbsenceDisabledReason) + '"'
+        const noAbsenceDisabledAttribute = sidebarStatus.disableNoAbsenceQuickSave
+          ? ' disabled'
           : '';
-        html += '    <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' + escapeHtml(key) + '"' + noAbsenceDisabledAttributes + '>欠席者なしで保存</button>';
-        html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '">欠席者を入力</button>';
+        const noAbsenceButtonTitle = sidebarStatus.noAbsenceDisabledReason ||
+          "この授業を欠席者・遅刻・公欠なし（全員出席）として保存します。";
+        html += '    <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' + escapeHtml(key) + '"' + noAbsenceDisabledAttribute + ' title="' + escapeHtml(noAbsenceButtonTitle) + '">欠席者なしで保存</button>';
+        html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '" title="名簿を開いて欠席・遅刻・公欠を入力し、保存済み内容を確認します。">欠席者を入力</button>';
       }
 
       html += '  </div>';
@@ -2941,7 +2945,7 @@ function handleNoAbsenceSaveClick(cls) {
 
   if (sidebarStatus.disableNoAbsenceQuickSave || hasUnconfirmedSaveStatus) {
     showMessage(
-      sidebarStatus.noAbsenceDisabledReason || "保存状態を確認できないため、欠席者なしでは保存できません。",
+      sidebarStatus.noAbsenceDisabledReason || "保存状態を確認できませんでした。「欠席者を入力」から名簿を開いて確認してください。",
       "warn"
     );
     return;
@@ -3018,16 +3022,16 @@ function handleNoAbsenceSaveClick(cls) {
         '<div class="summary-item present">欠席者なし</div>';
       document.getElementById("sortNote").textContent = "";
       document.getElementById("studentArea").innerHTML =
-        '<div class="empty-box">欠席者なしとして保存しました。<br>欠席者を追加・修正する場合は「欠席者を入力」から名簿を開いてください。</div>';
+        '<div class="empty-box">この授業を「欠席者なし（全員出席）」として保存しました。<br>欠席・遅刻・公欠を追加・修正する場合は「欠席者を入力」から名簿を開いてください。</div>';
 
       setSaveStateText(savingMode === "past"
-        ? "過去授業を欠席者なしとして保存しました"
-        : "欠席者なしとして保存しました"
+        ? "過去授業を「欠席者なし（全員出席）」で保存しました"
+        : "「欠席者なし（全員出席）」で保存しました"
       );
 
       showMessage(savingMode === "past"
-        ? "過去授業を欠席者なしとして保存しました"
-        : "欠席者なしとして保存しました",
+        ? "過去授業を「欠席者なし（全員出席）」で保存しました"
+        : "「欠席者なし（全員出席）」で保存しました",
         "success"
       );
 
@@ -3119,8 +3123,8 @@ function handleNoAbsenceSaveClick(cls) {
             renderClassList();
             renderLastSavedInfoBar(savingClass.lastSavedInfo);
             markDirty(false);
-            setSaveStateText(savingMode === "past" ? "過去授業の修正を保存しました" : "保存しました");
-            showMessage(savingMode === "past" ? "過去授業の修正を保存しました" : "保存しました", "success");
+            setSaveStateText(savingMode === "past" ? "過去授業の出席内容を保存しました" : "出席内容を保存しました");
+            showMessage(savingMode === "past" ? "過去授業の出席内容を保存しました" : "出席内容を保存しました", "success");
 
             const shouldPatchUnsaved =
               !wasSavedBefore &&
@@ -3263,9 +3267,9 @@ function isExperimentSubject(cls) {
           loadSaveStatusForVisibleClasses();
           selectedClass = null;
           document.getElementById("selectedClassInfo").innerHTML =
-            "授業カードの「欠席者なしで保存」または「欠席者を入力」を選択してください。";
+            "本日の授業カードから操作を選択してください。";
           document.getElementById("studentArea").innerHTML =
-            '<div class="empty-box">欠席者がいない場合は、学生名簿を開かずに保存できるようにします。<br>欠席者がいる場合のみ「欠席者を入力」から名簿を表示します。</div>';
+            '<div class="empty-box">欠席・遅刻・公欠がない授業は「欠席者なしで保存」で全員出席として記録できます。<br>欠席・遅刻・公欠がある場合や、保存済み内容を確認する場合は「欠席者を入力」を開いてください。</div>';
           document.getElementById("summaryArea").innerHTML = "";
           document.getElementById("sortNote").textContent = "";
           renderLastSavedInfoBar(null);
@@ -3372,9 +3376,9 @@ function isExperimentSubject(cls) {
 
           selectedClass = null;
           document.getElementById("selectedClassInfo").innerHTML =
-            "過去授業の「欠席者なしで保存」または「欠席者を入力」を選択してください。";
+            "過去授業カードから操作を選択してください。";
           document.getElementById("studentArea").innerHTML =
-            '<div class="empty-box">過去授業を修正する場合は「欠席者を入力」から名簿を表示してください。<br>欠席者がいなかった授業は、次Stepで名簿なし保存に対応します。</div>';
+            '<div class="empty-box">過去授業を修正する場合は「欠席者を入力」から名簿を開いてください。<br>欠席・遅刻・公欠がなかった授業は「欠席者なしで保存」で全員出席として記録できます。</div>';
           document.getElementById("summaryArea").innerHTML = "";
           document.getElementById("sortNote").textContent = "";
           renderLastSavedInfoBar(null);
