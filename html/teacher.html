@@ -274,6 +274,13 @@
       color: #a12622;
     }
 
+    .class-status.failed {
+      background: #fdecec;
+      border-color: #d98f8f;
+      border-style: dashed;
+      color: #a12622;
+    }
+
     .class-title {
       font-size: 16px;
       font-weight: bold;
@@ -319,6 +326,21 @@
   background: #eef4ff;
   border-color: #9db7ef;
   color: #1f4fa3;
+}
+
+.class-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: #f3f5f8;
+  border-color: #d9e0e8;
+  color: #77808f;
+}
+
+.class-card-status-note {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #8a4b00;
 }
 
     .info-bar {
@@ -1956,7 +1978,11 @@ function getSidebarSaveStatusInfo(cls) {
       isSaved: false,
       label: "未保存",
       className: "unsaved",
-      lastSavedInfo: null
+      lastSavedInfo: null,
+      isChecking: false,
+      disableNoAbsenceQuickSave: false,
+      noAbsenceDisabledReason: "",
+      statusNote: ""
     };
   }
 
@@ -1968,15 +1994,32 @@ function getSidebarSaveStatusInfo(cls) {
   if (!isExperimentSubject(cls)) {
     const sessionKey = getSessionKey(cls);
     const isSaved = !!(cls.isSaved || savedSessionKeys[sessionKey]);
-    const label = cls.saveStatusNotLoaded && !isSaved
-      ? (currentMode === "past" ? "開くと確認" : "確認中...")
-      : (isSaved ? "保存済み" : "未保存");
+    const statusLoadFailed = currentMode === "today" && !!cls.saveStatusLoadFailed;
+    const isChecking = currentMode === "today" && !!cls.saveStatusNotLoaded && !statusLoadFailed;
+    const label = statusLoadFailed
+      ? "確認失敗"
+      : (isChecking
+        ? "確認中..."
+        : (cls.saveStatusNotLoaded && !isSaved && currentMode === "past"
+          ? "開くと確認"
+          : (isSaved ? "保存済み" : "未保存")));
+    const className = statusLoadFailed
+      ? "failed"
+      : (isChecking ? "checking" : (isSaved ? "saved" : (cls.saveStatusNotLoaded ? "checking" : "unsaved")));
+    const disableNoAbsenceQuickSave = statusLoadFailed || isChecking;
+    const noAbsenceDisabledReason = statusLoadFailed
+      ? "保存状態を確認できないため、名簿を開いて確認してください。"
+      : (isChecking ? "保存状態を確認中のため、欠席者なしでは保存できません。" : "");
 
     return {
       isSaved: isSaved,
       label: label,
-      className: isSaved ? "saved" : (cls.saveStatusNotLoaded ? "checking" : "unsaved"),
-      lastSavedInfo: cls.lastSavedInfo || null
+      className: className,
+      lastSavedInfo: cls.lastSavedInfo || null,
+      isChecking: isChecking,
+      disableNoAbsenceQuickSave: disableNoAbsenceQuickSave,
+      noAbsenceDisabledReason: noAbsenceDisabledReason,
+      statusNote: statusLoadFailed ? "名簿を開いて保存状況を確認してください。" : ""
     };
   }
 
@@ -2005,7 +2048,11 @@ function getSidebarSaveStatusInfo(cls) {
       isSaved: savedCount > 0,
       label: savedCount > 0 ? "一部確認中" : (currentMode === "past" ? "開くと確認" : "確認中..."),
       className: savedCount > 0 ? "partial" : "checking",
-      lastSavedInfo: latestInfo
+      lastSavedInfo: latestInfo,
+      isChecking: loadedCount < total,
+      disableNoAbsenceQuickSave: false,
+      noAbsenceDisabledReason: "",
+      statusNote: ""
     };
   }
 
@@ -2014,7 +2061,11 @@ function getSidebarSaveStatusInfo(cls) {
       isSaved: true,
       label: "全保存済み",
       className: "saved",
-      lastSavedInfo: latestInfo
+      lastSavedInfo: latestInfo,
+      isChecking: false,
+      disableNoAbsenceQuickSave: false,
+      noAbsenceDisabledReason: "",
+      statusNote: ""
     };
   }
 
@@ -2023,7 +2074,11 @@ function getSidebarSaveStatusInfo(cls) {
       isSaved: true,
       label: "一部保存済み",
       className: "partial",
-      lastSavedInfo: latestInfo
+      lastSavedInfo: latestInfo,
+      isChecking: false,
+      disableNoAbsenceQuickSave: false,
+      noAbsenceDisabledReason: "",
+      statusNote: ""
     };
   }
 
@@ -2031,7 +2086,11 @@ function getSidebarSaveStatusInfo(cls) {
     isSaved: false,
     label: "未保存",
     className: "unsaved",
-    lastSavedInfo: null
+    lastSavedInfo: null,
+    isChecking: false,
+    disableNoAbsenceQuickSave: false,
+    noAbsenceDisabledReason: "",
+    statusNote: ""
   };
 }
 
@@ -2108,12 +2167,19 @@ function renderClassList() {
 
       html += '  </div>';
 
+      if (sidebarStatus.statusNote) {
+        html += '  <div class="class-card-status-note">' + escapeHtml(sidebarStatus.statusNote) + '</div>';
+      }
+
       html += '  <div class="class-card-actions">';
 
       if (requiresGroupSelection(cls)) {
         html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '">班を選択して入力</button>';
       } else {
-        html += '    <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' + escapeHtml(key) + '">欠席者なしで保存</button>';
+        const noAbsenceDisabledAttributes = sidebarStatus.disableNoAbsenceQuickSave
+          ? ' disabled title="' + escapeHtml(sidebarStatus.noAbsenceDisabledReason) + '"'
+          : '';
+        html += '    <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' + escapeHtml(key) + '"' + noAbsenceDisabledAttributes + '>欠席者なしで保存</button>';
         html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '">欠席者を入力</button>';
       }
 
@@ -2169,7 +2235,7 @@ function loadSaveStatusForVisibleClasses() {
 
   google.script.run
     .withSuccessHandler(function(statusMap) {
-      if (requestToken !== saveStatusRequestToken) return;
+      if (requestToken !== saveStatusRequestToken || currentMode !== "today") return;
 
       const map = statusMap || {};
 
@@ -2177,11 +2243,17 @@ function loadSaveStatusForVisibleClasses() {
         const key = getSessionKey(cls);
         const status = map[key];
 
-        if (!status) return;
+        if (!status) {
+          if (!isExperimentSubject(cls)) {
+            cls.saveStatusLoadFailed = true;
+          }
+          return;
+        }
 
         cls.isSaved = !!status.isSaved;
         cls.lastSavedInfo = status.lastSavedInfo || null;
         cls.saveStatusNotLoaded = false;
+        cls.saveStatusLoadFailed = false;
 
         if (cls.isSaved) {
           savedSessionKeys[key] = true;
@@ -2193,8 +2265,15 @@ function loadSaveStatusForVisibleClasses() {
       renderClassList();
     })
     .withFailureHandler(function(error) {
+      if (requestToken !== saveStatusRequestToken || currentMode !== "today") return;
+
       console.error(error);
-      // 後読み失敗時も入力自体は続行できるので、画面全体エラーにはしない
+      classesCache.forEach(function(cls) {
+        if (!isExperimentSubject(cls)) {
+          cls.saveStatusLoadFailed = true;
+        }
+      });
+      renderClassList();
     })
     .getSaveStatusForTeacherSessions(targets);
 }
@@ -2681,6 +2760,11 @@ function renderSelectedClassInfo() {
           cls.isSaved = hasSavedSession;
           cls.lastSavedInfo = lastSavedInfo;
 
+          if (currentMode === "today" && !isExperimentSubject(cls)) {
+            cls.saveStatusNotLoaded = false;
+            cls.saveStatusLoadFailed = false;
+          }
+
           if (hasSavedSession) {
             savedSessionKeys[getSessionKey(cls)] = true;
             savedSessionKeys[sessionKey] = true;
@@ -2851,6 +2935,18 @@ function handleNoAbsenceSaveClick(cls) {
     return;
   }
 
+  const sidebarStatus = getSidebarSaveStatusInfo(cls);
+  const hasUnconfirmedSaveStatus = currentMode === "today" &&
+    (cls.saveStatusNotLoaded || cls.saveStatusLoadFailed);
+
+  if (sidebarStatus.disableNoAbsenceQuickSave || hasUnconfirmedSaveStatus) {
+    showMessage(
+      sidebarStatus.noAbsenceDisabledReason || "保存状態を確認できないため、欠席者なしでは保存できません。",
+      "warn"
+    );
+    return;
+  }
+
   const ok = window.confirm(
     "この授業を「欠席者なし」として保存します。\n\n" +
     "既に欠席・遅刻・公欠の記録がある場合は、この授業分の記録を消して「欠席者なし」に更新します。\n\n" +
@@ -2910,6 +3006,7 @@ function handleNoAbsenceSaveClick(cls) {
       savingClass.isSaved = true;
       savingClass.lastSavedInfo = result && result.lastSavedInfo ? result.lastSavedInfo : null;
       savingClass.saveStatusNotLoaded = false;
+      savingClass.saveStatusLoadFailed = false;
 
       savedSessionKeys[displaySessionKey] = true;
 
@@ -3014,6 +3111,7 @@ function handleNoAbsenceSaveClick(cls) {
           savingClass.isSaved = true;
           savingClass.lastSavedInfo = result && result.lastSavedInfo ? result.lastSavedInfo : null;
           savingClass.saveStatusNotLoaded = false;
+          savingClass.saveStatusLoadFailed = false;
 
           savedSessionKeys[displaySessionKey] = true;
           savedSessionKeys[sessionKey] = true;
