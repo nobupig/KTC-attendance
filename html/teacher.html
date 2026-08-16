@@ -1478,9 +1478,10 @@ function loadTeacherUnsavedSummaryManual() {
       teacherUnsavedSummaryRequestKey = requestKey;
       teacherUnsavedDetailsLoadedKey = "";
       renderTeacherUnsavedSummaryLoading();
-// 本日の授業一覧の表示を優先し、未保存サマリーは少し遅らせてFast APIで後読みする。// 初期表示では未保存サマリーを自動取得しない。
-      // 本日の授業一覧の表示を優先し、未保存確認はボタン押下時だけ実行する。
-        teacherUnsavedSummaryData = {
+
+            // 本日の授業一覧・保存状態の描画を優先し、
+            // 未保存サマリーは少し遅らせてFast APIで後読みする。
+            teacherUnsavedSummaryData = {
           ok: true,
           count: null,
           checkedRange: null,
@@ -2042,9 +2043,10 @@ function renderClassList() {
     const statusLabel = sidebarStatus.label;
     const statusClassName = sidebarStatus.className || "";
 
-html += '    <span class="class-status ' + statusClassName + '">' + statusLabel + '</span>';
-
-
+    html += '<div class="class-card' + (activeClass ? ' active' : '') + '" data-sidebar-key="' + escapeHtml(key) + '">';
+    html += '  <div class="class-card-top">';
+    html += '    <span class="period-badge">' + escapeHtml(String(cls.period || "")) + '限</span>';
+    html += '    <span class="class-status ' + escapeHtml(statusClassName) + '">' + escapeHtml(statusLabel) + '</span>';
     html += '  </div>';
     html += '  <div class="class-title">' + escapeHtml(cls.subjectName) + '</div>';
     html += '  <div class="class-meta">';
@@ -2070,10 +2072,10 @@ html += '    <span class="class-status ' + statusClassName + '">' + statusLabel 
       html += '  <div class="class-card-actions">';
 
       if (requiresGroupSelection(cls)) {
-        html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + key + '">班を選択して入力</button>';
+        html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '">班を選択して入力</button>';
       } else {
-        html += '    <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' + key + '">欠席者なしで保存</button>';
-        html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + key + '">欠席者を入力</button>';
+        html += '    <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' + escapeHtml(key) + '">欠席者なしで保存</button>';
+        html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '">欠席者を入力</button>';
       }
 
       html += '  </div>';
