@@ -235,20 +235,44 @@
     }
 
     .class-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid #d9e0ee;
+      border-radius: 999px;
+      background: #f7f9fc;
       font-size: 12px;
       font-weight: bold;
       color: #666;
+      line-height: 1.2;
+      white-space: nowrap;
     }
 
-    .class-status.saved { color: #1d6b37; }
+    .class-status.saved {
+      background: #e8f7ec;
+      border-color: #a7d8b4;
+      color: #1d6b37;
+    }
 
     .class-status.partial {
-        color: #8a5a00;
-      }
+      background: #fff4db;
+      border-color: #e7cb76;
+      color: #8a5a00;
+    }
 
-      .class-status.checking {
-        color: #667;
-      }
+    .class-status.checking {
+      background: #f7f9fc;
+      border-color: #b9c2d0;
+      border-style: dashed;
+      color: #667;
+    }
+
+    .class-status.unsaved {
+      background: #fdecec;
+      border-color: #e5aaaa;
+      color: #a12622;
+    }
 
     .class-title {
       font-size: 16px;
@@ -270,6 +294,11 @@
 }
 
 .class-action-btn {
+  display: inline-flex;
+  flex: 1 1 140px;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
   border: 1px solid #ccd5e3;
   background: #fff;
   color: #334;
@@ -492,6 +521,16 @@
       .status-btn {
         padding: 6px 8px;
         font-size: 12px;
+      }
+
+      .class-card-actions {
+        flex-direction: column;
+      }
+
+      .class-action-btn {
+        width: 100%;
+        min-height: 44px;
+        flex: 0 0 auto;
       }
 
       button.main-btn {
@@ -1916,7 +1955,7 @@ function getSidebarSaveStatusInfo(cls) {
     return {
       isSaved: false,
       label: "未保存",
-      className: "",
+      className: "unsaved",
       lastSavedInfo: null
     };
   }
@@ -1936,7 +1975,7 @@ function getSidebarSaveStatusInfo(cls) {
     return {
       isSaved: isSaved,
       label: label,
-      className: isSaved ? "saved" : (cls.saveStatusNotLoaded ? "checking" : ""),
+      className: isSaved ? "saved" : (cls.saveStatusNotLoaded ? "checking" : "unsaved"),
       lastSavedInfo: cls.lastSavedInfo || null
     };
   }
@@ -1991,7 +2030,7 @@ function getSidebarSaveStatusInfo(cls) {
   return {
     isSaved: false,
     label: "未保存",
-    className: "",
+    className: "unsaved",
     lastSavedInfo: null
   };
 }
