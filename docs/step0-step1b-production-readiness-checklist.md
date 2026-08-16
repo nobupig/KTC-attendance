@@ -14,7 +14,7 @@
 
 **No-Go（確認継続）**
 
-6時台・12時台トリガーと主要な画面検証は成功しているが、17時台・21時台トリガー、本番用ID、反映前デプロイ情報、rollback対象、production Operationのシート準備は未確認である。未チェックの必須項目が1件でもある間は、本番反映を開始しない。
+検証環境の6時台・12時台・17時台・21時台rebuild triggerと主要な画面検証は成功している。ただし、本番Apps Script ID、本番Operation ID、本番Master ID、production Operationのcache sheets準備、反映前の本番デプロイバージョンとrollback対象の記録、代表確認データと担当者の決定が未完了である。未チェックの必須項目が1件でもある間は、本番反映を開始しない。
 
 ## 2. 対象変更
 
@@ -74,22 +74,38 @@ Step1-Bでは保存API、Fast API、DB構造、保存データ仕様を変更し
 
 - [x] 6時台トリガーが成功している
 - [x] 12時台トリガーが成功している
-- [ ] 17時台トリガーが成功している
-- [ ] 21時台トリガーが成功している
-- [ ] 4回すべてでタイムアウト、権限、クォータ、Spreadsheetアクセスエラーがない
-- [ ] 各実行後に`checkedAt`と`snapshotId`が更新され、Fast APIが`ready`を返す
+- [x] 17時台トリガーが成功している
+- [x] 21時台トリガーが成功している
+- [x] 4回すべてでタイムアウト、権限、クォータ、Spreadsheetアクセスエラーがない
+- [x] 各実行後に`checkedAt`と`snapshotId`が更新され、Fast APIが`ready`を返す
 
-12時台トリガーの確認済み結果：
+検証環境のtrigger確認結果：
+
+| 時間帯 | `ok` | `checkedAt` | `teacherCount` | `summaryRowCount` | `detailRowCount` | `warningCount` | `elapsedMs` |
+|---|---:|---|---:|---:|---:|---:|---:|
+| 6時台 | `true` | `2026-08-16 06:50:56` | 95 | 95 | 5052 | 0 | 57325 |
+| 12時台 | `true` | `2026-08-16 12:14:29` | 95 | 95 | 5051 | 0 | 41342 |
+| 17時台 | `true` | `2026-08-16 17:22:46` | 95 | 95 | 5051 | 0 | 93175 |
+| 21時台 | `true` | `2026-08-16 21:43:45` | 95 | 95 | 5051 | 0 | 34081 |
+
+12時台の`snapshotId`は`20260816_121429_367__44ee5861-0e86-4052-b1ba-2363397d99d3`である。
+
+17時台の`elapsedMs`は93175msで、実行は成功し、`warningCount`は0だった。ただし、他の時間帯より長いため、本番反映時も`elapsedMs`を記録して観察する。21時台は34081msに戻っているため、現時点では継続悪化とは判断しない。
+
+17時台build後の`getTeacherUnsavedSummaryFast()`確認結果：
 
 | 項目 | 結果 |
-|---|---:|
-| `ok` | `true` |
-| `snapshotId` | `20260816_121429_367__44ee5861-0e86-4052-b1ba-2363397d99d3` |
-| `teacherCount` | 95 |
-| `summaryRowCount` | 95 |
-| `detailRowCount` | 5051 |
-| `warningCount` | 0 |
-| `elapsedMs` | 41342 |
+|---|---|
+| status | `ready` |
+| `teacherId` | `T018` |
+| `teacherName` | 安井宣仁 |
+| `unsavedCount` | 76 |
+| `detailCount` | 76 |
+| `checkedAt` | `2026-08-16 17:22:46` |
+| `cacheDate` | `2026-08-16` |
+| `snapshotId` | `20260816_172246_354__6a534c32-232d-435f-ade5-5774e9b7574d` |
+
+検証環境のStep0-C trigger安定確認は完了した。ただし、本番反映のGo条件はまだ満たしていない。次に確認するのは、本番側ID、production Operationのcache sheets準備、反映前の本番デプロイバージョンとrollback対象、代表確認データと担当者である。
 
 ### 3.4 科目担当画面
 
