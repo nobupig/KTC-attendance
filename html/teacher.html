@@ -197,6 +197,78 @@
       gap: 10px;
     }
 
+    .class-list-overview {
+      padding: 12px;
+      border: 1px solid #d9e0ee;
+      border-radius: 10px;
+      background: #f8fbff;
+    }
+
+    .class-list-overview-title {
+      color: #334;
+      font-size: 14px;
+      font-weight: bold;
+      line-height: 1.5;
+    }
+
+    .class-list-overview-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .class-list-overview-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 28px;
+      padding: 4px 9px;
+      border: 1px solid #d9e0ee;
+      border-radius: 999px;
+      background: #fff;
+      color: #4a5568;
+      font-size: 12px;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .class-list-overview-chip strong {
+      font-size: 13px;
+    }
+
+    .class-list-overview-chip.state-saved {
+      border-color: #b8d9c1;
+      background: #f2faf4;
+      color: #1d6b37;
+    }
+
+    .class-list-overview-chip.state-unsaved {
+      border-color: #e7c79e;
+      background: #fff8f0;
+      color: #8a4b00;
+    }
+
+    .class-list-overview-chip.state-partial {
+      border-color: #e7d08c;
+      background: #fffaec;
+      color: #7a5700;
+    }
+
+    .class-list-overview-chip.state-checking {
+      border-color: #b9c2d0;
+      border-style: dashed;
+      background: #f7f9fc;
+      color: #667;
+    }
+
+    .class-list-overview-chip.state-failed {
+      border-color: #d98f8f;
+      border-style: dashed;
+      background: #fff5f4;
+      color: #a12622;
+    }
+
     .class-card {
       border: 1px solid #d9e0ee;
       border-radius: 10px;
@@ -204,6 +276,31 @@
       background: #fff;
       cursor: pointer;
       transition: 0.15s;
+    }
+
+    .class-card.state-saved {
+      border-left: 4px solid #8fc69f;
+      background: #fbfefc;
+    }
+
+    .class-card.state-unsaved {
+      border-left: 4px solid #d6a25b;
+      background: #fffaf4;
+    }
+
+    .class-card.state-partial {
+      border-left: 4px solid #d6b24a;
+      background: #fffcf3;
+    }
+
+    .class-card.state-checking {
+      border-left: 4px solid #aeb8c6;
+      background: #fafbfc;
+    }
+
+    .class-card.state-failed {
+      border-left: 4px solid #c77470;
+      background: #fff8f7;
     }
 
     .class-card:hover {
@@ -214,6 +311,7 @@
     .class-card.active {
       border: 2px solid #2f6feb;
       background: #eef4ff;
+      box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.14);
     }
 
     .class-card-top {
@@ -222,6 +320,7 @@
       gap: 8px;
       margin-bottom: 6px;
       align-items: center;
+      flex-wrap: wrap;
     }
 
     .period-badge {
@@ -547,6 +646,20 @@
 
       .class-card-actions {
         flex-direction: column;
+      }
+
+      .class-list-overview {
+        padding: 10px;
+      }
+
+      .class-list-overview-chip {
+        flex: 1 1 calc(50% - 6px);
+        justify-content: space-between;
+        min-width: 0;
+      }
+
+      .class-card-top {
+        align-items: flex-start;
       }
 
       .class-action-btn {
@@ -2133,17 +2246,68 @@ function renderClassList() {
     return sidebarClassesMap[key];
   });
 
-  let html = "";
+  const overviewStateDefinitions = [
+    { key: "saved", label: "保存済み" },
+    { key: "unsaved", label: "未保存" },
+    { key: "partial", label: "一部保存済み" },
+    { key: "checking", label: "確認中" },
+    { key: "failed", label: "確認失敗" }
+  ];
+  const stateCardClassMap = {
+    saved: "state-saved",
+    unsaved: "state-unsaved",
+    partial: "state-partial",
+    checking: "state-checking",
+    failed: "state-failed"
+  };
+  const stateCounts = {
+    saved: 0,
+    unsaved: 0,
+    partial: 0,
+    checking: 0,
+    failed: 0
+  };
 
-  sidebarClasses.forEach(function(cls) {
+  const sidebarItems = sidebarClasses.map(function(cls) {
+    const sidebarStatus = getSidebarSaveStatusInfo(cls);
+    const rawStateName = String(sidebarStatus.className || "");
+    const stateName = Object.prototype.hasOwnProperty.call(stateCardClassMap, rawStateName)
+      ? rawStateName
+      : "checking";
+
+    stateCounts[stateName]++;
+
+    return {
+      cls: cls,
+      sidebarStatus: sidebarStatus,
+      stateName: stateName,
+      stateCardClass: stateCardClassMap[stateName]
+    };
+  });
+
+  let html = '<div class="class-list-overview" aria-label="授業一覧の概要">';
+  html += '  <div class="class-list-overview-title">' +
+    (currentMode === "today" ? "本日の担当授業" : "検索日の担当授業") +
+    '：' + sidebarItems.length + '件</div>';
+  html += '  <div class="class-list-overview-chips">';
+
+  overviewStateDefinitions.forEach(function(stateDefinition) {
+    html += '    <span class="class-list-overview-chip ' + stateCardClassMap[stateDefinition.key] + '">' +
+      escapeHtml(stateDefinition.label) + ' <strong>' + stateCounts[stateDefinition.key] + '</strong></span>';
+  });
+
+  html += '  </div>';
+  html += '</div>';
+
+  sidebarItems.forEach(function(item) {
+    const cls = item.cls;
     const key = getSidebarCardKey(cls);
     const activeClass = selectedClass && key === getSidebarCardKey(selectedClass);
-    const sidebarStatus = getSidebarSaveStatusInfo(cls);
-    const isSaved = !!sidebarStatus.isSaved;
+    const sidebarStatus = item.sidebarStatus;
     const statusLabel = sidebarStatus.label;
-    const statusClassName = sidebarStatus.className || "";
+    const statusClassName = item.stateName;
 
-    html += '<div class="class-card' + (activeClass ? ' active' : '') + '" data-sidebar-key="' + escapeHtml(key) + '">';
+    html += '<div class="class-card ' + item.stateCardClass + (activeClass ? ' active' : '') + '" data-sidebar-key="' + escapeHtml(key) + '">';
     html += '  <div class="class-card-top">';
     html += '    <span class="period-badge">' + escapeHtml(String(cls.period || "")) + '限</span>';
     html += '    <span class="class-status ' + escapeHtml(statusClassName) + '">' + escapeHtml(statusLabel) + '</span>';
