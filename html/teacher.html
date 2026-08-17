@@ -1061,6 +1061,41 @@
       color: #fff;
     }
 
+    .teacher-action-required-section {
+      margin-top: 24px;
+      padding: 18px;
+      border: 1px solid #d9e0ee;
+      border-radius: 12px;
+      background: #f7f9fc;
+    }
+
+    .teacher-action-required-header {
+      margin-bottom: 12px;
+    }
+
+    .teacher-action-required-kicker {
+      margin-bottom: 4px;
+      color: #6a7280;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 0.08em;
+    }
+
+    .teacher-action-required-header h2 {
+      margin: 0;
+      color: #28364d;
+      font-size: 19px;
+      line-height: 1.45;
+    }
+
+    .teacher-action-required-header .sub-text {
+      margin-top: 5px;
+    }
+
+    .teacher-action-required-section .teacher-unsaved-summary-box {
+      margin-bottom: 0;
+    }
+
     .teacher-unsaved-summary-box {
       --teacher-unsaved-accent: #5c667a;
       --teacher-unsaved-accent-soft: #eef1f5;
@@ -1334,6 +1369,7 @@
       }
 
       .panel,
+      .teacher-action-required-section,
       .teacher-unsaved-summary-box,
       .class-card {
         padding: 10px;
@@ -1419,23 +1455,6 @@
         <div class="sub-text" id="pageSubText">読み込み中...</div>
       </header>
 
-      <aside id="teacherUnsavedSummaryBox" class="teacher-unsaved-summary-box loading" aria-live="polite" aria-atomic="true">
-        <div class="teacher-unsaved-summary-head">
-          <div class="teacher-unsaved-summary-status">
-            <span id="teacherUnsavedSummaryStatusIcon" class="teacher-unsaved-summary-status-icon" aria-hidden="true">…</span>
-            <span id="teacherUnsavedSummaryStatusLabel">確認中</span>
-          </div>
-          <div class="teacher-unsaved-summary-texts">
-            <div id="teacherUnsavedSummaryTitle" class="teacher-unsaved-summary-title">過去の未保存授業を確認中</div>
-            <div id="teacherUnsavedSummarySub" class="teacher-unsaved-summary-sub">本日の授業を先に操作できます。</div>
-          </div>
-          <button id="teacherUnsavedToggleBtn" class="teacher-unsaved-toggle-btn" type="button" aria-expanded="false" aria-controls="teacherUnsavedDetailsBox" hidden>
-            <span id="teacherUnsavedToggleLabel">未保存授業を確認</span>
-            <span id="teacherUnsavedToggleIcon">▼</span>
-          </button>
-        </div>
-      </aside>
-
       <div class="layout lesson-workspace">
         <section class="panel lesson-list-panel" aria-labelledby="lessonListHeading">
           <h3 id="lessonListHeading" tabindex="-1">今日の出席管理</h3>
@@ -1502,12 +1521,37 @@
       </div>
     </section>
 
-    <section id="teacherUnsavedDetailsBox" class="panel teacher-unsaved-details-box teacher-unsaved-details-section" hidden aria-labelledby="teacherUnsavedDetailsHeading">
-      <header class="teacher-unsaved-details-header">
-        <h2 id="teacherUnsavedDetailsHeading">過去の未保存授業</h2>
-        <div class="sub-text">必要な授業を選び、過去授業の出席入力を開きます。</div>
+    <section class="teacher-action-required-section" aria-labelledby="teacherActionRequiredHeading">
+      <header class="teacher-action-required-header">
+        <div class="teacher-action-required-kicker">要対応</div>
+        <h2 id="teacherActionRequiredHeading">過去の未保存授業</h2>
+        <div class="sub-text">今日の進捗には含まれません。必要な過去分を別途確認してください。</div>
       </header>
-      <div id="teacherUnsavedDetailsContent" class="teacher-unsaved-details-content"></div>
+
+      <aside id="teacherUnsavedSummaryBox" class="teacher-unsaved-summary-box loading" aria-live="polite" aria-atomic="true">
+        <div class="teacher-unsaved-summary-head">
+          <div class="teacher-unsaved-summary-status">
+            <span id="teacherUnsavedSummaryStatusIcon" class="teacher-unsaved-summary-status-icon" aria-hidden="true">…</span>
+            <span id="teacherUnsavedSummaryStatusLabel">確認中</span>
+          </div>
+          <div class="teacher-unsaved-summary-texts">
+            <div id="teacherUnsavedSummaryTitle" class="teacher-unsaved-summary-title">過去の未保存授業を確認中</div>
+            <div id="teacherUnsavedSummarySub" class="teacher-unsaved-summary-sub">本日の授業を先に操作できます。</div>
+          </div>
+          <button id="teacherUnsavedToggleBtn" class="teacher-unsaved-toggle-btn" type="button" aria-expanded="false" aria-controls="teacherUnsavedDetailsBox" hidden>
+            <span id="teacherUnsavedToggleLabel">未保存授業を確認</span>
+            <span id="teacherUnsavedToggleIcon">▼</span>
+          </button>
+        </div>
+      </aside>
+
+      <section id="teacherUnsavedDetailsBox" class="panel teacher-unsaved-details-box teacher-unsaved-details-section" hidden aria-labelledby="teacherUnsavedDetailsHeading">
+        <header class="teacher-unsaved-details-header">
+          <h3 id="teacherUnsavedDetailsHeading">過去の未保存授業</h3>
+          <div class="sub-text">必要な授業を選び、過去授業の出席入力を開きます。</div>
+        </header>
+        <div id="teacherUnsavedDetailsContent" class="teacher-unsaved-details-content"></div>
+      </section>
     </section>
   </main>
 
