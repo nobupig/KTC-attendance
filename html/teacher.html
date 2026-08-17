@@ -3955,7 +3955,10 @@ function isExperimentSubject(cls) {
             renderClassList();
             document.getElementById("selectedClassInfo").innerHTML = "今日の授業はありません。";
             document.getElementById("studentArea").innerHTML = '<div class="empty-box">出席入力の対象授業はありません。</div>';
+            document.getElementById("summaryArea").innerHTML = "";
             document.getElementById("sortNote").textContent = "";
+            renderLastSavedInfoBar(null);
+            setSaveStateText("");
             return;
           }
 
@@ -4044,7 +4047,10 @@ function isExperimentSubject(cls) {
             renderClassList();
             document.getElementById("selectedClassInfo").innerHTML = "該当日の担当授業はありません。";
             document.getElementById("studentArea").innerHTML = '<div class="empty-box">修正対象の授業はありません。</div>';
+            document.getElementById("summaryArea").innerHTML = "";
             document.getElementById("sortNote").textContent = "";
+            renderLastSavedInfoBar(null);
+            setSaveStateText("");
             return;
           }
 
