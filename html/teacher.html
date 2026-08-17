@@ -2823,6 +2823,112 @@ function renderPastClassList() {
   renderClassListContent();
 }
 
+function normalizeTodayTaskState(sidebarStatus, isTaskDirty) {
+  if (isTaskDirty) return "dirty";
+
+  const rawState = String(sidebarStatus && sidebarStatus.className || "");
+  if (rawState === "failed") return "failed";
+  if (rawState === "checking") return "checking";
+  if (rawState === "partial") return "partial";
+  if (rawState === "saved") return "saved";
+  if (rawState === "unsaved") return "unprocessed";
+
+  return sidebarStatus && sidebarStatus.isChecking ? "checking" : "unprocessed";
+}
+
+function buildTodayTaskViewModels() {
+  if (currentMode !== "today") return [];
+
+  const taskMap = Object.create(null);
+  const taskKeys = [];
+
+  (classesCache || []).forEach(function(cls, originalOrder) {
+    const sidebarKey = getSidebarCardKey(cls);
+    if (!sidebarKey) return;
+
+    if (!taskMap[sidebarKey]) {
+      taskMap[sidebarKey] = {
+        sidebarKey: sidebarKey,
+        cls: cls,
+        relatedClasses: [],
+        originalOrder: originalOrder
+      };
+      taskKeys.push(sidebarKey);
+    }
+
+    taskMap[sidebarKey].relatedClasses.push(cls);
+  });
+
+  const selectedSidebarKey = selectedClass ? getSidebarCardKey(selectedClass) : "";
+
+  return taskKeys.map(function(sidebarKey) {
+    const task = taskMap[sidebarKey];
+    const sidebarStatus = getSidebarSaveStatusInfo(task.cls);
+    const isTaskDirty = !!(
+      currentMode === "today" &&
+      isDirty &&
+      selectedSidebarKey &&
+      sidebarKey === selectedSidebarKey
+    );
+    const state = normalizeTodayTaskState(sidebarStatus, isTaskDirty);
+    const rawPeriod = String(task.cls && task.cls.period || "").trim();
+    const numericPeriod = Number(rawPeriod);
+
+    return {
+      sidebarKey: sidebarKey,
+      cls: task.cls,
+      relatedClasses: task.relatedClasses,
+      sidebarStatus: sidebarStatus,
+      state: state,
+      isCompleted: state === "saved",
+      isRemaining: state !== "saved",
+      isDirty: isTaskDirty,
+      sortPeriod: rawPeriod && Number.isFinite(numericPeriod) ? numericPeriod : null,
+      originalOrder: task.originalOrder
+    };
+  });
+}
+
+function sortTodayTaskModels(taskModels, pinDirtyFirst) {
+  const models = (taskModels || []).slice();
+  const nonDirtyModels = models.filter(function(task) {
+    return !task.isDirty;
+  });
+  const canSortByPeriod = nonDirtyModels.every(function(task) {
+    return task.sortPeriod !== null;
+  });
+
+  return models.sort(function(a, b) {
+    if (pinDirtyFirst && a.isDirty !== b.isDirty) {
+      return a.isDirty ? -1 : 1;
+    }
+
+    if (canSortByPeriod && a.sortPeriod !== b.sortPeriod) {
+      return a.sortPeriod - b.sortPeriod;
+    }
+
+    return a.originalOrder - b.originalOrder;
+  });
+}
+
+function getTodayDashboardMetrics(taskModels) {
+  const models = taskModels || [];
+  const total = models.length;
+  const completed = models.filter(function(task) {
+    return task.state === "saved";
+  }).length;
+
+  return {
+    total: total,
+    completed: completed,
+    remaining: total - completed,
+    percentage: total > 0 ? Math.round((completed / total) * 100) : 0,
+    isStatusChecking: models.some(function(task) {
+      return task.state === "checking" || !!(task.sidebarStatus && task.sidebarStatus.isChecking);
+    })
+  };
+}
+
 function createTodayTaskSection(title, cards, emptyText) {
   const section = document.createElement("section");
   section.className = "today-task-section";
@@ -2862,30 +2968,39 @@ function createTodayTaskSection(title, cards, emptyText) {
 
 function renderTodayDashboard() {
   const area = document.getElementById("classListArea");
-
-  // Step2-A-1では既存カードとaction listenerをそのまま生成し、
-  // Dashboardの情報階層へDOMを移動する。正式なtask状態モデルはStep2-A-2で扱う。
-  renderClassListContent();
-
   const isLoading = isClassListLoading;
-  const cards = Array.prototype.slice.call(area.children).filter(function(child) {
-    return child.classList && child.classList.contains("class-card");
+  const taskModels = isLoading ? [] : buildTodayTaskViewModels();
+  const remainingTaskModels = sortTodayTaskModels(taskModels.filter(function(task) {
+    return task.state !== "saved";
+  }), true);
+  const completedTaskModels = sortTodayTaskModels(taskModels.filter(function(task) {
+    return task.state === "saved";
+  }), false);
+  const orderedTaskModels = remainingTaskModels.concat(completedTaskModels);
+  const metrics = getTodayDashboardMetrics(taskModels);
+
+  // 既存カードとaction listenerを再利用し、業務状態・集計・順序はTask View Modelから渡す。
+  renderClassListContent(orderedTaskModels);
+
+  const cardBySidebarKey = Object.create(null);
+  Array.prototype.slice.call(area.children).forEach(function(child) {
+    const sidebarKey = child && child.dataset ? child.dataset.sidebarKey : "";
+    if (sidebarKey) {
+      cardBySidebarKey[sidebarKey] = child;
+    }
   });
-  const completedCards = cards.filter(function(card) {
-    return card.classList.contains("state-saved");
+  const remainingCards = remainingTaskModels.map(function(task) {
+    return cardBySidebarKey[task.sidebarKey];
+  }).filter(function(card) {
+    return !!card;
   });
-  const remainingCards = cards.filter(function(card) {
-    return !card.classList.contains("state-saved");
-  });
-  const total = cards.length;
-  const completed = completedCards.length;
-  const remaining = total - completed;
-  const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const isStatusChecking = cards.some(function(card) {
-    return card.classList.contains("state-checking");
+  const completedCards = completedTaskModels.map(function(task) {
+    return cardBySidebarKey[task.sidebarKey];
+  }).filter(function(card) {
+    return !!card;
   });
 
-  cards.forEach(function(card) {
+  remainingCards.concat(completedCards).forEach(function(card) {
     card.remove();
   });
 
@@ -2901,15 +3016,15 @@ function renderTodayDashboard() {
     summary.setAttribute("aria-busy", "true");
   }
 
-  const totalText = isLoading ? "—" : String(total);
-  const completedText = isLoading ? "—" : String(completed);
-  const remainingText = isLoading ? "—" : String(remaining);
+  const totalText = isLoading ? "—" : String(metrics.total);
+  const completedText = isLoading ? "—" : String(metrics.completed);
+  const remainingText = isLoading ? "—" : String(metrics.remaining);
   const progressLabel = isLoading
     ? "授業情報を読み込み中です。"
-    : (total === 0
+    : (metrics.total === 0
       ? "0 / 0　今日の授業はありません。"
-      : String(total) + "授業中 " + String(completed) + "授業完了　残り" + String(remaining) + "授業" +
-        (isStatusChecking ? "（保存状態を確認中）" : ""));
+      : String(metrics.total) + "授業中 " + String(metrics.completed) + "授業完了　残り" + String(metrics.remaining) + "授業" +
+        (metrics.isStatusChecking ? "（保存状態を確認中）" : ""));
 
   summary.innerHTML = '' +
     '<h4 id="todayDashboardSummaryTitle" class="today-dashboard-summary-title">今日の進捗</h4>' +
@@ -2929,16 +3044,16 @@ function renderTodayDashboard() {
     '</div>' +
     '<div class="today-dashboard-progress-label">' + progressLabel + '</div>' +
     '<div class="today-dashboard-progress-track">' +
-      '<div class="today-dashboard-progress-bar" style="width:' + String(percentage) + '%;"></div>' +
+      '<div class="today-dashboard-progress-bar" style="width:' + String(metrics.percentage) + '%;"></div>' +
     '</div>';
 
   const progressTrack = summary.querySelector(".today-dashboard-progress-track");
-  if (!isLoading && total > 0) {
+  if (!isLoading && metrics.total > 0) {
     progressTrack.setAttribute("role", "progressbar");
     progressTrack.setAttribute("aria-label", "今日の授業の完了状況");
     progressTrack.setAttribute("aria-valuemin", "0");
-    progressTrack.setAttribute("aria-valuemax", String(total));
-    progressTrack.setAttribute("aria-valuenow", String(completed));
+    progressTrack.setAttribute("aria-valuemax", String(metrics.total));
+    progressTrack.setAttribute("aria-valuenow", String(metrics.completed));
   } else {
     progressTrack.setAttribute("aria-hidden", "true");
   }
@@ -2947,7 +3062,7 @@ function renderTodayDashboard() {
 
   const remainingEmptyText = isLoading
     ? "授業情報を読み込み中..."
-    : (total > 0 ? "未処理の授業はありません。" : "今日の授業はありません。");
+    : (metrics.total > 0 ? "未処理の授業はありません。" : "今日の授業はありません。");
   const completedEmptyText = isLoading
     ? "保存状態の確認後に表示します。"
     : "完了した授業はありません。";
@@ -2959,7 +3074,7 @@ function renderTodayDashboard() {
   area.appendChild(dashboard);
 }
 
-function renderClassListContent() {
+function renderClassListContent(todayTaskModels) {
   const area = document.getElementById("classListArea");
   const quickNav = document.getElementById("quickClassNav");
 
@@ -2982,18 +3097,27 @@ function renderClassListContent() {
 
   renderQuickClassNav();
 
-  const sidebarClassesMap = {};
-  classesCache.forEach(function(cls) {
-    const sidebarKey = getSidebarCardKey(cls);
-    if (!sidebarKey) return;
-    if (!sidebarClassesMap[sidebarKey]) {
-      sidebarClassesMap[sidebarKey] = cls;
-    }
-  });
+  const hasTodayTaskModels = Array.isArray(todayTaskModels);
+  let sidebarClasses = [];
 
-  const sidebarClasses = Object.keys(sidebarClassesMap).map(function(key) {
-    return sidebarClassesMap[key];
-  });
+  if (hasTodayTaskModels) {
+    sidebarClasses = todayTaskModels.map(function(task) {
+      return task.cls;
+    });
+  } else {
+    const sidebarClassesMap = {};
+    classesCache.forEach(function(cls) {
+      const sidebarKey = getSidebarCardKey(cls);
+      if (!sidebarKey) return;
+      if (!sidebarClassesMap[sidebarKey]) {
+        sidebarClassesMap[sidebarKey] = cls;
+      }
+    });
+
+    sidebarClasses = Object.keys(sidebarClassesMap).map(function(key) {
+      return sidebarClassesMap[key];
+    });
+  }
 
   const overviewStateDefinitions = [
     { key: "saved", label: "保存済み" },
@@ -3017,12 +3141,24 @@ function renderClassListContent() {
     failed: 0
   };
 
-  const sidebarItems = sidebarClasses.map(function(cls) {
-    const sidebarStatus = getSidebarSaveStatusInfo(cls);
+  const sidebarItems = (hasTodayTaskModels ? todayTaskModels : sidebarClasses).map(function(source) {
+    const taskModel = hasTodayTaskModels ? source : null;
+    const cls = taskModel ? taskModel.cls : source;
+    const sidebarStatus = taskModel ? taskModel.sidebarStatus : getSidebarSaveStatusInfo(cls);
     const rawStateName = String(sidebarStatus.className || "");
-    const stateName = Object.prototype.hasOwnProperty.call(stateCardClassMap, rawStateName)
+    let stateName = Object.prototype.hasOwnProperty.call(stateCardClassMap, rawStateName)
       ? rawStateName
       : "checking";
+
+    if (taskModel) {
+      if (taskModel.state === "dirty") {
+        stateName = "partial";
+      } else if (taskModel.state === "unprocessed") {
+        stateName = "unsaved";
+      } else if (Object.prototype.hasOwnProperty.call(stateCardClassMap, taskModel.state)) {
+        stateName = taskModel.state;
+      }
+    }
 
     stateCounts[stateName]++;
 
@@ -3030,7 +3166,8 @@ function renderClassListContent() {
       cls: cls,
       sidebarStatus: sidebarStatus,
       stateName: stateName,
-      stateCardClass: stateCardClassMap[stateName]
+      stateCardClass: stateCardClassMap[stateName],
+      taskModel: taskModel
     };
   });
 
@@ -3055,7 +3192,7 @@ function renderClassListContent() {
     const key = getSidebarCardKey(cls);
     const activeClass = !!(selectedClass && key === getSidebarCardKey(selectedClass));
     const isExperiment = isExperimentSubject(cls);
-    const isEditing = activeClass && isDirty;
+    const isEditing = item.taskModel ? item.taskModel.isDirty : (activeClass && isDirty);
     const sidebarStatus = item.sidebarStatus;
     let statusLabel = sidebarStatus.label;
     const statusClassName = item.stateName;
