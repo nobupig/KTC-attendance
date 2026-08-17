@@ -456,6 +456,12 @@
       color: #a12622;
     }
 
+    .class-list-overview-chip.state-dirty {
+      border-color: #d9b45f;
+      background: #fff7df;
+      color: #7a5700;
+    }
+
     .class-card {
       border: 1px solid #d9e0ee;
       border-radius: 10px;
@@ -489,10 +495,22 @@
       background: #fff8f7;
     }
 
+    .class-card.state-dirty {
+      border-left: 4px solid #d9a72e;
+      background: #fff9e8;
+    }
+
     .class-card.active {
       border: 2px solid #2f6feb;
       background: #eef4ff;
       box-shadow: 0 0 0 2px rgba(47, 111, 235, 0.12);
+    }
+
+    .class-card.state-dirty.active {
+      border: 2px solid #d09a1b;
+      border-left-width: 4px;
+      background: #fff8e1;
+      box-shadow: 0 0 0 2px rgba(208, 154, 27, 0.14);
     }
 
     .class-card-header {
@@ -2929,6 +2947,82 @@ function getTodayDashboardMetrics(taskModels) {
   };
 }
 
+function getTodayTaskDisplayInfo(taskModel) {
+  const task = taskModel || {};
+  const sidebarStatus = task.sidebarStatus || {};
+
+  if (task.state === "dirty") {
+    return {
+      state: "dirty",
+      cardClass: "state-dirty",
+      statusClass: "editing",
+      statusLabel: "入力途中（未保存）",
+      overviewKey: "dirty",
+      overviewLabel: "入力途中",
+      overviewClass: "state-dirty"
+    };
+  }
+
+  if (task.state === "failed") {
+    return {
+      state: "failed",
+      cardClass: "state-failed",
+      statusClass: "failed",
+      statusLabel: "確認失敗",
+      overviewKey: "failed",
+      overviewLabel: "確認失敗",
+      overviewClass: "state-failed"
+    };
+  }
+
+  if (task.state === "checking") {
+    return {
+      state: "checking",
+      cardClass: "state-checking",
+      statusClass: "checking",
+      statusLabel: "確認中",
+      overviewKey: "checking",
+      overviewLabel: "確認中",
+      overviewClass: "state-checking"
+    };
+  }
+
+  if (task.state === "partial") {
+    const isPartialChecking = !!sidebarStatus.isChecking;
+    return {
+      state: "partial",
+      cardClass: "state-partial",
+      statusClass: "partial",
+      statusLabel: sidebarStatus.label || (isPartialChecking ? "一部確認中" : "一部保存済み"),
+      overviewKey: isPartialChecking ? "partial-checking" : "partial",
+      overviewLabel: isPartialChecking ? "一部確認中" : "一部保存済み",
+      overviewClass: "state-partial"
+    };
+  }
+
+  if (task.state === "saved") {
+    return {
+      state: "saved",
+      cardClass: "state-saved",
+      statusClass: "saved",
+      statusLabel: sidebarStatus.label || "保存済み",
+      overviewKey: "saved",
+      overviewLabel: "保存済み",
+      overviewClass: "state-saved"
+    };
+  }
+
+  return {
+    state: "unprocessed",
+    cardClass: "state-unsaved",
+    statusClass: "unsaved",
+    statusLabel: "未入力",
+    overviewKey: "unprocessed",
+    overviewLabel: "未入力",
+    overviewClass: "state-unsaved"
+  };
+}
+
 function createTodayTaskSection(title, cards, emptyText) {
   const section = document.createElement("section");
   section.className = "today-task-section";
@@ -2982,6 +3076,7 @@ function renderTodayDashboard() {
   // 既存カードとaction listenerを再利用し、業務状態・集計・順序はTask View Modelから渡す。
   renderClassListContent(orderedTaskModels);
 
+  const overview = area.querySelector(".class-list-overview");
   const cardBySidebarKey = Object.create(null);
   Array.prototype.slice.call(area.children).forEach(function(child) {
     const sidebarKey = child && child.dataset ? child.dataset.sidebarKey : "";
@@ -3003,6 +3098,9 @@ function renderTodayDashboard() {
   remainingCards.concat(completedCards).forEach(function(card) {
     card.remove();
   });
+  if (overview) {
+    overview.remove();
+  }
 
   const dashboard = document.createElement("div");
   dashboard.className = "today-dashboard";
@@ -3059,6 +3157,9 @@ function renderTodayDashboard() {
   }
 
   dashboard.appendChild(summary);
+  if (overview) {
+    dashboard.appendChild(overview);
+  }
 
   const remainingEmptyText = isLoading
     ? "授業情報を読み込み中..."
@@ -3119,55 +3220,69 @@ function renderClassListContent(todayTaskModels) {
     });
   }
 
-  const overviewStateDefinitions = [
-    { key: "saved", label: "保存済み" },
-    { key: "unsaved", label: "未入力" },
-    { key: "partial", label: "一部保存済み" },
-    { key: "checking", label: "確認中" },
-    { key: "failed", label: "確認失敗" }
-  ];
+  const overviewStateDefinitions = hasTodayTaskModels
+    ? [
+      { key: "dirty", label: "入力途中", className: "state-dirty" },
+      { key: "failed", label: "確認失敗", className: "state-failed" },
+      { key: "checking", label: "確認中", className: "state-checking" },
+      { key: "partial-checking", label: "一部確認中", className: "state-partial" },
+      { key: "partial", label: "一部保存済み", className: "state-partial" },
+      { key: "unprocessed", label: "未入力", className: "state-unsaved" },
+      { key: "saved", label: "保存済み", className: "state-saved" }
+    ]
+    : [
+      { key: "saved", label: "保存済み", className: "state-saved" },
+      { key: "unsaved", label: "未入力", className: "state-unsaved" },
+      { key: "partial", label: "一部保存済み", className: "state-partial" },
+      { key: "checking", label: "確認中", className: "state-checking" },
+      { key: "failed", label: "確認失敗", className: "state-failed" }
+    ];
   const stateCardClassMap = {
+    dirty: "state-dirty",
     saved: "state-saved",
     unsaved: "state-unsaved",
     partial: "state-partial",
     checking: "state-checking",
     failed: "state-failed"
   };
-  const stateCounts = {
-    saved: 0,
-    unsaved: 0,
-    partial: 0,
-    checking: 0,
-    failed: 0
-  };
+  const stateCounts = {};
+  overviewStateDefinitions.forEach(function(stateDefinition) {
+    stateCounts[stateDefinition.key] = 0;
+  });
 
   const sidebarItems = (hasTodayTaskModels ? todayTaskModels : sidebarClasses).map(function(source) {
     const taskModel = hasTodayTaskModels ? source : null;
     const cls = taskModel ? taskModel.cls : source;
     const sidebarStatus = taskModel ? taskModel.sidebarStatus : getSidebarSaveStatusInfo(cls);
+    const displayInfo = taskModel ? getTodayTaskDisplayInfo(taskModel) : null;
     const rawStateName = String(sidebarStatus.className || "");
     let stateName = Object.prototype.hasOwnProperty.call(stateCardClassMap, rawStateName)
       ? rawStateName
       : "checking";
+    const overviewKey = displayInfo ? displayInfo.overviewKey : stateName;
 
-    if (taskModel) {
-      if (taskModel.state === "dirty") {
-        stateName = "partial";
-      } else if (taskModel.state === "unprocessed") {
-        stateName = "unsaved";
-      } else if (Object.prototype.hasOwnProperty.call(stateCardClassMap, taskModel.state)) {
-        stateName = taskModel.state;
+    if (displayInfo) {
+      stateName = displayInfo.state;
+      const overviewDefinition = overviewStateDefinitions.find(function(stateDefinition) {
+        return stateDefinition.key === displayInfo.overviewKey;
+      });
+      if (overviewDefinition) {
+        overviewDefinition.label = displayInfo.overviewLabel;
+        overviewDefinition.className = displayInfo.overviewClass;
       }
     }
 
-    stateCounts[stateName]++;
+    if (Object.prototype.hasOwnProperty.call(stateCounts, overviewKey)) {
+      stateCounts[overviewKey]++;
+    }
 
     return {
       cls: cls,
       sidebarStatus: sidebarStatus,
       stateName: stateName,
-      stateCardClass: stateCardClassMap[stateName],
-      taskModel: taskModel
+      stateCardClass: displayInfo ? displayInfo.cardClass : stateCardClassMap[stateName],
+      taskModel: taskModel,
+      displayInfo: displayInfo
     };
   });
 
@@ -3180,7 +3295,7 @@ function renderClassListContent(todayTaskModels) {
   overviewStateDefinitions.forEach(function(stateDefinition) {
     if (stateCounts[stateDefinition.key] <= 0) return;
 
-    html += '    <span class="class-list-overview-chip ' + stateCardClassMap[stateDefinition.key] + '">' +
+    html += '    <span class="class-list-overview-chip ' + stateDefinition.className + '">' +
       escapeHtml(stateDefinition.label) + ' <strong>' + stateCounts[stateDefinition.key] + '</strong></span>';
   });
 
@@ -3194,17 +3309,19 @@ function renderClassListContent(todayTaskModels) {
     const isExperiment = isExperimentSubject(cls);
     const isEditing = item.taskModel ? item.taskModel.isDirty : (activeClass && isDirty);
     const sidebarStatus = item.sidebarStatus;
-    let statusLabel = sidebarStatus.label;
-    const statusClassName = item.stateName;
+    let statusLabel = item.displayInfo ? item.displayInfo.statusLabel : sidebarStatus.label;
+    const statusClassName = item.displayInfo ? item.displayInfo.statusClass : item.stateName;
 
-    if (!isExperiment && statusLabel === "未保存") {
-      statusLabel = "未入力";
-    } else if (!isExperiment && statusLabel === "確認中...") {
-      statusLabel = "確認中";
-    }
+    if (!item.displayInfo) {
+      if (!isExperiment && statusLabel === "未保存") {
+        statusLabel = "未入力";
+      } else if (!isExperiment && statusLabel === "確認中...") {
+        statusLabel = "確認中";
+      }
 
-    if (isEditing) {
-      statusLabel = "入力途中（未保存）";
+      if (isEditing) {
+        statusLabel = "入力途中（未保存）";
+      }
     }
 
     const targetParts = [];
@@ -3234,7 +3351,7 @@ function renderClassListContent(todayTaskModels) {
     if (activeClass) {
       html += '      <span class="class-selected-label">選択中</span>';
     }
-    html += '      <span class="class-status ' + escapeHtml(statusClassName) + (isEditing ? ' editing' : '') + '">' + escapeHtml(statusLabel) + '</span>';
+    html += '      <span class="class-status ' + escapeHtml(statusClassName) + (!item.displayInfo && isEditing ? ' editing' : '') + '">' + escapeHtml(statusLabel) + '</span>';
     html += '    </div>';
     html += '  </header>';
     html += '  <div class="class-card-main">';
