@@ -128,6 +128,36 @@
       align-items: start;
     }
 
+    .teacher-page-main {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .lesson-primary-section {
+      min-width: 0;
+    }
+
+    .lesson-section-header {
+      margin-bottom: 12px;
+    }
+
+    .lesson-section-kicker {
+      margin-bottom: 4px;
+      color: #4a5b7a;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .lesson-section-header h2 {
+      margin: 0 0 6px;
+      font-size: 20px;
+    }
+
+    .lesson-section-header .sub-text {
+      margin-bottom: 0;
+    }
+
     .panel {
       background: #fff;
       border-radius: 12px;
@@ -135,9 +165,22 @@
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     }
 
-    .panel h2 {
+    .panel h2,
+    .panel h3 {
       margin: 0 0 12px;
       font-size: 18px;
+    }
+
+    .lesson-mode-tools-label {
+      margin-bottom: 8px;
+      color: #667;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .past-search-section h4 {
+      margin: 0 0 10px;
+      font-size: 14px;
     }
 
     .mode-tabs {
@@ -272,10 +315,9 @@
     .class-card {
       border: 1px solid #d9e0ee;
       border-radius: 10px;
-      padding: 12px;
+      padding: 14px;
       background: #fff;
-      cursor: pointer;
-      transition: 0.15s;
+      transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
     }
 
     .class-card.state-saved {
@@ -303,34 +345,54 @@
       background: #fff8f7;
     }
 
-    .class-card:hover {
-      background: #f8fbff;
-      border-color: #9db7ef;
-    }
-
     .class-card.active {
       border: 2px solid #2f6feb;
       background: #eef4ff;
-      box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.14);
+      box-shadow: 0 0 0 2px rgba(47, 111, 235, 0.12);
     }
 
-    .class-card-top {
+    .class-card-header {
       display: flex;
       justify-content: space-between;
       gap: 8px;
-      margin-bottom: 6px;
+      margin-bottom: 10px;
       align-items: center;
       flex-wrap: wrap;
     }
 
+    .class-card-labels {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
     .period-badge {
-      display: inline-block;
-      padding: 3px 8px;
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 3px 9px;
       border-radius: 999px;
       background: #e9eefb;
       color: #31456a;
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .class-selected-label {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid #9db7ef;
+      border-radius: 999px;
+      background: #fff;
+      color: #1f4fa3;
       font-size: 12px;
       font-weight: bold;
+      line-height: 1.2;
+      white-space: nowrap;
     }
 
     .class-status {
@@ -380,67 +442,112 @@
       color: #a12622;
     }
 
-    .class-title {
-      font-size: 16px;
-      font-weight: bold;
-      margin-bottom: 4px;
+    .class-status.editing {
+      background: #fff4db;
+      border-color: #e1c36c;
+      border-style: solid;
+      color: #7a5700;
     }
 
-    .class-meta {
+    .class-card-main {
+      min-width: 0;
+    }
+
+    .class-title {
+      font-size: 17px;
+      font-weight: bold;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .class-target {
+      margin-top: 3px;
+      color: #334;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    .class-card-secondary {
+      margin-top: 9px;
       font-size: 13px;
       color: #666;
-      line-height: 1.6;
+      line-height: 1.55;
+    }
+
+    .class-card-secondary-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 10px;
+    }
+
+    .class-card-secondary-line + .class-card-secondary-line {
+      margin-top: 2px;
     }
 
     .class-card-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
 
-.class-action-btn {
-  display: inline-flex;
-  flex: 1 1 140px;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  border: 1px solid #ccd5e3;
-  background: #fff;
-  color: #334;
-  border-radius: 999px;
-  padding: 8px 12px;
-  font-size: 12px;
-  font-weight: bold;
-  cursor: pointer;
-}
+    .class-action-btn {
+      display: inline-flex;
+      flex: 1 1 140px;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      border: 1px solid #ccd5e3;
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+    }
 
-.class-action-btn.no-absence {
-  background: #e8f7ec;
-  border-color: #a7d8b4;
-  color: #1d6b37;
-}
+    .class-action-btn.input-absence {
+      background: #2f6feb;
+      border-color: #2f6feb;
+      color: #fff;
+    }
 
-.class-action-btn.input-absence {
-  background: #eef4ff;
-  border-color: #9db7ef;
-  color: #1f4fa3;
-}
+    .class-action-btn.input-absence:hover:not(:disabled) {
+      background: #245fc7;
+      border-color: #245fc7;
+    }
 
-.class-action-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  background: #f3f5f8;
-  border-color: #d9e0e8;
-  color: #77808f;
-}
+    .class-action-btn.no-absence {
+      background: #fff;
+      border-color: #a7d8b4;
+      color: #1d6b37;
+    }
 
-.class-card-status-note {
-  margin-top: 8px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #8a4b00;
-}
+    .class-action-btn.no-absence:hover:not(:disabled) {
+      background: #f2faf4;
+      border-color: #7fbd90;
+    }
+
+    .class-action-btn:focus {
+      outline: 2px solid #2f6feb;
+      outline-offset: 2px;
+    }
+
+    .class-action-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      background: #f3f5f8;
+      border-color: #d9e0e8;
+      color: #77808f;
+    }
+
+    .class-card-status-note {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #8a4b00;
+    }
 
     .info-bar {
       border: 1px solid #d9e0ee;
@@ -658,7 +765,7 @@
         min-width: 0;
       }
 
-      .class-card-top {
+      .class-card-header {
         align-items: flex-start;
       }
 
@@ -735,7 +842,7 @@
       color: #fff;
     }
 
-        .teacher-unsaved-summary-box {
+    .teacher-unsaved-summary-box {
       margin-bottom: 12px;
       padding: 12px 14px;
       border-radius: 10px;
@@ -807,6 +914,16 @@
       margin-top: 12px;
       padding-top: 12px;
       border-top: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .teacher-unsaved-details-section {
+      margin-top: 0;
+      padding-top: 16px;
+      border-top: 0;
+    }
+
+    .teacher-unsaved-details-header .sub-text {
+      margin-bottom: 12px;
     }
 
     .teacher-unsaved-details-content {
@@ -908,10 +1025,6 @@
   color: #667;
 }
 
-    .panel > .teacher-unsaved-summary-box:first-child {
-  margin-bottom: 14px;
-}
-
   </style>
 </head>
 <body>
@@ -919,7 +1032,6 @@
     <div class="page-header-row">
       <div class="page-header-main">
         <h1>科目担当画面</h1>
-        <div class="sub-text" id="pageSubText">読み込み中...</div>
       </div>
       <div class="page-header-actions">
         <button id="goHomeButton" type="button" class="header-link-btn">ホームへ戻る</button>
@@ -940,11 +1052,15 @@
     <div id="messageArea" class="message"></div>
   </div>
 
-  <div class="layout">
-    <div class="panel">
-      <h2>担当授業</h2>
+  <main class="teacher-page-main">
+    <section class="lesson-primary-section" aria-labelledby="lessonSectionHeading">
+      <header class="lesson-section-header">
+        <div class="lesson-section-kicker">今日の業務</div>
+        <h2 id="lessonSectionHeading">今日の授業</h2>
+        <div class="sub-text" id="pageSubText">読み込み中...</div>
+      </header>
 
-            <div id="teacherUnsavedSummaryBox" class="teacher-unsaved-summary-box loading">
+      <aside id="teacherUnsavedSummaryBox" class="teacher-unsaved-summary-box loading">
         <div class="teacher-unsaved-summary-head">
           <div class="teacher-unsaved-summary-texts">
             <div id="teacherUnsavedSummaryTitle" class="teacher-unsaved-summary-title">未保存の授業を確認中...</div>
@@ -955,64 +1071,79 @@
             <span id="teacherUnsavedToggleIcon">▼</span>
           </button>
         </div>
+      </aside>
 
-        <div id="teacherUnsavedDetailsBox" class="teacher-unsaved-details-box" hidden>
-          <div id="teacherUnsavedDetailsContent" class="teacher-unsaved-details-content"></div>
-        </div>
+      <div class="layout lesson-workspace">
+        <section class="panel lesson-list-panel" aria-labelledby="lessonListHeading">
+          <h3 id="lessonListHeading">授業一覧</h3>
+
+          <div class="lesson-mode-tools">
+            <div class="lesson-mode-tools-label">表示する授業</div>
+            <div class="mode-tabs">
+              <button id="modeTodayBtn" type="button" class="mode-tab active">本日の授業</button>
+              <button id="modePastBtn" type="button" class="mode-tab">過去授業を検索</button>
+            </div>
+
+            <section id="pastSearchBox" class="search-box past-search-section" style="display:none;" aria-labelledby="pastSearchHeading">
+              <h4 id="pastSearchHeading">過去授業の検索・修正</h4>
+              <div class="search-row">
+                <input type="date" id="pastDateInput">
+                <button id="searchPastButton" type="button" class="main-btn secondary-btn">検索する</button>
+              </div>
+              <div class="search-note">最後に検索した日付を保持します。</div>
+            </section>
+          </div>
+
+          <div id="quickClassNav" class="quick-nav" style="display:none;"></div>
+
+          <div id="classListArea" class="class-list">
+            <div class="empty-box">授業情報を読み込み中...</div>
+          </div>
+        </section>
+
+        <section class="panel attendance-input-panel" aria-labelledby="attendanceInputHeading">
+          <h3 id="attendanceInputHeading">出席入力</h3>
+
+          <div id="selectedClassInfo" class="info-bar">授業を読み込み中...</div>
+          <div id="lastSavedInfoBar" class="info-bar" style="display:none;"></div>
+          <div id="groupSelectorArea" class="info-bar" style="display:none;">
+            <label for="groupSelect"><strong>班選択</strong></label><br>
+            <select id="groupSelect" style="margin-top:8px; padding:8px 10px; min-width:180px;">
+              <option value="">班を選択してください</option>
+            </select>
+            <div style="margin-top:8px; font-size:12px; color:#667;">
+              工学実験では班を選択すると、その班の学生のみ表示します。
+            </div>
+          </div>
+
+          <div class="action-bar top-action-bar">
+            <button id="resetPresentButton" type="button" class="main-btn secondary-btn">全員を出席にする</button>
+            <button id="saveButtonTop" type="button" class="main-btn save-btn" disabled>保存する</button>
+          </div>
+
+          <div id="saveState" class="save-state"></div>
+          <div id="summaryArea" class="summary"></div>
+          <div id="sortNote" class="sort-note"></div>
+
+          <div id="studentArea">
+            <div class="empty-box">学生一覧を読み込み中...</div>
+          </div>
+
+          <div class="action-bar bottom-action-bar">
+            <button id="saveButtonBottom" type="button" class="main-btn save-btn" disabled>保存する</button>
+          </div>
+        </section>
       </div>
+    </section>
 
-      <div class="mode-tabs">
-        <button id="modeTodayBtn" type="button" class="mode-tab active">本日の授業</button>
-        <button id="modePastBtn" type="button" class="mode-tab">過去授業を検索</button>
-      </div>
-
-      <div id="pastSearchBox" class="search-box" style="display:none;">
-        <div class="search-row">
-          <input type="date" id="pastDateInput">
-          <button id="searchPastButton" type="button" class="main-btn secondary-btn">検索する</button>
-        </div>
-        <div class="search-note">最後に検索した日付を保持します。</div>
-      </div>
-      <div id="quickClassNav" class="quick-nav" style="display:none;"></div>
-            
-     <div id="classListArea" class="class-list">
-        <div class="empty-box">授業情報を読み込み中...</div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <h2>出席入力</h2>
-
-      <div id="selectedClassInfo" class="info-bar">授業を読み込み中...</div>
-      <div id="lastSavedInfoBar" class="info-bar" style="display:none;"></div>
-      <div id="groupSelectorArea" class="info-bar" style="display:none;">
-        <label for="groupSelect"><strong>班選択</strong></label><br>
-        <select id="groupSelect" style="margin-top:8px; padding:8px 10px; min-width:180px;">
-          <option value="">班を選択してください</option>
-        </select>
-        <div style="margin-top:8px; font-size:12px; color:#667;">
-          工学実験では班を選択すると、その班の学生のみ表示します。
-        </div>
-      </div>
-
-      <div class="action-bar top-action-bar">
-        <button id="resetPresentButton" type="button" class="main-btn secondary-btn">全員を出席にする</button>
-        <button id="saveButtonTop" type="button" class="main-btn save-btn" disabled>保存する</button>
-      </div>
-
-      <div id="saveState" class="save-state"></div>
-      <div id="summaryArea" class="summary"></div>
-      <div id="sortNote" class="sort-note"></div>
-
-      <div id="studentArea">
-        <div class="empty-box">学生一覧を読み込み中...</div>
-      </div>
-
-      <div class="action-bar bottom-action-bar">
-        <button id="saveButtonBottom" type="button" class="main-btn save-btn" disabled>保存する</button>
-      </div>
-    </div>
-  </div>
+    <section id="teacherUnsavedDetailsBox" class="panel teacher-unsaved-details-box teacher-unsaved-details-section" hidden aria-labelledby="teacherUnsavedDetailsHeading">
+      <header class="teacher-unsaved-details-header">
+        <h2 id="teacherUnsavedDetailsHeading">過去の未保存授業</h2>
+        <div class="sub-text">必要な授業を選び、過去授業の出席入力を開きます。</div>
+      </header>
+      <div id="teacherUnsavedDetailsContent" class="teacher-unsaved-details-content"></div>
+    </section>
+  </main>
 
   <script>
     const preSelectedSession = {
@@ -1217,7 +1348,13 @@ function goHome() {
     }
 
     function markDirty(flag) {
-  isDirty = flag;
+  const nextDirty = !!flag;
+  const dirtyStateChanged = isDirty !== nextDirty;
+  isDirty = nextDirty;
+
+  if (dirtyStateChanged) {
+    renderClassList();
+  }
 
   if (isSaving) {
     setTopActionButtonsDisabled(true);
@@ -2248,7 +2385,7 @@ function renderClassList() {
 
   const overviewStateDefinitions = [
     { key: "saved", label: "保存済み" },
-    { key: "unsaved", label: "未保存" },
+    { key: "unsaved", label: "未入力" },
     { key: "partial", label: "一部保存済み" },
     { key: "checking", label: "確認中" },
     { key: "failed", label: "確認失敗" }
@@ -2292,6 +2429,8 @@ function renderClassList() {
   html += '  <div class="class-list-overview-chips">';
 
   overviewStateDefinitions.forEach(function(stateDefinition) {
+    if (stateCounts[stateDefinition.key] <= 0) return;
+
     html += '    <span class="class-list-overview-chip ' + stateCardClassMap[stateDefinition.key] + '">' +
       escapeHtml(stateDefinition.label) + ' <strong>' + stateCounts[stateDefinition.key] + '</strong></span>';
   });
@@ -2302,58 +2441,103 @@ function renderClassList() {
   sidebarItems.forEach(function(item) {
     const cls = item.cls;
     const key = getSidebarCardKey(cls);
-    const activeClass = selectedClass && key === getSidebarCardKey(selectedClass);
+    const activeClass = !!(selectedClass && key === getSidebarCardKey(selectedClass));
+    const isExperiment = isExperimentSubject(cls);
+    const isEditing = activeClass && isDirty;
     const sidebarStatus = item.sidebarStatus;
-    const statusLabel = sidebarStatus.label;
+    let statusLabel = sidebarStatus.label;
     const statusClassName = item.stateName;
 
-    html += '<div class="class-card ' + item.stateCardClass + (activeClass ? ' active' : '') + '" data-sidebar-key="' + escapeHtml(key) + '">';
-    html += '  <div class="class-card-top">';
-    html += '    <span class="period-badge">' + escapeHtml(String(cls.period || "")) + '限</span>';
-    html += '    <span class="class-status ' + escapeHtml(statusClassName) + '">' + escapeHtml(statusLabel) + '</span>';
-    html += '  </div>';
-    html += '  <div class="class-title">' + escapeHtml(cls.subjectName) + '</div>';
-    html += '  <div class="class-meta">';
-    if (isExperimentSubject(cls)) {
-      html += '班選択して記録<br>';
-    } else {
-      html += escapeHtml(cls.grade) + '年 ' + escapeHtml(cls.unit) + '組<br>';
+    if (!isExperiment && statusLabel === "未保存") {
+      statusLabel = "未入力";
+    } else if (!isExperiment && statusLabel === "確認中...") {
+      statusLabel = "確認中";
     }
-    html += escapeHtml(cls.date) + ' / 第' + escapeHtml(cls.sessionNumber) + '回';
 
+    if (isEditing) {
+      statusLabel = "入力途中（未保存）";
+    }
+
+    const targetParts = [];
+    if (!isExperiment && cls.grade) targetParts.push(String(cls.grade) + "年");
+    if (!isExperiment && cls.unit) targetParts.push(String(cls.unit) + "組");
+    const classTargetText = isExperiment ? "班選択して記録" : targetParts.join(" ");
+
+    let teacherText = "";
     if (cls.teachers && cls.teachers.length > 0) {
-      html += '<br>担当: ' + escapeHtml(formatTeachersText(cls.teachers));
+      teacherText = formatTeachersText(cls.teachers);
     } else if (cls.teacherName) {
-      html += '<br>担当: ' + escapeHtml(cls.teacherName);
+      teacherText = cls.teacherName;
     }
 
-    if (sidebarStatus.lastSavedInfo && sidebarStatus.lastSavedInfo.savedAtText) {
-      html += '<br>最終保存: ' + escapeHtml(sidebarStatus.lastSavedInfo.savedAtText);
+    const secondarySummaryItems = [];
+    if (currentMode === "past" && cls.date) {
+      secondarySummaryItems.push("日付: " + String(cls.date));
+    }
+    if (cls.sessionNumber) {
+      secondarySummaryItems.push("第" + String(cls.sessionNumber) + "回");
     }
 
-      html += '  </div>';
+    html += '<article class="class-card ' + item.stateCardClass + (activeClass ? ' active' : '') + '" data-sidebar-key="' + escapeHtml(key) + '">';
+    html += '  <header class="class-card-header">';
+    html += '    <span class="period-badge">' + escapeHtml(String(cls.period || "")) + '限</span>';
+    html += '    <div class="class-card-labels">';
+    if (activeClass) {
+      html += '      <span class="class-selected-label">選択中</span>';
+    }
+    html += '      <span class="class-status ' + escapeHtml(statusClassName) + (isEditing ? ' editing' : '') + '">' + escapeHtml(statusLabel) + '</span>';
+    html += '    </div>';
+    html += '  </header>';
+    html += '  <div class="class-card-main">';
+    html += '    <div class="class-title">' + escapeHtml(cls.subjectName) + '</div>';
+    if (classTargetText) {
+      html += '    <div class="class-target">' + escapeHtml(classTargetText) + '</div>';
+    }
+    html += '  </div>';
 
-      if (sidebarStatus.statusNote) {
-        html += '  <div class="class-card-status-note">' + escapeHtml(sidebarStatus.statusNote) + '</div>';
+    if (
+      secondarySummaryItems.length > 0 ||
+      teacherText ||
+      (sidebarStatus.lastSavedInfo && sidebarStatus.lastSavedInfo.savedAtText)
+    ) {
+      html += '  <div class="class-card-secondary">';
+      if (secondarySummaryItems.length > 0) {
+        html += '    <div class="class-card-secondary-summary">';
+        secondarySummaryItems.forEach(function(summaryItem) {
+          html += '      <span>' + escapeHtml(summaryItem) + '</span>';
+        });
+        html += '    </div>';
       }
-
-      html += '  <div class="class-card-actions">';
-
-      if (requiresGroupSelection(cls)) {
-        html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '">班を選択して入力</button>';
-      } else {
-        const noAbsenceDisabledAttribute = sidebarStatus.disableNoAbsenceQuickSave
-          ? ' disabled'
-          : '';
-        const noAbsenceButtonTitle = sidebarStatus.noAbsenceDisabledReason ||
-          "この授業を欠席者・遅刻・公欠なし（全員出席）として保存します。";
-        html += '    <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' + escapeHtml(key) + '"' + noAbsenceDisabledAttribute + ' title="' + escapeHtml(noAbsenceButtonTitle) + '">欠席者なしで保存</button>';
-        html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '" title="名簿を開いて欠席・遅刻・公欠を入力し、保存済み内容を確認します。">欠席者を入力</button>';
+      if (teacherText) {
+        html += '    <div class="class-card-secondary-line">担当: ' + escapeHtml(teacherText) + '</div>';
       }
-
+      if (sidebarStatus.lastSavedInfo && sidebarStatus.lastSavedInfo.savedAtText) {
+        html += '    <div class="class-card-secondary-line">最終保存: ' + escapeHtml(sidebarStatus.lastSavedInfo.savedAtText) + '</div>';
+      }
       html += '  </div>';
+    }
 
-    html += '</div>';
+    if (sidebarStatus.statusNote) {
+      html += '  <div class="class-card-status-note">' + escapeHtml(sidebarStatus.statusNote) + '</div>';
+    }
+
+    html += '  <div class="class-card-actions">';
+
+    if (requiresGroupSelection(cls)) {
+      html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '">班を選択して入力</button>';
+    } else {
+      const noAbsenceDisabledAttribute = sidebarStatus.disableNoAbsenceQuickSave
+        ? ' disabled'
+        : '';
+      const noAbsenceButtonTitle = sidebarStatus.noAbsenceDisabledReason ||
+        "この授業を欠席者・遅刻・公欠なし（全員出席）として保存します。";
+      html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '" title="名簿を開いて出席を入力・確認します。">出席を入力・確認</button>';
+      html += '    <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' + escapeHtml(key) + '"' + noAbsenceDisabledAttribute + ' title="' + escapeHtml(noAbsenceButtonTitle) + '">欠席者なしで保存</button>';
+    }
+
+    html += '  </div>';
+
+    html += '</article>';
   });
 
   area.innerHTML = html;
@@ -2823,7 +3007,11 @@ function renderSelectedClassInfo() {
       setLoadingDetail();
       renderSelectedClassInfo();
       clearMessage();
+      const hadDirtyCard = isDirty;
       isDirty = false;
+      if (hadDirtyCard) {
+        renderClassList();
+      }
       setSaveStateText("");
       setTopActionButtonsDisabled(true);
       isRiskLoading = false;
@@ -2981,6 +3169,7 @@ function renderSelectedClassInfo() {
   debugLog("selectClass", cls);
 
   selectedClass = cls;
+  isDirty = false;
   renderClassList();
   renderSelectedClassInfo();
   clearMessage();
@@ -3124,7 +3313,6 @@ function handleNoAbsenceSaveClick(cls) {
   if (!ok) return;
 
   selectedClass = cls;
-  renderClassList();
   renderSelectedClassInfo();
   renderLastSavedInfoBar(cls.lastSavedInfo || null);
 
@@ -3133,6 +3321,7 @@ function handleNoAbsenceSaveClick(cls) {
   riskMapState = {};
   isRiskLoading = false;
   isDirty = false;
+  renderClassList();
 
   document.getElementById("summaryArea").innerHTML = "";
   document.getElementById("sortNote").textContent = "";
@@ -3702,6 +3891,7 @@ function isExperimentSubject(cls) {
         riskMapState = {};
         isRiskLoading = false;
         isDirty = false;
+        renderClassList();
 
         renderSelectedClassInfo();
         document.getElementById("studentArea").innerHTML = '<div class="empty-box">まず担当する班を選択してください。</div>';
