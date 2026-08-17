@@ -843,41 +843,70 @@
     }
 
     .teacher-unsaved-summary-box {
+      --teacher-unsaved-accent: #5c667a;
+      --teacher-unsaved-accent-soft: #eef1f5;
       margin-bottom: 12px;
-      padding: 12px 14px;
+      padding: 11px 13px;
       border-radius: 10px;
       border: 1px solid #d9e0ee;
-      background: #fff;
+      background: #fafbfc;
     }
 
+    .teacher-unsaved-summary-box.idle,
     .teacher-unsaved-summary-box.loading {
-      background: #f7f9fc;
-      color: #667;
+      --teacher-unsaved-accent: #5c667a;
+      --teacher-unsaved-accent-soft: #eef1f5;
+      background: #f8f9fb;
     }
 
     .teacher-unsaved-summary-box.ok {
-      background: #eef4ff;
-      color: #1f4fa3;
-      border-color: #d6e4ff;
+      --teacher-unsaved-accent: #287a4a;
+      --teacher-unsaved-accent-soft: #e8f5ed;
+      background: #f5faf7;
+      border-color: #d6e8dc;
     }
 
     .teacher-unsaved-summary-box.warn {
-      background: #fff4db;
-      color: #8a5a00;
-      border-color: #f0d59c;
+      --teacher-unsaved-accent: #8a6200;
+      --teacher-unsaved-accent-soft: #fff0c7;
+      background: #fffaf0;
+      border-color: #ead9ad;
     }
 
     .teacher-unsaved-summary-box.error {
-      background: #fdecec;
-      color: #a12622;
-      border-color: #efc2c2;
+      --teacher-unsaved-accent: #a13b35;
+      --teacher-unsaved-accent-soft: #fbe9e7;
+      background: #fff7f6;
+      border-color: #e8c9c6;
     }
 
     .teacher-unsaved-summary-head {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px 12px;
+    }
+
+    .teacher-unsaved-summary-status {
       display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 10px;
+      align-items: center;
+      gap: 6px;
+      color: var(--teacher-unsaved-accent);
+      font-size: 12px;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+
+    .teacher-unsaved-summary-status-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--teacher-unsaved-accent-soft);
+      font-size: 13px;
+      line-height: 1;
     }
 
     .teacher-unsaved-summary-texts {
@@ -886,15 +915,17 @@
     }
 
     .teacher-unsaved-summary-title {
-      font-size: 14px;
+      color: #223;
+      font-size: 15px;
       font-weight: bold;
-      margin-bottom: 4px;
+      line-height: 1.45;
     }
 
     .teacher-unsaved-summary-sub {
+      margin-top: 3px;
+      color: #667;
       font-size: 12px;
-      line-height: 1.6;
-      opacity: 0.95;
+      line-height: 1.55;
     }
 
     .teacher-unsaved-toggle-btn {
@@ -908,6 +939,16 @@
       font-weight: bold;
       cursor: pointer;
       white-space: nowrap;
+    }
+
+    .teacher-unsaved-toggle-btn:hover {
+      background: #f3f6fb;
+      border-color: #9db0cc;
+    }
+
+    .teacher-unsaved-summary-box.warn .teacher-unsaved-toggle-btn {
+      border-color: #c9a44d;
+      color: #705000;
     }
 
     .teacher-unsaved-details-box {
@@ -928,36 +969,56 @@
 
     .teacher-unsaved-details-content {
       display: grid;
-      gap: 8px;
+      gap: 10px;
     }
 
     .teacher-unsaved-detail-item {
-      display: flex;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
-      gap: 12px;
-      padding: 10px 12px;
+      gap: 14px;
+      padding: 13px 14px;
       border-radius: 10px;
-      border: 1px solid rgba(0, 0, 0, 0.06);
-      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid #dce3ee;
+      background: #fff;
     }
 
-    .teacher-unsaved-detail-date {
-      font-size: 14px;
+    .teacher-unsaved-detail-timing {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 5px;
+      color: #4a5870;
+      font-size: 12px;
       font-weight: bold;
+    }
+
+    .teacher-unsaved-detail-period {
+      display: inline-flex;
+      align-items: center;
+      min-height: 23px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e9eefb;
+      color: #31456a;
+    }
+
+    h3.teacher-unsaved-detail-subject {
+      margin: 0;
       color: #223;
-      margin-bottom: 3px;
+      font-size: 16px;
+      font-weight: bold;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
     }
 
-    .teacher-unsaved-detail-main {
-      font-size: 13px;
-      color: #334;
-    }
-
-    .teacher-unsaved-detail-sub {
+    .teacher-unsaved-detail-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px 10px;
+      margin-top: 4px;
       font-size: 12px;
       color: #667;
-      margin-top: 2px;
     }
 
     .teacher-unsaved-open-btn {
@@ -973,15 +1034,59 @@
       white-space: nowrap;
     }
 
-    .teacher-unsaved-empty-note {
+    .teacher-unsaved-open-btn:hover {
+      background: #245fc7;
+    }
+
+    .teacher-unsaved-state {
+      padding: 14px;
+      border: 1px solid #dce3ee;
+      border-radius: 10px;
+      background: #f8f9fb;
       font-size: 13px;
       color: #667;
-      padding: 4px 0;
+      line-height: 1.55;
+    }
+
+    .teacher-unsaved-state-label {
+      display: block;
+      margin-bottom: 3px;
+      color: #334;
+      font-weight: bold;
+    }
+
+    .teacher-unsaved-state.loading {
+      border-style: dashed;
+    }
+
+    .teacher-unsaved-state.empty {
+      border-color: #d6e8dc;
+      background: #f5faf7;
+    }
+
+    .teacher-unsaved-state.empty .teacher-unsaved-state-label {
+      color: #287a4a;
+    }
+
+    .teacher-unsaved-state.error {
+      border-color: #e8c9c6;
+      background: #fff7f6;
+    }
+
+    .teacher-unsaved-state.error .teacher-unsaved-state-label {
+      color: #a13b35;
+    }
+
+    .teacher-unsaved-list-note {
+      padding: 4px 2px;
+      color: #667;
+      font-size: 12px;
+      line-height: 1.55;
     }
 
     @media (max-width: 720px) {
       .teacher-unsaved-summary-head {
-        flex-direction: column;
+        grid-template-columns: 1fr;
         align-items: stretch;
       }
 
@@ -991,7 +1096,7 @@
       }
 
       .teacher-unsaved-detail-item {
-        flex-direction: column;
+        grid-template-columns: 1fr;
         align-items: stretch;
       }
     }
@@ -1062,12 +1167,16 @@
 
       <aside id="teacherUnsavedSummaryBox" class="teacher-unsaved-summary-box loading">
         <div class="teacher-unsaved-summary-head">
+          <div class="teacher-unsaved-summary-status">
+            <span id="teacherUnsavedSummaryStatusIcon" class="teacher-unsaved-summary-status-icon" aria-hidden="true">…</span>
+            <span id="teacherUnsavedSummaryStatusLabel">確認中</span>
+          </div>
           <div class="teacher-unsaved-summary-texts">
-            <div id="teacherUnsavedSummaryTitle" class="teacher-unsaved-summary-title">未保存の授業を確認中...</div>
-            <div id="teacherUnsavedSummarySub" class="teacher-unsaved-summary-sub">4月7日以降の未保存授業を確認しています。</div>
+            <div id="teacherUnsavedSummaryTitle" class="teacher-unsaved-summary-title">過去の未保存授業を確認中</div>
+            <div id="teacherUnsavedSummarySub" class="teacher-unsaved-summary-sub">本日の授業を先に操作できます。</div>
           </div>
           <button id="teacherUnsavedToggleBtn" class="teacher-unsaved-toggle-btn" type="button" hidden>
-            <span id="teacherUnsavedToggleLabel">詳細を見る</span>
+            <span id="teacherUnsavedToggleLabel">未保存授業を確認</span>
             <span id="teacherUnsavedToggleIcon">▼</span>
           </button>
         </div>
@@ -1488,7 +1597,7 @@ function goHome() {
       const toggleIcon = document.getElementById("teacherUnsavedToggleIcon");
 
       if (detailsBox) detailsBox.hidden = true;
-      if (toggleLabel) toggleLabel.textContent = "詳細を見る";
+      if (toggleLabel) toggleLabel.textContent = "未保存授業を確認";
       if (toggleIcon) toggleIcon.textContent = "▼";
     }
 
@@ -1505,25 +1614,31 @@ function goHome() {
     }
 
     function renderTeacherUnsavedSummaryLoading() {
-  const box = document.getElementById("teacherUnsavedSummaryBox");
-  const title = document.getElementById("teacherUnsavedSummaryTitle");
-  const sub = document.getElementById("teacherUnsavedSummarySub");
-  const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
-  const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+      const box = document.getElementById("teacherUnsavedSummaryBox");
+      const statusIcon = document.getElementById("teacherUnsavedSummaryStatusIcon");
+      const statusLabel = document.getElementById("teacherUnsavedSummaryStatusLabel");
+      const title = document.getElementById("teacherUnsavedSummaryTitle");
+      const sub = document.getElementById("teacherUnsavedSummarySub");
+      const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
+      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
 
-  if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
+      if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
 
-  box.className = "teacher-unsaved-summary-box idle";
-  title.textContent = "未保存授業を確認中...";
-  sub.textContent = "本日の授業を優先して表示した後、過去の未保存授業を自動で確認しています。数秒かかる場合があります。";
+      box.className = "teacher-unsaved-summary-box loading";
+      if (statusIcon) statusIcon.textContent = "…";
+      if (statusLabel) statusLabel.textContent = "確認中";
+      title.textContent = "過去の未保存授業を確認中";
+      sub.textContent = "本日の授業を先に操作できます。";
 
-  toggleBtn.hidden = true;
-  detailsContent.innerHTML = "";
-  closeTeacherUnsavedDetails();
-}
+      toggleBtn.hidden = true;
+      detailsContent.innerHTML = "";
+      closeTeacherUnsavedDetails();
+    }
     
     function renderTeacherUnsavedSummaryError() {
       const box = document.getElementById("teacherUnsavedSummaryBox");
+      const statusIcon = document.getElementById("teacherUnsavedSummaryStatusIcon");
+      const statusLabel = document.getElementById("teacherUnsavedSummaryStatusLabel");
       const title = document.getElementById("teacherUnsavedSummaryTitle");
       const sub = document.getElementById("teacherUnsavedSummarySub");
       const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
@@ -1532,8 +1647,10 @@ function goHome() {
       if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
 
       box.className = "teacher-unsaved-summary-box error";
-      title.textContent = "未保存状況を取得できませんでした";
-      sub.textContent = "授業一覧や出席入力自体はそのまま使えます。";
+      if (statusIcon) statusIcon.textContent = "×";
+      if (statusLabel) statusLabel.textContent = "取得できません";
+      title.textContent = "過去の未保存状況を取得できませんでした";
+      sub.textContent = "今日の授業・出席入力はそのまま利用できます。";
       toggleBtn.hidden = true;
       detailsContent.innerHTML = "";
       closeTeacherUnsavedDetails();
@@ -1629,64 +1746,97 @@ function goHome() {
     }
 
     function renderTeacherUnsavedSummary(data) {
-  const box = document.getElementById("teacherUnsavedSummaryBox");
-  const title = document.getElementById("teacherUnsavedSummaryTitle");
-  const sub = document.getElementById("teacherUnsavedSummarySub");
-  const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
-  const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+      const box = document.getElementById("teacherUnsavedSummaryBox");
+      const statusIcon = document.getElementById("teacherUnsavedSummaryStatusIcon");
+      const statusLabel = document.getElementById("teacherUnsavedSummaryStatusLabel");
+      const title = document.getElementById("teacherUnsavedSummaryTitle");
+      const sub = document.getElementById("teacherUnsavedSummarySub");
+      const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
+      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
 
-  if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
+      if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
 
-  // 初期表示：未保存サマリーは自動取得しない
-  if (data && data.notLoaded) {
-  box.className = "teacher-unsaved-summary-box idle";
-  title.textContent = "未保存授業を確認します";
-  sub.textContent = "本日の授業を表示した後、過去の未保存授業を自動で確認します。";
+      // 初期表示：未保存サマリーは自動取得しない
+      if (data && data.notLoaded) {
+        box.className = "teacher-unsaved-summary-box idle";
+        if (statusIcon) statusIcon.textContent = "i";
+        if (statusLabel) statusLabel.textContent = "確認待ち";
+        title.textContent = "過去の未保存授業を確認します";
+        sub.textContent = "本日の授業を表示した後に自動確認します。";
 
-  toggleBtn.hidden = true;
-  detailsContent.innerHTML = "";
-  closeTeacherUnsavedDetails();
-  teacherUnsavedDetailsLoadedKey = "";
-  return;
-}
+        toggleBtn.hidden = true;
+        detailsContent.innerHTML = "";
+        closeTeacherUnsavedDetails();
+        teacherUnsavedDetailsLoadedKey = "";
+        return;
+      }
 
-  if (!data || data.ok !== true || data.status !== "ready" || typeof data.count !== "number") {
-    const statusView = getTeacherUnsavedCacheStatusView(data);
-    const checkedAtText = getTeacherUnsavedCheckedAtText(data);
+      if (!data || data.ok !== true || data.status !== "ready" || typeof data.count !== "number") {
+        const statusView = getTeacherUnsavedCacheStatusView(data);
+        const checkedAtText = getTeacherUnsavedCheckedAtText(data);
+        const status = String((data && data.status) || "");
+        const cacheStatus = String((data && data.cacheStatus) || "");
+        let visualState = "unavailable";
+        let visualLabel = "取得できません";
+        let visualIcon = "×";
 
-    box.className = "teacher-unsaved-summary-box " + statusView.className;
-    title.textContent = statusView.message;
-    sub.textContent = checkedAtText || "授業一覧や出席入力はそのまま利用できます。";
-    toggleBtn.hidden = true;
-    detailsContent.innerHTML = "";
-    closeTeacherUnsavedDetails();
-    teacherUnsavedDetailsLoadedKey = "";
-    return;
-  }
+        if (status === "missing") {
+          visualState = "missing";
+          visualLabel = "準備待ち";
+          visualIcon = "i";
+        } else if (status === "stale") {
+          visualState = "stale";
+          visualLabel = "要確認";
+          visualIcon = "!";
+        } else if (status === "error" || cacheStatus === "error") {
+          visualState = "error";
+        } else if (status === "building" || cacheStatus === "building") {
+          visualState = "building";
+          visualLabel = "情報更新中";
+          visualIcon = "↻";
+        }
 
-  const count = data.count;
-  const rangeText = getTeacherUnsavedRangeText(data);
-  const checkedAtText = getTeacherUnsavedCheckedAtText(data);
-  const summarySubText = ["対象期間: " + rangeText, checkedAtText]
-    .filter(function(text) { return Boolean(text); })
-    .join(" / ");
+        box.className = "teacher-unsaved-summary-box " + statusView.className + " state-" + visualState;
+        if (statusIcon) statusIcon.textContent = visualIcon;
+        if (statusLabel) statusLabel.textContent = visualLabel;
+        title.textContent = statusView.message;
+        sub.textContent = [checkedAtText, "今日の授業・出席入力はそのまま利用できます。"]
+          .filter(function(text) { return Boolean(text); })
+          .join(" / ");
+        toggleBtn.hidden = true;
+        detailsContent.innerHTML = "";
+        closeTeacherUnsavedDetails();
+        teacherUnsavedDetailsLoadedKey = "";
+        return;
+      }
 
-  if (count > 0) {
-    box.className = "teacher-unsaved-summary-box warn";
-    title.textContent = "未保存の授業が " + count + " 件あります";
-    sub.textContent = summarySubText;
-    toggleBtn.hidden = false;
-    return;
-  }
+      const count = data.count;
+      const rangeText = getTeacherUnsavedRangeText(data);
+      const checkedAtText = getTeacherUnsavedCheckedAtText(data);
+      const summarySubText = ["対象期間：" + rangeText, checkedAtText]
+        .filter(function(text) { return Boolean(text); })
+        .join(" / ");
 
-  box.className = "teacher-unsaved-summary-box ok";
-  title.textContent = "未保存の授業はありません";
-  sub.textContent = summarySubText;
-  toggleBtn.hidden = true;
-  detailsContent.innerHTML = "";
-  closeTeacherUnsavedDetails();
-  teacherUnsavedDetailsLoadedKey = "";
-}
+      if (count > 0) {
+        box.className = "teacher-unsaved-summary-box warn state-ready-has-items";
+        if (statusIcon) statusIcon.textContent = "!";
+        if (statusLabel) statusLabel.textContent = "要確認";
+        title.textContent = "過去の未保存授業が " + count + "件あります";
+        sub.textContent = summarySubText;
+        toggleBtn.hidden = false;
+        return;
+      }
+
+      box.className = "teacher-unsaved-summary-box ok state-ready-empty";
+      if (statusIcon) statusIcon.textContent = "✓";
+      if (statusLabel) statusLabel.textContent = "問題なし";
+      title.textContent = "過去の未保存授業はありません";
+      sub.textContent = summarySubText;
+      toggleBtn.hidden = true;
+      detailsContent.innerHTML = "";
+      closeTeacherUnsavedDetails();
+      teacherUnsavedDetailsLoadedKey = "";
+    }
 
 function loadTeacherUnsavedSummaryManual() {
   const requestKey = Date.now() + "_" + Math.random();
@@ -1711,13 +1861,21 @@ function loadTeacherUnsavedSummaryManual() {
     function renderTeacherUnsavedDetailsLoading() {
       const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
       if (!detailsContent) return;
-      detailsContent.innerHTML = '<div class="teacher-unsaved-empty-note">未保存授業一覧を読み込んでいます...</div>';
+      detailsContent.innerHTML = '' +
+        '<div class="teacher-unsaved-state loading">' +
+          '<span class="teacher-unsaved-state-label">読み込み中</span>' +
+          '未保存授業を読み込んでいます。' +
+        '</div>';
     }
 
     function renderTeacherUnsavedDetailsError() {
       const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
       if (!detailsContent) return;
-      detailsContent.innerHTML = '<div class="teacher-unsaved-empty-note">未保存授業一覧の取得に失敗しました。</div>';
+      detailsContent.innerHTML = '' +
+        '<div class="teacher-unsaved-state error">' +
+          '<span class="teacher-unsaved-state-label">取得できません</span>' +
+          '未保存授業一覧を取得できませんでした。今日の授業・出席入力はそのまま利用できます。' +
+        '</div>';
     }
 
     function renderTeacherUnsavedDetails(data) {
@@ -1726,8 +1884,11 @@ function loadTeacherUnsavedSummaryManual() {
 
       if (!data || data.ok !== true || data.status !== "ready") {
         const statusView = getTeacherUnsavedCacheStatusView(data);
-        detailsContent.innerHTML = '<div class="teacher-unsaved-empty-note">' +
-          escapeHtml(statusView.message) +
+        const stateClass = statusView.className === "error" ? " error" : "";
+        const stateLabel = statusView.className === "error" ? "取得できません" : "確認できません";
+        detailsContent.innerHTML = '<div class="teacher-unsaved-state' + stateClass + '">' +
+          '<span class="teacher-unsaved-state-label">' + stateLabel + '</span>' +
+          escapeHtml(statusView.message) + ' 今日の授業・出席入力はそのまま利用できます。' +
           '</div>';
         return;
       }
@@ -1735,38 +1896,45 @@ function loadTeacherUnsavedSummaryManual() {
       const items = Array.isArray(data && data.items) ? data.items : [];
 
       if (!items.length) {
-        detailsContent.innerHTML = '<div class="teacher-unsaved-empty-note">未保存授業はありません。</div>';
+        detailsContent.innerHTML = '' +
+          '<div class="teacher-unsaved-state empty">' +
+            '<span class="teacher-unsaved-state-label">問題なし</span>' +
+            '未保存授業はありません。' +
+          '</div>';
         return;
       }
 
       const itemsHtml = items.map(function(item) {
+        const rawDate = String(item.date || "");
         const dateText = escapeHtml(formatDateJa(item.date || ""));
         const subjectText = escapeHtml(item.subjectName || "");
         const periodText = escapeHtml(String(item.period || ""));
         const targetText = escapeHtml(item.targetLabel || "");
         const sessionText = item.sessionNumber ? ('第' + escapeHtml(String(item.sessionNumber)) + '回') : '';
+        let metaHtml = '';
 
-        let subText = '';
-        if (targetText && sessionText) {
-          subText = targetText + ' / ' + sessionText;
-        } else if (targetText) {
-          subText = targetText;
-        } else if (sessionText) {
-          subText = sessionText;
+        if (targetText) {
+          metaHtml += '<span>' + targetText + '</span>';
+        }
+        if (sessionText) {
+          metaHtml += '<span>' + sessionText + '</span>';
         }
 
         return '' +
-          '<div class="teacher-unsaved-detail-item">' +
-            '<div>' +
-              '<div class="teacher-unsaved-detail-date">' + dateText + ' / ' + periodText + '限</div>' +
-              '<div class="teacher-unsaved-detail-main">' + subjectText + '</div>' +
-              '<div class="teacher-unsaved-detail-sub">' + subText + '</div>' +
+          '<article class="teacher-unsaved-detail-item">' +
+            '<div class="teacher-unsaved-detail-body">' +
+              '<div class="teacher-unsaved-detail-timing">' +
+                '<time datetime="' + escapeHtml(rawDate) + '">' + dateText + '</time>' +
+                '<span class="teacher-unsaved-detail-period">' + periodText + '限</span>' +
+              '</div>' +
+              '<h3 class="teacher-unsaved-detail-subject">' + subjectText + '</h3>' +
+              (metaHtml ? '<div class="teacher-unsaved-detail-meta">' + metaHtml + '</div>' : '') +
             '</div>' +
             '<button class="teacher-unsaved-open-btn" type="button" data-date="' + escapeHtml(item.date || "") + '" data-class-id="' + escapeHtml(item.classId || "") + '" data-period="' + escapeHtml(String(item.period || "")) + '">この授業を開く</button>' +
-          '</div>';
+          '</article>';
       }).join("");
       const moreNoteHtml = data.hasMore
-        ? '<div class="teacher-unsaved-empty-note">現在 ' + items.length +
+        ? '<div class="teacher-unsaved-list-note">現在 ' + items.length +
           ' 件を表示しています（全 ' + escapeHtml(String(data.totalCount || "")) +
           ' 件）。残りは今後のページング対応で表示します。</div>'
         : '';
