@@ -2689,7 +2689,7 @@ function buildQuickButtonLabel(cls, sameSubjectInPeriod) {
       const active = selectedClass && key === getSidebarCardKey(selectedClass);
       const label = buildQuickButtonLabel(cls, sameSubjectInPeriod);
 
-      html += '<button type="button" class="quick-class-btn' + (active ? ' active' : '') + '" data-sidebar-key="' + key + '">';
+      html += '<button type="button" class="quick-class-btn' + (active ? ' active' : '') + '" data-sidebar-key="' + key + '" aria-pressed="' + String(!!active) + '">';
       html += escapeHtml(label);
       html += '</button>';
     });
