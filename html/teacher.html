@@ -159,6 +159,7 @@
     }
 
     .panel {
+      min-width: 0;
       background: #fff;
       border-radius: 12px;
       padding: 16px;
@@ -169,6 +170,38 @@
     .panel h3 {
       margin: 0 0 12px;
       font-size: 18px;
+    }
+
+    .attendance-input-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .panel .attendance-input-header h3 {
+      margin-bottom: 0;
+    }
+
+    .lesson-list-panel,
+    .attendance-input-panel {
+      scroll-margin-top: 12px;
+    }
+
+    .return-to-list-btn {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #9db7ef;
+      border-radius: 10px;
+      background: #fff;
+      color: #1f4fa3;
+      padding: 9px 12px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
     }
 
     .lesson-mode-tools-label {
@@ -529,11 +562,6 @@
       border-color: #7fbd90;
     }
 
-    .class-action-btn:focus {
-      outline: 2px solid #2f6feb;
-      outline-offset: 2px;
-    }
-
     .class-action-btn:disabled {
       opacity: 0.55;
       cursor: not-allowed;
@@ -716,9 +744,28 @@
 
     .bottom-action-bar { margin-top: 16px; }
 
+    button:focus-visible,
+    select:focus-visible,
+    input[type="date"]:focus-visible {
+      outline: 3px solid #1f6feb;
+      outline-offset: 2px;
+    }
+
+    #lessonListHeading:focus-visible,
+    #attendanceInputHeading:focus-visible {
+      outline: 3px solid #1f6feb;
+      outline-offset: 4px;
+      border-radius: 4px;
+    }
+
     @media (max-width: 900px) {
       .layout {
         grid-template-columns: 1fr;
+      }
+
+      .return-to-list-btn {
+        display: inline-flex;
+        min-height: 44px;
       }
     }
 
@@ -733,6 +780,23 @@
 
       .panel {
         padding: 12px;
+      }
+
+      .mode-tabs {
+        flex-wrap: wrap;
+      }
+
+      .mode-tab,
+      .header-link-btn,
+      button.main-btn,
+      .quick-class-btn,
+      .teacher-unsaved-toggle-btn,
+      .teacher-unsaved-open-btn,
+      .return-to-list-btn,
+      .risk-load-btn,
+      select,
+      input[type="date"] {
+        min-height: 44px;
       }
 
       .search-box,
@@ -769,6 +833,15 @@
         align-items: flex-start;
       }
 
+      .period-badge {
+        flex: 0 0 auto;
+      }
+
+      .class-title,
+      .class-target {
+        overflow-wrap: anywhere;
+      }
+
       .class-action-btn {
         width: 100%;
         min-height: 44px;
@@ -777,6 +850,15 @@
 
       button.main-btn {
         width: 100%;
+      }
+
+      .search-row {
+        align-items: stretch;
+      }
+
+      .search-row input[type="date"] {
+        min-width: 0;
+        flex: 1 1 180px;
       }
 
       .action-bar,
@@ -1084,7 +1166,7 @@
       line-height: 1.55;
     }
 
-    @media (max-width: 720px) {
+    @media (max-width: 768px) {
       .teacher-unsaved-summary-head {
         grid-template-columns: 1fr;
         align-items: stretch;
@@ -1098,6 +1180,41 @@
       .teacher-unsaved-detail-item {
         grid-template-columns: 1fr;
         align-items: stretch;
+      }
+    }
+
+    @media (max-width: 360px) {
+      body {
+        padding: 8px;
+      }
+
+      h1 {
+        font-size: 20px;
+      }
+
+      .lesson-section-header h2 {
+        font-size: 18px;
+      }
+
+      .panel,
+      .teacher-unsaved-summary-box,
+      .class-card {
+        padding: 10px;
+      }
+
+      .mode-tabs,
+      .search-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .mode-tab,
+      .search-row input[type="date"] {
+        width: 100%;
+      }
+
+      .class-list-overview-chip {
+        flex-basis: 100%;
       }
     }
 
@@ -1154,18 +1271,18 @@
       </div>
     </div>
 
-    <div id="messageArea" class="message"></div>
+    <div id="messageArea" class="message" aria-live="polite" aria-atomic="true"></div>
   </div>
 
   <main class="teacher-page-main">
     <section class="lesson-primary-section" aria-labelledby="lessonSectionHeading">
       <header class="lesson-section-header">
-        <div class="lesson-section-kicker">今日の業務</div>
+        <div id="lessonSectionKicker" class="lesson-section-kicker">今日の業務</div>
         <h2 id="lessonSectionHeading">今日の授業</h2>
         <div class="sub-text" id="pageSubText">読み込み中...</div>
       </header>
 
-      <aside id="teacherUnsavedSummaryBox" class="teacher-unsaved-summary-box loading">
+      <aside id="teacherUnsavedSummaryBox" class="teacher-unsaved-summary-box loading" aria-live="polite" aria-atomic="true">
         <div class="teacher-unsaved-summary-head">
           <div class="teacher-unsaved-summary-status">
             <span id="teacherUnsavedSummaryStatusIcon" class="teacher-unsaved-summary-status-icon" aria-hidden="true">…</span>
@@ -1175,7 +1292,7 @@
             <div id="teacherUnsavedSummaryTitle" class="teacher-unsaved-summary-title">過去の未保存授業を確認中</div>
             <div id="teacherUnsavedSummarySub" class="teacher-unsaved-summary-sub">本日の授業を先に操作できます。</div>
           </div>
-          <button id="teacherUnsavedToggleBtn" class="teacher-unsaved-toggle-btn" type="button" hidden>
+          <button id="teacherUnsavedToggleBtn" class="teacher-unsaved-toggle-btn" type="button" aria-expanded="false" aria-controls="teacherUnsavedDetailsBox" hidden>
             <span id="teacherUnsavedToggleLabel">未保存授業を確認</span>
             <span id="teacherUnsavedToggleIcon">▼</span>
           </button>
@@ -1184,19 +1301,19 @@
 
       <div class="layout lesson-workspace">
         <section class="panel lesson-list-panel" aria-labelledby="lessonListHeading">
-          <h3 id="lessonListHeading">授業一覧</h3>
+          <h3 id="lessonListHeading" tabindex="-1">授業一覧</h3>
 
           <div class="lesson-mode-tools">
             <div class="lesson-mode-tools-label">表示する授業</div>
-            <div class="mode-tabs">
-              <button id="modeTodayBtn" type="button" class="mode-tab active">本日の授業</button>
-              <button id="modePastBtn" type="button" class="mode-tab">過去授業を検索</button>
+            <div class="mode-tabs" aria-label="表示する授業">
+              <button id="modeTodayBtn" type="button" class="mode-tab active" aria-pressed="true">本日の授業</button>
+              <button id="modePastBtn" type="button" class="mode-tab" aria-pressed="false">過去授業を検索</button>
             </div>
 
             <section id="pastSearchBox" class="search-box past-search-section" style="display:none;" aria-labelledby="pastSearchHeading">
               <h4 id="pastSearchHeading">過去授業の検索・修正</h4>
               <div class="search-row">
-                <input type="date" id="pastDateInput">
+                <input type="date" id="pastDateInput" aria-label="検索日">
                 <button id="searchPastButton" type="button" class="main-btn secondary-btn">検索する</button>
               </div>
               <div class="search-note">最後に検索した日付を保持します。</div>
@@ -1211,7 +1328,10 @@
         </section>
 
         <section class="panel attendance-input-panel" aria-labelledby="attendanceInputHeading">
-          <h3 id="attendanceInputHeading">出席入力</h3>
+          <div class="attendance-input-header">
+            <h3 id="attendanceInputHeading" tabindex="-1">出席入力</h3>
+            <button id="returnToLessonListButton" class="return-to-list-btn" type="button">授業一覧へ戻る</button>
+          </div>
 
           <div id="selectedClassInfo" class="info-bar">授業を読み込み中...</div>
           <div id="lastSavedInfoBar" class="info-bar" style="display:none;"></div>
@@ -1230,7 +1350,7 @@
             <button id="saveButtonTop" type="button" class="main-btn save-btn" disabled>保存する</button>
           </div>
 
-          <div id="saveState" class="save-state"></div>
+          <div id="saveState" class="save-state" aria-live="polite" aria-atomic="true"></div>
           <div id="summaryArea" class="summary"></div>
           <div id="sortNote" class="sort-note"></div>
 
@@ -1582,9 +1702,59 @@ function goHome() {
       }
     }
 
+    function isNarrowTeacherLayout() {
+      return !!(
+        window.matchMedia &&
+        window.matchMedia("(max-width: 900px)").matches
+      );
+    }
+
+    function focusTeacherSection(headingId, sectionSelector) {
+      if (!isNarrowTeacherLayout()) return;
+
+      const heading = document.getElementById(headingId);
+      const section = document.querySelector(sectionSelector);
+      if (!heading || !section || section.hidden) return;
+
+      window.requestAnimationFrame(function() {
+        if (section.hidden) return;
+
+        try {
+          heading.focus({ preventScroll: true });
+        } catch (error) {
+          heading.focus();
+        }
+
+        const reduceMotion = window.matchMedia &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        section.scrollIntoView({
+          behavior: reduceMotion ? "auto" : "smooth",
+          block: "start"
+        });
+      });
+    }
+
+    function focusAttendanceWorkspace() {
+      focusTeacherSection("attendanceInputHeading", ".attendance-input-panel");
+    }
+
+    function focusLessonList() {
+      focusTeacherSection("lessonListHeading", ".lesson-list-panel");
+    }
+
     function updateModeUI() {
-      document.getElementById("modeTodayBtn").classList.toggle("active", currentMode === "today");
-      document.getElementById("modePastBtn").classList.toggle("active", currentMode === "past");
+      const isTodayMode = currentMode === "today";
+      const todayButton = document.getElementById("modeTodayBtn");
+      const pastButton = document.getElementById("modePastBtn");
+      const sectionHeading = document.getElementById("lessonSectionHeading");
+      const sectionKicker = document.getElementById("lessonSectionKicker");
+
+      todayButton.classList.toggle("active", isTodayMode);
+      pastButton.classList.toggle("active", !isTodayMode);
+      todayButton.setAttribute("aria-pressed", String(isTodayMode));
+      pastButton.setAttribute("aria-pressed", String(!isTodayMode));
+      sectionHeading.textContent = isTodayMode ? "今日の授業" : "過去授業の検索・修正";
+      sectionKicker.textContent = isTodayMode ? "今日の業務" : "過去授業";
       document.getElementById("pastSearchBox").style.display = currentMode === "past" ? "block" : "none";
       renderPageSubText();
     }
@@ -1593,10 +1763,12 @@ function goHome() {
       teacherUnsavedDetailsOpen = false;
 
       const detailsBox = document.getElementById("teacherUnsavedDetailsBox");
+      const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
       const toggleLabel = document.getElementById("teacherUnsavedToggleLabel");
       const toggleIcon = document.getElementById("teacherUnsavedToggleIcon");
 
       if (detailsBox) detailsBox.hidden = true;
+      if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "false");
       if (toggleLabel) toggleLabel.textContent = "未保存授業を確認";
       if (toggleIcon) toggleIcon.textContent = "▼";
     }
@@ -1605,10 +1777,12 @@ function goHome() {
       teacherUnsavedDetailsOpen = true;
 
       const detailsBox = document.getElementById("teacherUnsavedDetailsBox");
+      const toggleBtn = document.getElementById("teacherUnsavedToggleBtn");
       const toggleLabel = document.getElementById("teacherUnsavedToggleLabel");
       const toggleIcon = document.getElementById("teacherUnsavedToggleIcon");
 
       if (detailsBox) detailsBox.hidden = false;
+      if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "true");
       if (toggleLabel) toggleLabel.textContent = "詳細を閉じる";
       if (toggleIcon) toggleIcon.textContent = "▲";
     }
@@ -2735,6 +2909,7 @@ function renderClassList() {
 
       if (action === "input-absence") {
         selectClass(nextClass);
+        focusAttendanceWorkspace();
       }
     });
   });
@@ -3933,6 +4108,7 @@ function isExperimentSubject(cls) {
   const searchPastButton = document.getElementById("searchPastButton");
   const pastDateInput = document.getElementById("pastDateInput");
   const teacherUnsavedToggleBtn = document.getElementById("teacherUnsavedToggleBtn");
+  const returnToLessonListButton = document.getElementById("returnToLessonListButton");
 
     if (goHomeButton) {
     goHomeButton.addEventListener("click", goHome);
@@ -4034,6 +4210,10 @@ function isExperimentSubject(cls) {
 
   if (teacherUnsavedToggleBtn) {
     teacherUnsavedToggleBtn.addEventListener("click", toggleTeacherUnsavedDetails);
+  }
+
+  if (returnToLessonListButton) {
+    returnToLessonListButton.addEventListener("click", focusLessonList);
   }
 
   const groupSelect = document.getElementById("groupSelect");
