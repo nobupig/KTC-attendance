@@ -2722,7 +2722,7 @@ function getSidebarSaveStatusInfo(cls) {
     const disableNoAbsenceQuickSave = statusLoadFailed || isChecking;
     const noAbsenceDisabledReason = statusLoadFailed
       ? "保存状態を確認できませんでした。「出席を入力・確認」から名簿を開いて確認してください。"
-      : (isChecking ? "保存状態を確認中です。確認後に「欠席者なしで保存」を利用できます。" : "");
+      : (isChecking ? "保存状態を確認中です。確認後に「全員出席で完了」を利用できます。" : "");
 
     return {
       isSaved: isSaved,
@@ -4238,7 +4238,7 @@ function isExperimentSubject(cls) {
           document.getElementById("selectedClassInfo").innerHTML =
             "本日の授業カードから操作を選択してください。";
           document.getElementById("studentArea").innerHTML =
-            '<div class="empty-box">欠席・遅刻・公欠がない授業は「欠席者なしで保存」で全員出席として記録できます。<br>欠席・遅刻・公欠がある場合や、保存済み内容を確認する場合は「出席を入力・確認」を開いてください。</div>';
+            '<div class="empty-box">欠席・遅刻・公欠がない授業は「全員出席で完了」で全員出席として記録できます。<br>欠席・遅刻・公欠がある場合や、保存済み内容を確認する場合は「出席を入力・確認」を開いてください。</div>';
           document.getElementById("summaryArea").innerHTML = "";
           document.getElementById("sortNote").textContent = "";
           renderLastSavedInfoBar(null);
@@ -4350,7 +4350,7 @@ function isExperimentSubject(cls) {
           document.getElementById("selectedClassInfo").innerHTML =
             "過去授業カードから操作を選択してください。";
           document.getElementById("studentArea").innerHTML =
-            '<div class="empty-box">過去授業を修正する場合は「出席を入力・確認」から名簿を開いてください。<br>欠席・遅刻・公欠がなかった授業は「欠席者なしで保存」で全員出席として記録できます。</div>';
+            '<div class="empty-box">過去授業を修正する場合は「出席を入力・確認」から名簿を開いてください。<br>欠席・遅刻・公欠がなかった授業は「全員出席で完了」で全員出席として記録できます。</div>';
           document.getElementById("summaryArea").innerHTML = "";
           document.getElementById("sortNote").textContent = "";
           renderLastSavedInfoBar(null);
