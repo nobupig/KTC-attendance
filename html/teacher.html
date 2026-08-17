@@ -273,6 +273,117 @@
       gap: 10px;
     }
 
+    .today-dashboard {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .today-dashboard-summary {
+      padding: 16px;
+      border: 1px solid #cfd9ea;
+      border-radius: 12px;
+      background: #f8fbff;
+    }
+
+    .today-dashboard-summary-title {
+      margin: 0;
+      color: #243b64;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .today-dashboard-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .today-dashboard-metric {
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid #d9e0ee;
+      border-radius: 10px;
+      background: #fff;
+    }
+
+    .today-dashboard-metric-label {
+      display: block;
+      color: #667;
+      font-size: 12px;
+      font-weight: bold;
+      line-height: 1.4;
+    }
+
+    .today-dashboard-metric-value {
+      display: block;
+      margin-top: 4px;
+      color: #243b64;
+      font-size: 22px;
+      font-weight: bold;
+      line-height: 1.2;
+    }
+
+    .today-dashboard-progress-label {
+      margin-top: 12px;
+      color: #44516a;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    .today-dashboard-progress-track {
+      height: 10px;
+      margin-top: 7px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e5eaf2;
+    }
+
+    .today-dashboard-progress-bar {
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: #2f6feb;
+      transition: width 0.2s ease;
+    }
+
+    .today-task-section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .today-task-section-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 7px;
+      border-bottom: 1px solid #e1e6ef;
+    }
+
+    .today-task-section-title {
+      margin: 0;
+      color: #334;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .today-task-section-count {
+      color: #667;
+      font-size: 12px;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+
+    .today-task-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
     .class-list-overview {
       padding: 12px;
       border: 1px solid #d9e0ee;
@@ -829,6 +940,14 @@
         min-width: 0;
       }
 
+      .today-dashboard-summary {
+        padding: 12px;
+      }
+
+      .today-dashboard-metrics {
+        grid-template-columns: 1fr;
+      }
+
       .class-card-header {
         align-items: flex-start;
       }
@@ -1301,7 +1420,7 @@
 
       <div class="layout lesson-workspace">
         <section class="panel lesson-list-panel" aria-labelledby="lessonListHeading">
-          <h3 id="lessonListHeading" tabindex="-1">授業一覧</h3>
+          <h3 id="lessonListHeading" tabindex="-1">今日の出席管理</h3>
 
           <div class="lesson-mode-tools">
             <div class="lesson-mode-tools-label">表示する授業</div>
@@ -1748,6 +1867,7 @@ function goHome() {
       const pastButton = document.getElementById("modePastBtn");
       const sectionHeading = document.getElementById("lessonSectionHeading");
       const sectionKicker = document.getElementById("lessonSectionKicker");
+      const lessonListHeading = document.getElementById("lessonListHeading");
 
       todayButton.classList.toggle("active", isTodayMode);
       pastButton.classList.toggle("active", !isTodayMode);
@@ -1755,6 +1875,7 @@ function goHome() {
       pastButton.setAttribute("aria-pressed", String(!isTodayMode));
       sectionHeading.textContent = isTodayMode ? "今日の授業" : "過去授業の検索・修正";
       sectionKicker.textContent = isTodayMode ? "今日の業務" : "過去授業";
+      lessonListHeading.textContent = isTodayMode ? "今日の出席管理" : "授業一覧";
       document.getElementById("pastSearchBox").style.display = currentMode === "past" ? "block" : "none";
       renderPageSubText();
     }
@@ -2690,6 +2811,155 @@ function getSidebarSaveStatusInfo(cls) {
 
 
 function renderClassList() {
+  if (currentMode === "today") {
+    renderTodayDashboard();
+    return;
+  }
+
+  renderPastClassList();
+}
+
+function renderPastClassList() {
+  renderClassListContent();
+}
+
+function createTodayTaskSection(title, cards, emptyText) {
+  const section = document.createElement("section");
+  section.className = "today-task-section";
+
+  const header = document.createElement("div");
+  header.className = "today-task-section-header";
+
+  const heading = document.createElement("h4");
+  heading.className = "today-task-section-title";
+  heading.textContent = title;
+
+  const count = document.createElement("span");
+  count.className = "today-task-section-count";
+  count.textContent = String(cards.length) + "授業";
+
+  header.appendChild(heading);
+  header.appendChild(count);
+  section.appendChild(header);
+
+  const list = document.createElement("div");
+  list.className = "today-task-list";
+
+  if (cards.length > 0) {
+    cards.forEach(function(card) {
+      list.appendChild(card);
+    });
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "empty-box";
+    empty.textContent = emptyText;
+    list.appendChild(empty);
+  }
+
+  section.appendChild(list);
+  return section;
+}
+
+function renderTodayDashboard() {
+  const area = document.getElementById("classListArea");
+
+  // Step2-A-1では既存カードとaction listenerをそのまま生成し、
+  // Dashboardの情報階層へDOMを移動する。正式なtask状態モデルはStep2-A-2で扱う。
+  renderClassListContent();
+
+  const isLoading = isClassListLoading;
+  const cards = Array.prototype.slice.call(area.children).filter(function(child) {
+    return child.classList && child.classList.contains("class-card");
+  });
+  const completedCards = cards.filter(function(card) {
+    return card.classList.contains("state-saved");
+  });
+  const remainingCards = cards.filter(function(card) {
+    return !card.classList.contains("state-saved");
+  });
+  const total = cards.length;
+  const completed = completedCards.length;
+  const remaining = total - completed;
+  const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const isStatusChecking = cards.some(function(card) {
+    return card.classList.contains("state-checking");
+  });
+
+  cards.forEach(function(card) {
+    card.remove();
+  });
+
+  const dashboard = document.createElement("div");
+  dashboard.className = "today-dashboard";
+
+  const summary = document.createElement("section");
+  summary.className = "today-dashboard-summary";
+  summary.setAttribute("aria-labelledby", "todayDashboardSummaryTitle");
+  summary.setAttribute("aria-live", "polite");
+  summary.setAttribute("aria-atomic", "true");
+  if (isLoading) {
+    summary.setAttribute("aria-busy", "true");
+  }
+
+  const totalText = isLoading ? "—" : String(total);
+  const completedText = isLoading ? "—" : String(completed);
+  const remainingText = isLoading ? "—" : String(remaining);
+  const progressLabel = isLoading
+    ? "授業情報を読み込み中です。"
+    : (total === 0
+      ? "0 / 0　今日の授業はありません。"
+      : String(total) + "授業中 " + String(completed) + "授業完了　残り" + String(remaining) + "授業" +
+        (isStatusChecking ? "（保存状態を確認中）" : ""));
+
+  summary.innerHTML = '' +
+    '<h4 id="todayDashboardSummaryTitle" class="today-dashboard-summary-title">今日の進捗</h4>' +
+    '<div class="today-dashboard-metrics">' +
+      '<div class="today-dashboard-metric">' +
+        '<span class="today-dashboard-metric-label">今日の授業</span>' +
+        '<strong class="today-dashboard-metric-value">' + totalText + '授業</strong>' +
+      '</div>' +
+      '<div class="today-dashboard-metric">' +
+        '<span class="today-dashboard-metric-label">完了</span>' +
+        '<strong class="today-dashboard-metric-value">' + completedText + '授業</strong>' +
+      '</div>' +
+      '<div class="today-dashboard-metric">' +
+        '<span class="today-dashboard-metric-label">残り</span>' +
+        '<strong class="today-dashboard-metric-value">' + remainingText + '授業</strong>' +
+      '</div>' +
+    '</div>' +
+    '<div class="today-dashboard-progress-label">' + progressLabel + '</div>' +
+    '<div class="today-dashboard-progress-track">' +
+      '<div class="today-dashboard-progress-bar" style="width:' + String(percentage) + '%;"></div>' +
+    '</div>';
+
+  const progressTrack = summary.querySelector(".today-dashboard-progress-track");
+  if (!isLoading && total > 0) {
+    progressTrack.setAttribute("role", "progressbar");
+    progressTrack.setAttribute("aria-label", "今日の授業の完了状況");
+    progressTrack.setAttribute("aria-valuemin", "0");
+    progressTrack.setAttribute("aria-valuemax", String(total));
+    progressTrack.setAttribute("aria-valuenow", String(completed));
+  } else {
+    progressTrack.setAttribute("aria-hidden", "true");
+  }
+
+  dashboard.appendChild(summary);
+
+  const remainingEmptyText = isLoading
+    ? "授業情報を読み込み中..."
+    : (total > 0 ? "未処理の授業はありません。" : "今日の授業はありません。");
+  const completedEmptyText = isLoading
+    ? "保存状態の確認後に表示します。"
+    : "完了した授業はありません。";
+
+  dashboard.appendChild(createTodayTaskSection("未処理", remainingCards, remainingEmptyText));
+  dashboard.appendChild(createTodayTaskSection("完了", completedCards, completedEmptyText));
+
+  area.innerHTML = "";
+  area.appendChild(dashboard);
+}
+
+function renderClassListContent() {
   const area = document.getElementById("classListArea");
   const quickNav = document.getElementById("quickClassNav");
 
@@ -2874,7 +3144,7 @@ function renderClassList() {
       const noAbsenceButtonTitle = sidebarStatus.noAbsenceDisabledReason ||
         "この授業を欠席者・遅刻・公欠なし（全員出席）として保存します。";
       html += '    <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' + escapeHtml(key) + '" title="名簿を開いて出席を入力・確認します。">出席を入力・確認</button>';
-      html += '    <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' + escapeHtml(key) + '"' + noAbsenceDisabledAttribute + ' title="' + escapeHtml(noAbsenceButtonTitle) + '">欠席者なしで保存</button>';
+      html += '    <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' + escapeHtml(key) + '"' + noAbsenceDisabledAttribute + ' title="' + escapeHtml(noAbsenceButtonTitle) + '">全員出席で完了</button>';
     }
 
     html += '  </div>';
