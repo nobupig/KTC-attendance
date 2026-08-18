@@ -1355,9 +1355,13 @@ function getSaveStatusForTeacherSessionsDirect_(sessionItems) {
       ? String(row[col.savedModeLabel] || '').trim()
       : '';
 
+    const accessedAtSerialized = accessedAtRaw instanceof Date
+      ? accessedAtRaw.toISOString()
+      : String(accessedAtRaw || '');
+
     const lastSavedInfo = {
       teacherEmail: teacherEmail,
-      savedAt: accessedAtRaw,
+      savedAt: accessedAtSerialized,
       savedAtText: formatDateTimeJst_(accessedAtRaw),
       actionType: actionType,
       targetSessionKey: targetSessionKey,
