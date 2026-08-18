@@ -833,6 +833,43 @@
       line-height: 1.8;
     }
 
+    .previous-session-copy-area {
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid #cfd9ea;
+      border-radius: 10px;
+      background: #f8fbff;
+    }
+
+    .previous-session-copy-title {
+      color: #243b64;
+      font-size: 14px;
+      font-weight: bold;
+      line-height: 1.5;
+    }
+
+    .previous-session-copy-meta {
+      margin-top: 4px;
+      color: #44516a;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .previous-session-copy-actions {
+      margin-top: 10px;
+    }
+
+    .previous-session-copy-note {
+      margin-top: 8px;
+      color: #667;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .previous-session-copy-note.disabled {
+      color: #8a5a00;
+    }
+
     .summary {
       display: flex;
       flex-wrap: wrap;
@@ -1617,6 +1654,7 @@
 
           <div id="selectedClassInfo" class="info-bar">授業を読み込み中...</div>
           <div id="lastSavedInfoBar" class="info-bar" style="display:none;"></div>
+          <div id="previousSessionCopyArea" class="previous-session-copy-area" style="display:none;" aria-live="polite" aria-atomic="true"></div>
           <div id="groupSelectorArea" class="info-bar" style="display:none;">
             <label for="groupSelect"><strong>班選択</strong></label><br>
             <select id="groupSelect" style="margin-top:8px; padding:8px 10px; min-width:180px;">
@@ -1711,6 +1749,9 @@
     let selectedClass = null;
     let studentsCache = [];
     let attendanceState = {};
+    let previousSessionCopyRequestToken = 0;
+    let previousSessionCopyDetailSessionKey = "";
+    let isPreviousSessionCopyLoading = false;
     let riskMapState = {};
     let isDirty = false;
     let isSaving = false;
@@ -3278,6 +3319,8 @@ function getSidebarSaveStatusInfo(cls) {
 
 
 function renderClassList() {
+  renderPreviousSessionCopyArea();
+
   if (currentMode === "today") {
     renderTodayDashboard();
     return;
@@ -4374,6 +4417,393 @@ function loadSaveStatusForPastClasses(expectedClassListRequestToken) {
     .getSaveStatusForTeacherSessions(targets);
 }
 
+function normalizePreviousSessionCopyClientValue(value) {
+  return value === null || value === undefined ? "" : String(value).trim();
+}
+
+function getPreviousSessionCopyClientIdentity(cls) {
+  if (!cls) return "";
+
+  return [
+    normalizePreviousSessionCopyClientValue(cls.classId),
+    normalizePreviousSessionCopyClientValue(cls.date),
+    normalizePreviousSessionCopyClientValue(cls.period),
+    normalizePreviousSessionCopyClientValue(cls.sessionNumber)
+  ].join("__");
+}
+
+function getPreviousSessionCopyCandidate(cls) {
+  if (
+    currentMode !== "today" ||
+    !cls ||
+    isExperimentSubject(cls) ||
+    requiresGroupSelection(cls)
+  ) {
+    return null;
+  }
+
+  const candidates = (classesCache || []).filter(function(item) {
+    return canGroupConsecutiveLessons(item, cls);
+  });
+
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+function buildPreviousSessionCopySortedStudentIds(students) {
+  if (!Array.isArray(students)) return null;
+
+  const result = [];
+  const seen = {};
+
+  for (let i = 0; i < students.length; i++) {
+    const studentId = normalizePreviousSessionCopyClientValue(
+      students[i] && students[i].studentId
+    );
+
+    if (!studentId || seen[studentId]) return null;
+
+    seen[studentId] = true;
+    result.push(studentId);
+  }
+
+  result.sort();
+  return result;
+}
+
+function buildPreviousSessionCopySortedResponseIds(studentIds) {
+  if (!Array.isArray(studentIds)) return null;
+
+  const result = [];
+  const seen = {};
+
+  for (let i = 0; i < studentIds.length; i++) {
+    const studentId = normalizePreviousSessionCopyClientValue(studentIds[i]);
+
+    if (!studentId || seen[studentId]) return null;
+
+    seen[studentId] = true;
+    result.push(studentId);
+  }
+
+  result.sort();
+  return result;
+}
+
+function getPreviousSessionCopyFailureMessage(code) {
+  const messages = {
+    INVALID_DESTINATION: "\u30b3\u30d4\u30fc\u5148\u306e\u6388\u696d\u60c5\u5831\u304c\u4e0d\u8db3\u3057\u3066\u3044\u307e\u3059\u3002",
+    DESTINATION_NOT_FOUND: "\u30b3\u30d4\u30fc\u5148\u306e\u6388\u696d\u3092\u78ba\u8a8d\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002",
+    UNSUPPORTED_CLASS: "\u3053\u306e\u6388\u696d\u3067\u306f\u524d\u6642\u9650\u30b3\u30d4\u30fc\u3092\u5229\u7528\u3067\u304d\u307e\u305b\u3093\u3002",
+    PREVIOUS_SESSION_NOT_FOUND: "\u30b3\u30d4\u30fc\u53ef\u80fd\u306a\u76f4\u524d\u6642\u9650\u3092\u78ba\u8a8d\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002",
+    SOURCE_NOT_SAVED: "\u524d\u6642\u9650\u304c\u4fdd\u5b58\u6e08\u307f\u3067\u306f\u306a\u3044\u305f\u3081\u30b3\u30d4\u30fc\u3067\u304d\u307e\u305b\u3093\u3002",
+    DESTINATION_ALREADY_SAVED: "\u30b3\u30d4\u30fc\u5148\u306f\u3059\u3067\u306b\u4fdd\u5b58\u6e08\u307f\u306e\u305f\u3081\u30b3\u30d4\u30fc\u3067\u304d\u307e\u305b\u3093\u3002",
+    ROSTER_MISMATCH: "\u524d\u6642\u9650\u3068\u30b3\u30d4\u30fc\u5148\u306e\u5b66\u751f\u4e00\u89a7\u304c\u4e00\u81f4\u3057\u306a\u3044\u305f\u3081\u30b3\u30d4\u30fc\u3067\u304d\u307e\u305b\u3093\u3002",
+    INVALID_SOURCE_ATTENDANCE: "\u524d\u6642\u9650\u306e\u4fdd\u5b58\u6e08\u307f\u51fa\u6b20\u306b\u30b3\u30d4\u30fc\u3067\u304d\u306a\u3044\u5024\u304c\u542b\u307e\u308c\u3066\u3044\u307e\u3059\u3002"
+  };
+
+  return messages[String(code || "")] ||
+    "\u524d\u6642\u9650\u306e\u51fa\u6b20\u3092\u30b3\u30d4\u30fc\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002";
+}
+
+function getPreviousSessionCopyUiState() {
+  if (currentMode !== "today" || !selectedClass) return null;
+
+  const sourceClass = getPreviousSessionCopyCandidate(selectedClass);
+  if (!sourceClass) return null;
+
+  const sourceStatus = getSidebarSaveStatusInfo(sourceClass);
+  const destinationSessionKey = getSessionKey(selectedClass);
+  const destinationSaved = !!(
+    selectedClass.isSaved ||
+    savedSessionKeys[destinationSessionKey]
+  );
+  const detailReady =
+    previousSessionCopyDetailSessionKey === destinationSessionKey;
+
+  let disabledReason = "";
+
+  if (isPreviousSessionCopyLoading) {
+    disabledReason = "\u30b3\u30d4\u30fc\u4e2d...";
+  } else if (isSaving) {
+    disabledReason = "\u4fdd\u5b58\u51e6\u7406\u4e2d\u306f\u30b3\u30d4\u30fc\u3067\u304d\u307e\u305b\u3093\u3002";
+  } else if (!detailReady) {
+    disabledReason = "\u5b66\u751f\u4e00\u89a7\u3092\u8aad\u307f\u8fbc\u307f\u4e2d\u3067\u3059\u3002";
+  } else if (!Array.isArray(studentsCache) || studentsCache.length === 0) {
+    disabledReason = "\u5b66\u751f\u4e00\u89a7\u3092\u78ba\u8a8d\u3067\u304d\u306a\u3044\u305f\u3081\u30b3\u30d4\u30fc\u3067\u304d\u307e\u305b\u3093\u3002";
+  } else if (isDirty) {
+    disabledReason = "\u5165\u529b\u9014\u4e2d\u306e\u305f\u3081\u30b3\u30d4\u30fc\u3067\u304d\u307e\u305b\u3093\u3002";
+  } else if (destinationSaved) {
+    disabledReason = "\u3053\u306e\u6388\u696d\u306f\u4fdd\u5b58\u6e08\u307f\u306e\u305f\u3081\u30b3\u30d4\u30fc\u3067\u304d\u307e\u305b\u3093\u3002";
+  } else if (sourceClass.saveStatusLoadFailed) {
+    disabledReason = "\u524d\u6642\u9650\u306e\u4fdd\u5b58\u72b6\u614b\u3092\u78ba\u8a8d\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002";
+  } else if (sourceClass.saveStatusNotLoaded && !sourceStatus.isSaved) {
+    disabledReason = "\u524d\u6642\u9650\u306e\u4fdd\u5b58\u72b6\u614b\u3092\u78ba\u8a8d\u4e2d\u3067\u3059\u3002";
+  } else if (!sourceStatus.isSaved) {
+    disabledReason = "\u524d\u6642\u9650\u304c\u672a\u4fdd\u5b58\u306e\u305f\u3081\u30b3\u30d4\u30fc\u3067\u304d\u307e\u305b\u3093\u3002";
+  }
+
+  return {
+    sourceClass: sourceClass,
+    destinationClass: selectedClass,
+    disabledReason: disabledReason,
+    canCopy: !disabledReason
+  };
+}
+
+function renderPreviousSessionCopyArea() {
+  const area = document.getElementById("previousSessionCopyArea");
+  if (!area) return;
+
+  const state = getPreviousSessionCopyUiState();
+
+  if (!state) {
+    area.style.display = "none";
+    area.innerHTML = "";
+    return;
+  }
+
+  const sourcePeriod = normalizePreviousSessionCopyClientValue(
+    state.sourceClass.period
+  );
+  const buttonLabel = isPreviousSessionCopyLoading
+    ? "\u30b3\u30d4\u30fc\u4e2d..."
+    : sourcePeriod + "\u9650\u306e\u51fa\u6b20\u3092\u30b3\u30d4\u30fc";
+  const noteText = state.disabledReason ||
+    "\u524d\u6642\u9650\u306e\u4fdd\u5b58\u6e08\u307f\u51fa\u6b20\u3092\u73fe\u5728\u306e\u6388\u696d\u3078\u30b3\u30d4\u30fc\u3057\u307e\u3059\u3002\u30b3\u30d4\u30fc\u5f8c\u306f\u5185\u5bb9\u3092\u78ba\u8a8d\u3057\u3066\u4fdd\u5b58\u3057\u3066\u304f\u3060\u3055\u3044\u3002";
+
+  area.style.display = "block";
+  area.innerHTML =
+    '<div class="previous-session-copy-title">' +
+      "\u524d\u6642\u9650\u306e\u51fa\u6b20\u30b3\u30d4\u30fc" +
+    '</div>' +
+    '<div class="previous-session-copy-meta">' +
+      "\u524d\u6642\u9650\uff1a" + escapeHtml(sourcePeriod) + "\u9650" +
+    '</div>' +
+    '<div class="previous-session-copy-actions">' +
+      '<button id="previousSessionCopyButton" type="button" class="main-btn secondary-btn"' +
+        (state.canCopy ? '' : ' disabled') +
+      '>' + escapeHtml(buttonLabel) + '</button>' +
+    '</div>' +
+    '<div class="previous-session-copy-note' +
+      (state.canCopy ? '' : ' disabled') +
+    '">' + escapeHtml(noteText) + '</div>';
+
+  const button = document.getElementById("previousSessionCopyButton");
+  if (button && state.canCopy) {
+    button.addEventListener("click", handlePreviousSessionCopyClick);
+  }
+}
+
+function buildPreviousSessionCopyNextAttendanceState(
+  result,
+  expectedSourceIdentity,
+  expectedDestinationIdentity
+) {
+  if (!result || result.ok !== true) return null;
+
+  if (
+    getPreviousSessionCopyClientIdentity(result.source) !== expectedSourceIdentity ||
+    getPreviousSessionCopyClientIdentity(result.destination) !== expectedDestinationIdentity
+  ) {
+    return null;
+  }
+
+  const currentStudentIds = buildPreviousSessionCopySortedStudentIds(studentsCache);
+  const responseStudentIds = buildPreviousSessionCopySortedResponseIds(result.studentIds);
+
+  if (
+    !currentStudentIds ||
+    !responseStudentIds ||
+    currentStudentIds.length === 0 ||
+    currentStudentIds.length !== responseStudentIds.length
+  ) {
+    return null;
+  }
+
+  for (let i = 0; i < currentStudentIds.length; i++) {
+    if (currentStudentIds[i] !== responseStudentIds[i]) return null;
+  }
+
+  const rawAttendanceMap = result.attendanceMap;
+  if (
+    !rawAttendanceMap ||
+    typeof rawAttendanceMap !== "object" ||
+    Array.isArray(rawAttendanceMap)
+  ) {
+    return null;
+  }
+
+  const nextState = {};
+  const currentStudentIdSet = {};
+
+  currentStudentIds.forEach(function(studentId) {
+    currentStudentIdSet[studentId] = true;
+    nextState[studentId] = "";
+  });
+
+  const allowedCodes = {
+    A: true,
+    L: true,
+    O: true
+  };
+  const seenAttendanceStudentIds = {};
+  const rawStudentIds = Object.keys(rawAttendanceMap);
+
+  for (let i = 0; i < rawStudentIds.length; i++) {
+    const rawStudentId = rawStudentIds[i];
+    const studentId = normalizePreviousSessionCopyClientValue(rawStudentId);
+    const statusCode = normalizePreviousSessionCopyClientValue(
+      rawAttendanceMap[rawStudentId]
+    );
+
+    if (
+      !studentId ||
+      seenAttendanceStudentIds[studentId] ||
+      !currentStudentIdSet[studentId] ||
+      !allowedCodes[statusCode]
+    ) {
+      return null;
+    }
+
+    seenAttendanceStudentIds[studentId] = true;
+    nextState[studentId] = statusCode;
+  }
+
+  return nextState;
+}
+
+function tryApplyPreviousSessionCopyResult(
+  result,
+  expectedSourceIdentity,
+  expectedDestinationIdentity
+) {
+  if (
+    currentMode !== "today" ||
+    !selectedClass ||
+    isDirty ||
+    isSaving ||
+    getPreviousSessionCopyClientIdentity(selectedClass) !== expectedDestinationIdentity ||
+    previousSessionCopyDetailSessionKey !== getSessionKey(selectedClass)
+  ) {
+    return false;
+  }
+
+  const currentSourceClass = getPreviousSessionCopyCandidate(selectedClass);
+  if (
+    !currentSourceClass ||
+    getPreviousSessionCopyClientIdentity(currentSourceClass) !== expectedSourceIdentity
+  ) {
+    return false;
+  }
+
+  const nextAttendanceState = buildPreviousSessionCopyNextAttendanceState(
+    result,
+    expectedSourceIdentity,
+    expectedDestinationIdentity
+  );
+
+  if (!nextAttendanceState) return false;
+
+  attendanceState = nextAttendanceState;
+  renderStudents();
+  renderSummary();
+  markDirty(true);
+  return true;
+}
+
+function handlePreviousSessionCopyClick() {
+  const state = getPreviousSessionCopyUiState();
+  if (!state || !state.canCopy || isPreviousSessionCopyLoading) return;
+
+  const expectedSourceIdentity =
+    getPreviousSessionCopyClientIdentity(state.sourceClass);
+  const expectedDestinationIdentity =
+    getPreviousSessionCopyClientIdentity(state.destinationClass);
+  const requestToken = ++previousSessionCopyRequestToken;
+
+  isPreviousSessionCopyLoading = true;
+  renderPreviousSessionCopyArea();
+  clearMessage();
+  showMessage("\u524d\u6642\u9650\u306e\u51fa\u6b20\u3092\u78ba\u8a8d\u4e2d...", "warn");
+
+  const destinationRequest = {
+    classId: state.destinationClass.classId,
+    date: state.destinationClass.date,
+    period: state.destinationClass.period,
+    sessionNumber: state.destinationClass.sessionNumber
+  };
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (requestToken !== previousSessionCopyRequestToken) return;
+
+      isPreviousSessionCopyLoading = false;
+
+      if (
+        currentMode !== "today" ||
+        !selectedClass ||
+        getPreviousSessionCopyClientIdentity(selectedClass) !== expectedDestinationIdentity
+      ) {
+        renderPreviousSessionCopyArea();
+        return;
+      }
+
+      if (!result || result.ok !== true) {
+        renderPreviousSessionCopyArea();
+        showMessage(
+          getPreviousSessionCopyFailureMessage(result && result.code),
+          "warn"
+        );
+        return;
+      }
+
+      if (
+        !tryApplyPreviousSessionCopyResult(
+          result,
+          expectedSourceIdentity,
+          expectedDestinationIdentity
+        )
+      ) {
+        renderPreviousSessionCopyArea();
+        showMessage(
+          "\u30b3\u30d4\u30fc\u7d50\u679c\u3092\u9069\u7528\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002\u6388\u696d\u3092\u958b\u304d\u76f4\u3057\u3066\u518d\u5ea6\u304a\u8a66\u3057\u304f\u3060\u3055\u3044\u3002",
+          "warn"
+        );
+        return;
+      }
+
+      const sourcePeriod = normalizePreviousSessionCopyClientValue(
+        result.source && result.source.period
+      );
+      const successMessage =
+        sourcePeriod + "\u9650\u306e\u51fa\u6b20\u3092\u30b3\u30d4\u30fc\u3057\u307e\u3057\u305f\u3002\u5185\u5bb9\u3092\u78ba\u8a8d\u3057\u3066\u4fdd\u5b58\u3057\u3066\u304f\u3060\u3055\u3044\u3002";
+
+      setSaveStateText(successMessage);
+      showMessage(successMessage, "warn");
+      renderPreviousSessionCopyArea();
+    })
+    .withFailureHandler(function(error) {
+      if (requestToken !== previousSessionCopyRequestToken) return;
+
+      isPreviousSessionCopyLoading = false;
+      renderPreviousSessionCopyArea();
+
+      if (
+        currentMode === "today" &&
+        selectedClass &&
+        getPreviousSessionCopyClientIdentity(selectedClass) === expectedDestinationIdentity
+      ) {
+        showMessage(
+          "\u524d\u6642\u9650\u306e\u51fa\u6b20\u3092\u30b3\u30d4\u30fc\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002",
+          "error"
+        );
+      }
+
+      console.error(error);
+    })
+    .getPreviousTeacherSessionAttendanceCopyPreview(destinationRequest);
+}
+
 function renderSelectedClassInfo() {
   const area = document.getElementById("selectedClassInfo");
 
@@ -4736,6 +5166,9 @@ function renderSelectedClassInfo() {
       const expectedGroup = group || "";
       const requestToken = ++detailRequestToken;
 
+      previousSessionCopyDetailSessionKey = "";
+      renderPreviousSessionCopyArea();
+
       const sessionKey = expectedGroup
         ? expectedSessionKey + "__" + expectedGroup
         : expectedSessionKey;
@@ -4780,6 +5213,7 @@ function renderSelectedClassInfo() {
         studentsCache = studentsByClassCache[studentCacheKey] || [];
         riskMapState = riskMapCache[riskCacheKey] || {};
         applyAttendanceMap(attendanceMapCache[sessionKey] || {});
+        previousSessionCopyDetailSessionKey = expectedSessionKey;
 
         renderSelectedClassInfo();
         renderSummary();
@@ -4852,6 +5286,7 @@ function renderSelectedClassInfo() {
           attendanceMapCache[sessionKey] = attendanceMap;
 
           applyAttendanceMap(attendanceMap);
+          previousSessionCopyDetailSessionKey = expectedSessionKey;
           renderSelectedClassInfo();
           renderSummary();
           renderStudents();
@@ -4911,6 +5346,10 @@ function renderSelectedClassInfo() {
 
     function selectClass(cls) {
   debugLog("selectClass", cls);
+
+  previousSessionCopyRequestToken++;
+  isPreviousSessionCopyLoading = false;
+  previousSessionCopyDetailSessionKey = "";
 
   selectedClass = cls;
   updateTodayWorkspaceViewUI();
