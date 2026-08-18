@@ -870,6 +870,36 @@
       color: #8a5a00;
     }
 
+    .guided-next-area {
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid #cfd9ea;
+      border-radius: 10px;
+      background: #f8fbff;
+    }
+
+    .guided-next-title {
+      color: #243b64;
+      font-size: 14px;
+      font-weight: bold;
+      line-height: 1.5;
+    }
+
+    .guided-next-actions {
+      margin-top: 10px;
+    }
+
+    .guided-next-actions .main-btn {
+      min-height: 44px;
+    }
+
+    .guided-next-note {
+      margin-top: 8px;
+      color: #8a5a00;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
     .summary {
       display: flex;
       flex-wrap: wrap;
@@ -1654,6 +1684,7 @@
 
           <div id="selectedClassInfo" class="info-bar">授業を読み込み中...</div>
           <div id="lastSavedInfoBar" class="info-bar" style="display:none;"></div>
+          <div id="guidedNextArea" class="guided-next-area" style="display:none;" aria-live="polite" aria-atomic="true"></div>
           <div id="previousSessionCopyArea" class="previous-session-copy-area" style="display:none;" aria-live="polite" aria-atomic="true"></div>
           <div id="groupSelectorArea" class="info-bar" style="display:none;">
             <label for="groupSelect"><strong>班選択</strong></label><br>
@@ -1926,6 +1957,11 @@ function goHome() {
     setSaveButtonsDisabled(disabled);
     }
 
+    function setTeacherSavingState(flag) {
+      isSaving = !!flag;
+      renderTeacherWorkflowAssistAreas();
+    }
+
     function markDirty(flag) {
   const nextDirty = !!flag;
   const dirtyStateChanged = isDirty !== nextDirty;
@@ -2194,6 +2230,7 @@ function goHome() {
       renderPageSubText();
       updatePastWorkspaceViewUI();
       updateTodayWorkspaceViewUI();
+      renderTeacherWorkflowAssistAreas();
     }
 
         function closeTeacherUnsavedDetails() {
@@ -3319,7 +3356,7 @@ function getSidebarSaveStatusInfo(cls) {
 
 
 function renderClassList() {
-  renderPreviousSessionCopyArea();
+  renderTeacherWorkflowAssistAreas();
 
   if (currentMode === "today") {
     renderTodayDashboard();
@@ -4289,12 +4326,19 @@ function loadSaveStatusForVisibleClasses() {
   const requestToken = ++saveStatusRequestToken;
 
   const targets = classesCache.map(function(cls) {
+    if (!isExperimentSubject(cls)) {
+      cls.saveStatusNotLoaded = true;
+      cls.saveStatusLoadFailed = false;
+    }
+
     return {
       classId: cls.classId,
       date: cls.date,
       period: cls.period
     };
   });
+
+  renderClassList();
 
   google.script.run
     .withSuccessHandler(function(statusMap) {
@@ -4447,6 +4491,139 @@ function getPreviousSessionCopyCandidate(cls) {
   });
 
   return candidates.length === 1 ? candidates[0] : null;
+}
+
+function getNextConsecutiveSessionCandidate(cls) {
+  if (
+    currentMode !== "today" ||
+    !cls ||
+    isExperimentSubject(cls) ||
+    requiresGroupSelection(cls)
+  ) {
+    return null;
+  }
+
+  const candidates = (classesCache || []).filter(function(item) {
+    return canGroupConsecutiveLessons(cls, item);
+  });
+
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+function getGuidedNextUiState() {
+  if (currentMode !== "today" || !selectedClass) return null;
+
+  const currentStatus = getSidebarSaveStatusInfo(selectedClass);
+  if (!currentStatus.isSaved) return null;
+
+  const nextClass = getNextConsecutiveSessionCandidate(selectedClass);
+  if (!nextClass) return null;
+
+  const nextStatus = getSidebarSaveStatusInfo(nextClass);
+  if (nextStatus.isSaved) return null;
+
+  let disabledReason = "";
+
+  if (isSaving) {
+    disabledReason = "保存処理中は次の授業へ進めません。";
+  } else if (isDirty) {
+    disabledReason = "入力途中の変更を保存してから次の授業へ進んでください。";
+  } else if (nextClass.saveStatusLoadFailed || nextStatus.className === "failed") {
+    disabledReason = "次の授業の保存状態を確認できませんでした。";
+  } else if (nextClass.saveStatusNotLoaded || nextStatus.isChecking) {
+    disabledReason = "次の授業の保存状態を確認中です。";
+  }
+
+  return {
+    currentClass: selectedClass,
+    nextClass: nextClass,
+    expectedCurrentIdentity: getPreviousSessionCopyClientIdentity(selectedClass),
+    expectedNextIdentity: getPreviousSessionCopyClientIdentity(nextClass),
+    disabledReason: disabledReason,
+    canAdvance: !disabledReason
+  };
+}
+
+function handleGuidedNextClick(expectedCurrentIdentity, expectedNextIdentity, button) {
+  if (button) button.disabled = true;
+
+  if (
+    getPreviousSessionCopyClientIdentity(selectedClass) !== expectedCurrentIdentity
+  ) {
+    return;
+  }
+
+  const nextClass = getNextConsecutiveSessionCandidate(selectedClass);
+  if (
+    !nextClass ||
+    getPreviousSessionCopyClientIdentity(nextClass) !== expectedNextIdentity
+  ) {
+    return;
+  }
+
+  const latestState = getGuidedNextUiState();
+  if (
+    !latestState ||
+    !latestState.canAdvance ||
+    latestState.expectedCurrentIdentity !== expectedCurrentIdentity ||
+    latestState.expectedNextIdentity !== expectedNextIdentity
+  ) {
+    return;
+  }
+
+  selectClass(nextClass);
+  focusAttendanceWorkspace();
+}
+
+function renderGuidedNextArea() {
+  const area = document.getElementById("guidedNextArea");
+  if (!area) return;
+
+  const state = getGuidedNextUiState();
+
+  if (!state) {
+    area.style.display = "none";
+    area.innerHTML = "";
+    return;
+  }
+
+  const nextPeriod = normalizePreviousSessionCopyClientValue(state.nextClass.period);
+  const buttonLabel = nextPeriod
+    ? "次の" + nextPeriod + "限へ進む"
+    : "次の授業へ進む";
+
+  area.style.display = "block";
+  area.innerHTML =
+    '<div class="guided-next-title">' +
+      "この授業は保存済みです。続けて次の授業へ進めます。" +
+    '</div>' +
+    '<div class="guided-next-actions">' +
+      '<button id="guidedNextButton" type="button" class="main-btn secondary-btn"' +
+        (state.canAdvance ? '' : ' disabled') +
+      '>' + escapeHtml(buttonLabel) + '</button>' +
+    '</div>' +
+    (state.disabledReason
+      ? '<div class="guided-next-note">' + escapeHtml(state.disabledReason) + '</div>'
+      : '');
+
+  const button = document.getElementById("guidedNextButton");
+  if (button && state.canAdvance) {
+    const expectedCurrentIdentity = state.expectedCurrentIdentity;
+    const expectedNextIdentity = state.expectedNextIdentity;
+
+    button.addEventListener("click", function() {
+      handleGuidedNextClick(
+        expectedCurrentIdentity,
+        expectedNextIdentity,
+        button
+      );
+    });
+  }
+}
+
+function renderTeacherWorkflowAssistAreas() {
+  renderGuidedNextArea();
+  renderPreviousSessionCopyArea();
 }
 
 function buildPreviousSessionCopySortedStudentIds(students) {
@@ -5537,11 +5714,11 @@ function handleNoAbsenceSaveClick(cls) {
     noAbsence: true
   };
 
-  isSaving = true;
+  setTeacherSavingState(true);
 
   const runner = google.script.run
     .withSuccessHandler(function(result) {
-      isSaving = false;
+      setTeacherSavingState(false);
       isDirty = false;
 
       attendanceMapCache[displaySessionKey] = {};
@@ -5554,6 +5731,12 @@ function handleNoAbsenceSaveClick(cls) {
       savingClass.saveStatusLoadFailed = false;
 
       savedSessionKeys[displaySessionKey] = true;
+
+      const shouldRevealGuidedNext =
+        savingMode === "today" &&
+        getPreviousSessionCopyClientIdentity(selectedClass) ===
+          getPreviousSessionCopyClientIdentity(savingClass) &&
+        getGuidedNextUiState() !== null;
 
       renderClassList();
       renderSelectedClassInfo();
@@ -5576,6 +5759,11 @@ function handleNoAbsenceSaveClick(cls) {
         "success"
       );
 
+      if (shouldRevealGuidedNext) {
+        updateTodayWorkspaceViewUI();
+        focusAttendanceWorkspace();
+      }
+
       const shouldPatchUnsaved =
         !wasSavedBefore &&
         isTeacherUnsavedTargetDate(savingClass.date);
@@ -5592,7 +5780,7 @@ function handleNoAbsenceSaveClick(cls) {
       console.log("saveNoAbsence result", result);
     })
     .withFailureHandler(function(error) {
-      isSaving = false;
+      setTeacherSavingState(false);
       setTopActionButtonsDisabled(true);
 
       document.getElementById("studentArea").innerHTML =
@@ -5639,14 +5827,14 @@ function handleNoAbsenceSaveClick(cls) {
       savedSessionKeys[sessionKey]
       );
 
-      isSaving = true;
+      setTeacherSavingState(true);
       markDirty(isDirty);
       showMessage("保存中です...", "warn");
 
       const payload = buildPayload(savingClass);
       const runner = google.script.run
         .withSuccessHandler(function(result) {
-          isSaving = false;
+          setTeacherSavingState(false);
           isDirty = false;
 
           attendanceMapCache[sessionKey] = buildAttendanceMapFromState();
@@ -5683,7 +5871,7 @@ function handleNoAbsenceSaveClick(cls) {
             console.log(result);
         })
         .withFailureHandler(function(error) {
-          isSaving = false;
+          setTeacherSavingState(false);
           markDirty(true);
           showMessage("保存に失敗しました", "error");
           console.error(error);

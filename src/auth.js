@@ -99,10 +99,19 @@ const pageToFileMap = {
   template.hasTeachingAssignment = hasTeachingAssignment;
   template.needsTeacherRoleNotice = (!hasTeacherRole && hasTeachingAssignment);
 
-  return template
+  const output = template
     .evaluate()
     .setTitle('出席管理システム')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+
+  if (targetPage === 'teacher') {
+    output.addMetaTag(
+      'viewport',
+      'width=device-width, initial-scale=1'
+    );
+  }
+
+  return output;
 }
 
 function include(filename) {
