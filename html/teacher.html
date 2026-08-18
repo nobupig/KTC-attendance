@@ -292,6 +292,25 @@
       gap: 10px;
     }
 
+    .class-list.past-card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 360px));
+      justify-content: start;
+      align-items: stretch;
+      gap: 12px;
+    }
+
+    .class-list.past-card-grid .class-list-overview,
+    .class-list.past-card-grid > .empty-box {
+      grid-column: 1 / -1;
+    }
+
+    .class-list.past-card-grid .class-card {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+    }
+
     .today-dashboard {
       display: flex;
       flex-direction: column;
@@ -1080,6 +1099,10 @@
       color: #fff;
     }
 
+    .past-period-filter .quick-buttons {
+      align-items: center;
+    }
+
     .teacher-action-required-section {
       margin-top: 24px;
       padding: 18px;
@@ -1408,6 +1431,10 @@
       .class-list-overview-chip {
         flex-basis: 100%;
       }
+
+      .class-list.past-card-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
     }
 
 .risk-action-bar {
@@ -1598,6 +1625,7 @@
 
     let currentMode = "today";
     let pastWorkspaceView = "list";
+    let pastPeriodFilter = "";
     let classesCache = [];
     let isClassListLoading = false;
     let selectedClass = null;
@@ -2564,6 +2592,7 @@ function patchTeacherUnsavedLocalAfterSave(classId, dateStr, period, forceDecrem
 
       currentMode = "past";
       pastWorkspaceView = "list";
+      pastPeriodFilter = "";
       updateModeUI();
       clearMessage();
 
@@ -2721,8 +2750,71 @@ function buildQuickButtonLabel(cls, sameSubjectInPeriod) {
   return (cls.subjectName || "") + " " + unitText;
 }
 
+  function getPastFilteredSidebarClasses() {
+    if (!pastPeriodFilter) return classesCache || [];
+
+    return (classesCache || []).filter(function(cls) {
+      return String(cls.period || "") === pastPeriodFilter;
+    });
+  }
+
+  function renderPastPeriodFilter(area) {
+    const periodMap = {};
+    (classesCache || []).forEach(function(cls) {
+      const period = String(cls.period || "");
+      if (period) periodMap[period] = true;
+    });
+
+    const sortedPeriods = Object.keys(periodMap).sort(function(a, b) {
+      return Number(a) - Number(b);
+    });
+
+    if (sortedPeriods.length === 0) {
+      pastPeriodFilter = "";
+      area.classList.remove("past-period-filter");
+      area.style.display = "none";
+      area.innerHTML = "";
+      return;
+    }
+
+    if (pastPeriodFilter && !periodMap[pastPeriodFilter]) {
+      pastPeriodFilter = "";
+    }
+
+    const filterOptions = [""].concat(sortedPeriods);
+    let html = '<div class="quick-nav-title">時限</div>';
+    html += '<div class="quick-buttons" role="group" aria-label="過去授業を時限で絞り込み">';
+
+    filterOptions.forEach(function(period) {
+      const active = period === pastPeriodFilter;
+      const label = period ? period + "限" : "すべて";
+      html += '<button type="button" class="quick-class-btn past-period-filter-btn' +
+        (active ? ' active' : '') + '" data-period="' + escapeHtml(period) +
+        '" aria-pressed="' + String(active) + '">' + escapeHtml(label) + '</button>';
+    });
+
+    html += '</div>';
+    area.classList.add("past-period-filter");
+    area.innerHTML = html;
+    area.style.display = "block";
+
+    area.querySelectorAll(".past-period-filter-btn").forEach(function(btn) {
+      btn.addEventListener("click", function() {
+        pastPeriodFilter = String(btn.dataset.period || "");
+        renderPastClassList();
+      });
+    });
+  }
+
   function renderQuickClassNav() {
   const area = document.getElementById("quickClassNav");
+
+  if (currentMode === "past") {
+    renderPastPeriodFilter(area);
+    return;
+  }
+
+  area.classList.remove("past-period-filter");
 
   if (!classesCache || classesCache.length === 0) {
     area.style.display = "none";
@@ -3309,6 +3401,10 @@ function renderTodayDashboard() {
 function renderClassListContent(todayTaskModels) {
   const area = document.getElementById("classListArea");
   const quickNav = document.getElementById("quickClassNav");
+  const isPastMode = currentMode === "past";
+
+  area.classList.toggle("past-card-grid", isPastMode);
+  if (!isPastMode) quickNav.classList.remove("past-period-filter");
 
   debugLog("renderClassList currentMode", currentMode);
   debugLog("renderClassList isClassListLoading", isClassListLoading);
@@ -3317,12 +3413,20 @@ function renderClassListContent(todayTaskModels) {
 
   if (isClassListLoading) {
     quickNav.style.display = "none";
+    if (isPastMode) {
+      quickNav.classList.remove("past-period-filter");
+      quickNav.innerHTML = "";
+    }
     area.innerHTML = '<div class="empty-box">授業情報を読み込み中...</div>';
     return;
   }
 
   if (!classesCache || classesCache.length === 0) {
     quickNav.style.display = "none";
+    if (isPastMode) {
+      quickNav.classList.remove("past-period-filter");
+      quickNav.innerHTML = "";
+    }
     area.innerHTML = '<div class="empty-box">' + (currentMode === "today" ? '今日の授業はありません。' : '該当日の担当授業はありません。') + '</div>';
     return;
   }
@@ -3338,7 +3442,8 @@ function renderClassListContent(todayTaskModels) {
     });
   } else {
     const sidebarClassesMap = {};
-    classesCache.forEach(function(cls) {
+    const sourceClasses = isPastMode ? getPastFilteredSidebarClasses() : classesCache;
+    sourceClasses.forEach(function(cls) {
       const sidebarKey = getSidebarCardKey(cls);
       if (!sidebarKey) return;
       if (!sidebarClassesMap[sidebarKey]) {
@@ -3417,9 +3522,12 @@ function renderClassListContent(todayTaskModels) {
     };
   });
 
+  const overviewTitle = isPastMode && pastPeriodFilter
+    ? "表示中の授業"
+    : (currentMode === "today" ? "本日の担当授業" : "検索日の担当授業");
   let html = '<div class="class-list-overview" aria-label="授業一覧の概要">';
   html += '  <div class="class-list-overview-title">' +
-    (currentMode === "today" ? "本日の担当授業" : "検索日の担当授業") +
+    overviewTitle +
     '：' + sidebarItems.length + '件</div>';
   html += '  <div class="class-list-overview-chips">';
 
@@ -4658,6 +4766,7 @@ function isExperimentSubject(cls) {
       debugLog("loadPastClassesByDate attempt", attempt);
 
       setPastWorkspaceView("list", false);
+      pastPeriodFilter = "";
       selectedClass = null;
       classesCache = [];
       isClassListLoading = true;
@@ -4829,6 +4938,7 @@ function isExperimentSubject(cls) {
       }
       currentMode = "past";
       pastWorkspaceView = "list";
+      pastPeriodFilter = "";
       updateModeUI();
       clearMessage();
       
