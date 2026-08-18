@@ -3126,18 +3126,16 @@ function getSidebarSaveStatusInfo(cls) {
   if (!isExperimentSubject(cls)) {
     const sessionKey = getSessionKey(cls);
     const isSaved = !!(cls.isSaved || savedSessionKeys[sessionKey]);
-    const statusLoadFailed = currentMode === "today" && !!cls.saveStatusLoadFailed;
-    const isChecking = currentMode === "today" && !!cls.saveStatusNotLoaded && !statusLoadFailed;
+    const statusLoadFailed = !!cls.saveStatusLoadFailed;
+    const isChecking = !!cls.saveStatusNotLoaded && !statusLoadFailed;
     const label = statusLoadFailed
       ? "確認失敗"
       : (isChecking
         ? "確認中..."
-        : (cls.saveStatusNotLoaded && !isSaved && currentMode === "past"
-          ? "開くと確認"
-          : (isSaved ? "保存済み" : "未保存")));
+        : (isSaved ? "保存済み" : "未保存"));
     const className = statusLoadFailed
       ? "failed"
-      : (isChecking ? "checking" : (isSaved ? "saved" : (cls.saveStatusNotLoaded ? "checking" : "unsaved")));
+      : (isChecking ? "checking" : (isSaved ? "saved" : "unsaved"));
     const disableNoAbsenceQuickSave = statusLoadFailed || isChecking;
     const noAbsenceDisabledReason = statusLoadFailed
       ? "保存状態を確認できませんでした。「出席を入力・確認」から名簿を開いて確認してください。"
@@ -3160,10 +3158,15 @@ function getSidebarSaveStatusInfo(cls) {
   // 工学実験は同一カードにまとまる classId 群を集約判定する
   let savedCount = 0;
   let loadedCount = 0;
+  let failedCount = 0;
 
   targets.forEach(function(item) {
     const key = getSessionKey(item);
     const isItemSaved = !!(item.isSaved || savedSessionKeys[key]);
+
+    if (item.saveStatusLoadFailed) {
+      failedCount++;
+    }
 
     if (!item.saveStatusNotLoaded || isItemSaved) {
       loadedCount++;
@@ -3177,10 +3180,23 @@ function getSidebarSaveStatusInfo(cls) {
   const total = targets.length;
   const latestInfo = getLatestSavedInfoFromClasses(targets);
 
+  if (currentMode === "past" && failedCount > 0) {
+    return {
+      isSaved: savedCount > 0,
+      label: "確認失敗",
+      className: "failed",
+      lastSavedInfo: latestInfo,
+      isChecking: false,
+      disableNoAbsenceQuickSave: true,
+      noAbsenceDisabledReason: "保存状態を確認できませんでした。「出席を入力・確認」から名簿を開いて確認してください。",
+      statusNote: "保存状態を確認できませんでした。「出席を入力・確認」から名簿を開いて確認してください。"
+    };
+  }
+
   if (loadedCount < total) {
     return {
       isSaved: savedCount > 0,
-      label: savedCount > 0 ? "一部確認中" : (currentMode === "past" ? "開くと確認" : "確認中..."),
+      label: savedCount > 0 ? "一部確認中" : "確認中...",
       className: savedCount > 0 ? "partial" : "checking",
       lastSavedInfo: latestInfo,
       isChecking: loadedCount < total,
@@ -4047,6 +4063,82 @@ function loadSaveStatusForVisibleClasses() {
     .getSaveStatusForTeacherSessions(targets);
 }
 
+function loadSaveStatusForPastClasses(expectedClassListRequestToken) {
+  if (currentMode !== "past" || !classesCache || classesCache.length === 0) return;
+
+  const requestToken = ++saveStatusRequestToken;
+  const targetClasses = classesCache.slice();
+  const targets = targetClasses.map(function(cls) {
+    cls.saveStatusNotLoaded = true;
+    cls.saveStatusLoadFailed = false;
+
+    return {
+      classId: cls.classId,
+      date: cls.date,
+      period: cls.period
+    };
+  });
+
+  renderClassList();
+
+  google.script.run
+    .withSuccessHandler(function(statusMap) {
+      if (
+        requestToken !== saveStatusRequestToken ||
+        currentMode !== "past" ||
+        expectedClassListRequestToken !== classListRequestToken
+      ) {
+        return;
+      }
+
+      const map = statusMap || {};
+
+      classesCache.forEach(function(cls) {
+        if (!cls.saveStatusNotLoaded && !cls.saveStatusLoadFailed) return;
+
+        const key = getSessionKey(cls);
+        const status = map[key];
+
+        if (!status) {
+          cls.saveStatusNotLoaded = false;
+          cls.saveStatusLoadFailed = true;
+          return;
+        }
+
+        cls.isSaved = !!status.isSaved;
+        cls.lastSavedInfo = status.lastSavedInfo || null;
+        cls.saveStatusNotLoaded = false;
+        cls.saveStatusLoadFailed = false;
+
+        if (cls.isSaved) {
+          savedSessionKeys[key] = true;
+        } else {
+          delete savedSessionKeys[key];
+        }
+      });
+
+      renderClassList();
+    })
+    .withFailureHandler(function(error) {
+      if (
+        requestToken !== saveStatusRequestToken ||
+        currentMode !== "past" ||
+        expectedClassListRequestToken !== classListRequestToken
+      ) {
+        return;
+      }
+
+      console.error(error);
+      classesCache.forEach(function(cls) {
+        if (!cls.saveStatusNotLoaded && !cls.saveStatusLoadFailed) return;
+        cls.saveStatusNotLoaded = false;
+        cls.saveStatusLoadFailed = true;
+      });
+      renderClassList();
+    })
+    .getSaveStatusForTeacherSessions(targets);
+}
+
 function renderSelectedClassInfo() {
   const area = document.getElementById("selectedClassInfo");
 
@@ -4533,7 +4625,7 @@ function renderSelectedClassInfo() {
           cls.isSaved = hasSavedSession;
           cls.lastSavedInfo = lastSavedInfo;
 
-          if (currentMode === "today" && !isExperimentSubject(cls)) {
+          if (!isExperimentSubject(cls)) {
             cls.saveStatusNotLoaded = false;
             cls.saveStatusLoadFailed = false;
           }
@@ -5072,6 +5164,7 @@ function isExperimentSubject(cls) {
       const requestToken = ++classListRequestToken;
       detailRequestToken++;
       groupListRequestToken++;
+      saveStatusRequestToken++;
 
       debugLog("loadPastClassesByDate targetDate", targetDate);
       debugLog("loadPastClassesByDate attempt", attempt);
@@ -5135,7 +5228,7 @@ function isExperimentSubject(cls) {
             return;
           }
 
-          renderClassList();
+          loadSaveStatusForPastClasses(requestToken);
          
           if (
             pendingUnsavedTeacherSession &&
@@ -5155,8 +5248,6 @@ function isExperimentSubject(cls) {
               return;
             }
           }
-           // loadSaveStatusForVisibleClasses();
-
           selectedClass = null;
           document.getElementById("selectedClassInfo").innerHTML =
             "過去授業カードから操作を選択してください。";
