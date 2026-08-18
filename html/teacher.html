@@ -1783,6 +1783,7 @@
     let previousSessionCopyRequestToken = 0;
     let previousSessionCopyDetailSessionKey = "";
     let isPreviousSessionCopyLoading = false;
+    let previousSessionCopyAppliedState = null;
     let riskMapState = {};
     let isDirty = false;
     let isSaving = false;
@@ -2187,6 +2188,7 @@ function goHome() {
       detailRequestToken++;
       groupListRequestToken++;
       riskRequestToken++;
+      clearPreviousSessionCopyAppliedState();
       selectedClass = null;
       studentsCache = [];
       attendanceState = {};
@@ -4465,6 +4467,10 @@ function normalizePreviousSessionCopyClientValue(value) {
   return value === null || value === undefined ? "" : String(value).trim();
 }
 
+function clearPreviousSessionCopyAppliedState() {
+  previousSessionCopyAppliedState = null;
+}
+
 function getPreviousSessionCopyClientIdentity(cls) {
   if (!cls) return "";
 
@@ -4731,6 +4737,28 @@ function renderPreviousSessionCopyArea() {
   const area = document.getElementById("previousSessionCopyArea");
   if (!area) return;
 
+  const selectedIdentity = getPreviousSessionCopyClientIdentity(selectedClass);
+  const appliedState = previousSessionCopyAppliedState;
+  const shouldShowAppliedState = !!(
+    currentMode === "today" &&
+    isDirty &&
+    selectedIdentity &&
+    appliedState &&
+    appliedState.destinationIdentity === selectedIdentity
+  );
+
+  if (shouldShowAppliedState) {
+    area.style.display = "block";
+    area.innerHTML =
+      '<div class="previous-session-copy-title">' +
+        "✓ " + escapeHtml(appliedState.sourcePeriod) + "限の出欠をコピー済み" +
+      '</div>' +
+      '<div class="previous-session-copy-note">' +
+        "現在の内容はまだ保存されていません。内容を確認して保存してください。" +
+      '</div>';
+    return;
+  }
+
   const state = getPreviousSessionCopyUiState();
 
   if (!state) {
@@ -4884,6 +4912,11 @@ function tryApplyPreviousSessionCopyResult(
   attendanceState = nextAttendanceState;
   renderStudents();
   renderSummary();
+  previousSessionCopyAppliedState = {
+    sourcePeriod: normalizePreviousSessionCopyClientValue(currentSourceClass.period),
+    sourceIdentity: expectedSourceIdentity,
+    destinationIdentity: expectedDestinationIdentity
+  };
   markDirty(true);
   return true;
 }
@@ -5339,6 +5372,8 @@ function renderSelectedClassInfo() {
     }
 
     function loadClassDetailWithGroup(cls, group) {
+      clearPreviousSessionCopyAppliedState();
+
       const expectedSessionKey = getSessionKey(cls);
       const expectedGroup = group || "";
       const requestToken = ++detailRequestToken;
@@ -5528,6 +5563,7 @@ function renderSelectedClassInfo() {
   isPreviousSessionCopyLoading = false;
   previousSessionCopyDetailSessionKey = "";
 
+  clearPreviousSessionCopyAppliedState();
   selectedClass = cls;
   updateTodayWorkspaceViewUI();
   isDirty = false;
@@ -5677,6 +5713,7 @@ function handleNoAbsenceSaveClick(cls) {
 
   if (!ok) return;
 
+  clearPreviousSessionCopyAppliedState();
   selectedClass = cls;
   renderSelectedClassInfo();
   renderLastSavedInfoBar(cls.lastSavedInfo || null);
@@ -5731,6 +5768,7 @@ function handleNoAbsenceSaveClick(cls) {
       savingClass.saveStatusLoadFailed = false;
 
       savedSessionKeys[displaySessionKey] = true;
+      clearPreviousSessionCopyAppliedState();
 
       const shouldRevealGuidedNext =
         savingMode === "today" &&
@@ -5848,6 +5886,7 @@ function handleNoAbsenceSaveClick(cls) {
 
           savedSessionKeys[displaySessionKey] = true;
           savedSessionKeys[sessionKey] = true;
+          clearPreviousSessionCopyAppliedState();
 
             renderClassList();
             renderLastSavedInfoBar(savingClass.lastSavedInfo);
@@ -5941,6 +5980,7 @@ function isExperimentSubject(cls) {
 
       debugLog("loadTodayClasses attempt", attempt);
 
+  clearPreviousSessionCopyAppliedState();
   selectedClass = null;
   updateTodayWorkspaceViewUI();
   classesCache = [];
@@ -5998,6 +6038,7 @@ function isExperimentSubject(cls) {
 
           renderClassList();
           loadSaveStatusForVisibleClasses();
+          clearPreviousSessionCopyAppliedState();
           selectedClass = null;
           document.getElementById("selectedClassInfo").innerHTML =
             "本日の授業カードから操作を選択してください。";
@@ -6035,6 +6076,7 @@ function isExperimentSubject(cls) {
 
       setPastWorkspaceView("list", false);
       pastPeriodFilter = "";
+      clearPreviousSessionCopyAppliedState();
       selectedClass = null;
       classesCache = [];
       isClassListLoading = true;
@@ -6112,6 +6154,7 @@ function isExperimentSubject(cls) {
               return;
             }
           }
+          clearPreviousSessionCopyAppliedState();
           selectedClass = null;
           document.getElementById("selectedClassInfo").innerHTML =
             "過去授業カードから操作を選択してください。";
