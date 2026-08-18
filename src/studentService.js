@@ -153,6 +153,275 @@ function getTeacherSessionDetailLight(classId, date, period, group) {
   return result;
 }
 
+function normalizePreviousSessionCopyValue_(value) {
+  return value === null || value === undefined ? '' : String(value).trim();
+}
+
+function getPreviousSessionCopyNumericValue_(value) {
+  const normalized = normalizePreviousSessionCopyValue_(value);
+  if (!normalized) return null;
+
+  const numericValue = Number(normalized);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function getPreviousSessionCopyTeacherSignature_(cls) {
+  const teachers = Array.isArray(cls && cls.teachers) && cls.teachers.length > 0
+    ? cls.teachers
+    : [{
+      teacherEmail: cls && cls.teacherEmail,
+      teacherName: cls && cls.teacherName,
+      roleType: cls && cls.roleType
+    }];
+
+  return teachers.map(function(teacher) {
+    return JSON.stringify([
+      normalizePreviousSessionCopyValue_(teacher && (teacher.teacherEmail || teacher.email)),
+      normalizePreviousSessionCopyValue_(teacher && (teacher.teacherName || teacher.name)),
+      normalizePreviousSessionCopyValue_(teacher && teacher.roleType)
+    ]);
+  }).filter(function(signature) {
+    return signature !== '["","",""]';
+  }).sort().join('|');
+}
+
+function isPreviousSessionCopyUnsupportedClass_(cls) {
+  if (!cls) return true;
+
+  const classId = normalizePreviousSessionCopyValue_(cls.classId);
+  const subjectId = normalizePreviousSessionCopyValue_(cls.subjectId);
+
+  return (
+    classId.indexOf('\u5de5\u5b66\u5b9f\u9a13\u5b9f\u7fd21') !== -1 ||
+    classId.indexOf('\u5de5\u5b66\u5b9f\u9a13\u5b9f\u7fd22') !== -1 ||
+    subjectId === 'G1_G_\u5de5\u5b66\u5b9f\u9a13\u5b9f\u7fd21_FY' ||
+    subjectId === 'G2_G_\u5de5\u5b66\u5b9f\u9a13\u5b9f\u7fd22_FY'
+  );
+}
+
+function canCopyPreviousTeacherSession_(previousClass, nextClass) {
+  if (!previousClass || !nextClass) return false;
+
+  if (
+    isPreviousSessionCopyUnsupportedClass_(previousClass) ||
+    isPreviousSessionCopyUnsupportedClass_(nextClass)
+  ) {
+    return false;
+  }
+
+  const previousDate = normalizePreviousSessionCopyValue_(previousClass.date);
+  const nextDate = normalizePreviousSessionCopyValue_(nextClass.date);
+  const previousClassId = normalizePreviousSessionCopyValue_(previousClass.classId);
+  const nextClassId = normalizePreviousSessionCopyValue_(nextClass.classId);
+  const previousSubjectId = normalizePreviousSessionCopyValue_(previousClass.subjectId);
+  const nextSubjectId = normalizePreviousSessionCopyValue_(nextClass.subjectId);
+
+  if (!previousDate || previousDate !== nextDate) return false;
+  if (!previousClassId || previousClassId !== nextClassId) return false;
+  if (!previousSubjectId || previousSubjectId !== nextSubjectId) return false;
+
+  const optionalIdentityFields = ['grade', 'unit', 'curriculumUnit'];
+  const optionalIdentityMatches = optionalIdentityFields.every(function(fieldName) {
+    return normalizePreviousSessionCopyValue_(previousClass[fieldName]) ===
+      normalizePreviousSessionCopyValue_(nextClass[fieldName]);
+  });
+  if (!optionalIdentityMatches) return false;
+
+  if (
+    getPreviousSessionCopyTeacherSignature_(previousClass) !==
+    getPreviousSessionCopyTeacherSignature_(nextClass)
+  ) {
+    return false;
+  }
+
+  const previousPeriod = getPreviousSessionCopyNumericValue_(previousClass.period);
+  const nextPeriod = getPreviousSessionCopyNumericValue_(nextClass.period);
+  if (previousPeriod === null || nextPeriod !== previousPeriod + 1) return false;
+
+  const previousSessionNumber = getPreviousSessionCopyNumericValue_(previousClass.sessionNumber);
+  const nextSessionNumber = getPreviousSessionCopyNumericValue_(nextClass.sessionNumber);
+  if (previousSessionNumber === null || nextSessionNumber !== previousSessionNumber + 1) return false;
+
+  return true;
+}
+
+function buildPreviousSessionCopyStudentIds_(students) {
+  const result = [];
+  const seen = {};
+
+  (Array.isArray(students) ? students : []).forEach(function(student) {
+    const studentId = normalizePreviousSessionCopyValue_(student && student.studentId);
+    if (!studentId || seen[studentId]) return;
+
+    seen[studentId] = true;
+    result.push(studentId);
+  });
+
+  result.sort();
+  return result;
+}
+
+function previousSessionCopyFail_(code, message) {
+  return {
+    ok: false,
+    code: String(code || 'COPY_PREVIEW_FAILED'),
+    message: String(message || 'Previous-session attendance copy is unavailable.')
+  };
+}
+
+function getPreviousTeacherSessionAttendanceCopyPreview(destination) {
+  const input = destination && typeof destination === 'object' ? destination : {};
+
+  const targetClassId = normalizePreviousSessionCopyValue_(input.classId);
+  const targetDate = formatDateToYmd(input.date);
+  const targetPeriod = normalizePreviousSessionCopyValue_(input.period);
+  const targetSessionNumber = normalizePreviousSessionCopyValue_(input.sessionNumber);
+
+  if (!targetClassId || !targetDate || !targetPeriod || !targetSessionNumber) {
+    return previousSessionCopyFail_(
+      'INVALID_DESTINATION',
+      'Destination session information is incomplete.'
+    );
+  }
+
+  const teacherClasses = getClassesForCurrentUserByDate(targetDate);
+  const normalizedTeacherClasses = Array.isArray(teacherClasses) ? teacherClasses : [];
+
+  const destinationMatches = normalizedTeacherClasses.filter(function(cls) {
+    return (
+      normalizePreviousSessionCopyValue_(cls.classId) === targetClassId &&
+      formatDateToYmd(cls.date) === targetDate &&
+      normalizePreviousSessionCopyValue_(cls.period) === targetPeriod &&
+      normalizePreviousSessionCopyValue_(cls.sessionNumber) === targetSessionNumber
+    );
+  });
+
+  if (destinationMatches.length !== 1) {
+    return previousSessionCopyFail_(
+      'DESTINATION_NOT_FOUND',
+      'Destination session could not be verified as a current teacher assignment.'
+    );
+  }
+
+  const destinationClass = destinationMatches[0];
+
+  if (isPreviousSessionCopyUnsupportedClass_(destinationClass)) {
+    return previousSessionCopyFail_(
+      'UNSUPPORTED_CLASS',
+      'Previous-session copy is not supported for this class.'
+    );
+  }
+
+  const sourceMatches = normalizedTeacherClasses.filter(function(cls) {
+    return canCopyPreviousTeacherSession_(cls, destinationClass);
+  });
+
+  if (sourceMatches.length !== 1) {
+    return previousSessionCopyFail_(
+      'PREVIOUS_SESSION_NOT_FOUND',
+      'An eligible immediate previous session could not be verified.'
+    );
+  }
+
+  const sourceClass = sourceMatches[0];
+
+  const sourceDetail = getTeacherSessionDetailLight(
+    sourceClass.classId,
+    sourceClass.date,
+    sourceClass.period,
+    ''
+  );
+
+  if (!sourceDetail || !sourceDetail.hasSavedSession) {
+    return previousSessionCopyFail_(
+      'SOURCE_NOT_SAVED',
+      'The immediate previous session is not saved.'
+    );
+  }
+
+  const destinationDetail = getTeacherSessionDetailLight(
+    destinationClass.classId,
+    destinationClass.date,
+    destinationClass.period,
+    ''
+  );
+
+  if (destinationDetail && destinationDetail.hasSavedSession) {
+    return previousSessionCopyFail_(
+      'DESTINATION_ALREADY_SAVED',
+      'The destination session is already saved.'
+    );
+  }
+
+  const sourceStudentIds = buildPreviousSessionCopyStudentIds_(
+    sourceDetail && sourceDetail.students
+  );
+  const destinationStudentIds = buildPreviousSessionCopyStudentIds_(
+    destinationDetail && destinationDetail.students
+  );
+
+  if (
+    sourceStudentIds.length === 0 ||
+    sourceStudentIds.length !== destinationStudentIds.length ||
+    sourceStudentIds.some(function(studentId, index) {
+      return studentId !== destinationStudentIds[index];
+    })
+  ) {
+    return previousSessionCopyFail_(
+      'ROSTER_MISMATCH',
+      'Source and destination rosters do not match.'
+    );
+  }
+
+  const sourceStudentIdSet = {};
+  sourceStudentIds.forEach(function(studentId) {
+    sourceStudentIdSet[studentId] = true;
+  });
+
+  const rawAttendanceMap = sourceDetail && sourceDetail.attendanceMap
+    ? sourceDetail.attendanceMap
+    : {};
+  const safeAttendanceMap = {};
+  const allowedCodes = {
+    A: true,
+    L: true,
+    O: true
+  };
+
+  const attendanceKeys = Object.keys(rawAttendanceMap);
+  for (let i = 0; i < attendanceKeys.length; i++) {
+    const rawStudentId = attendanceKeys[i];
+    const studentId = normalizePreviousSessionCopyValue_(rawStudentId);
+    const statusCode = normalizePreviousSessionCopyValue_(rawAttendanceMap[rawStudentId]);
+
+    if (!studentId || !sourceStudentIdSet[studentId] || !allowedCodes[statusCode]) {
+      return previousSessionCopyFail_(
+        'INVALID_SOURCE_ATTENDANCE',
+        'Saved source attendance contains an unsupported value.'
+      );
+    }
+
+    safeAttendanceMap[studentId] = statusCode;
+  }
+
+  return {
+    ok: true,
+    source: {
+      classId: normalizePreviousSessionCopyValue_(sourceClass.classId),
+      date: formatDateToYmd(sourceClass.date),
+      period: normalizePreviousSessionCopyValue_(sourceClass.period),
+      sessionNumber: normalizePreviousSessionCopyValue_(sourceClass.sessionNumber)
+    },
+    destination: {
+      classId: normalizePreviousSessionCopyValue_(destinationClass.classId),
+      date: formatDateToYmd(destinationClass.date),
+      period: normalizePreviousSessionCopyValue_(destinationClass.period),
+      sessionNumber: normalizePreviousSessionCopyValue_(destinationClass.sessionNumber)
+    },
+    studentIds: sourceStudentIds,
+    attendanceMap: safeAttendanceMap
+  };
+}
 function getTeacherSessionDetail(classId, date, period, group) {
   const light = getTeacherSessionDetailLight(classId, date, period, group);
   light.riskMap = getStudentRiskMapForClass(classId, light.students);
