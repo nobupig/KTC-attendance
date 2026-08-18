@@ -223,6 +223,19 @@
       display: inline-flex;
     }
 
+    .lesson-workspace.today-list-view {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .lesson-workspace.today-list-view .lesson-list-panel {
+      width: min(100%, 960px);
+      justify-self: center;
+    }
+
+    .lesson-workspace.today-list-view .attendance-input-panel {
+      display: none;
+    }
+
     .lesson-mode-tools-label {
       margin-bottom: 8px;
       color: #667;
@@ -2053,6 +2066,24 @@ function goHome() {
       if (attendanceInputPanel) attendanceInputPanel.hidden = isPastMode && !isPastDetailView;
     }
 
+    function updateTodayWorkspaceViewUI() {
+      const workspace = document.querySelector(".lesson-workspace");
+      const lessonListPanel = document.querySelector(".lesson-list-panel");
+      const attendanceInputPanel = document.querySelector(".attendance-input-panel");
+      const isTodayMode = currentMode === "today";
+      const isTodayDetailView = isTodayMode && !!selectedClass;
+
+      if (workspace) {
+        workspace.classList.toggle("today-list-view", isTodayMode && !isTodayDetailView);
+        workspace.classList.toggle("today-detail-view", isTodayDetailView);
+      }
+
+      if (!isTodayMode) return;
+
+      if (lessonListPanel) lessonListPanel.hidden = false;
+      if (attendanceInputPanel) attendanceInputPanel.hidden = !isTodayDetailView;
+    }
+
     function setPastWorkspaceView(view, shouldFocus) {
       pastWorkspaceView = view === "detail" ? "detail" : "list";
       updatePastWorkspaceViewUI();
@@ -2121,6 +2152,7 @@ function goHome() {
       document.getElementById("pastSearchBox").style.display = currentMode === "past" ? "block" : "none";
       renderPageSubText();
       updatePastWorkspaceViewUI();
+      updateTodayWorkspaceViewUI();
     }
 
         function closeTeacherUnsavedDetails() {
@@ -4881,6 +4913,7 @@ function renderSelectedClassInfo() {
   debugLog("selectClass", cls);
 
   selectedClass = cls;
+  updateTodayWorkspaceViewUI();
   isDirty = false;
   renderClassList();
   renderSelectedClassInfo();
@@ -5282,6 +5315,7 @@ function isExperimentSubject(cls) {
       debugLog("loadTodayClasses attempt", attempt);
 
   selectedClass = null;
+  updateTodayWorkspaceViewUI();
   classesCache = [];
   isClassListLoading = true;
   studentsCache = [];
@@ -5655,7 +5689,7 @@ function isExperimentSubject(cls) {
         if (matched) return matched;
       }
 
-      return classes[0];
+      return null;
     }
 
     function init() {
