@@ -3440,7 +3440,65 @@ function getTodayTaskDisplayInfo(taskModel) {
   };
 }
 
-function createTodayTaskSection(title, cards, emptyText) {
+function sortTodayTaskModelsByPeriod(taskModels) {
+  return (taskModels || []).slice().sort(function(a, b) {
+    if (a.sortPeriod !== null && b.sortPeriod !== null && a.sortPeriod !== b.sortPeriod) {
+      return a.sortPeriod - b.sortPeriod;
+    }
+    if (a.sortPeriod !== null && b.sortPeriod === null) return -1;
+    if (a.sortPeriod === null && b.sortPeriod !== null) return 1;
+    return a.originalOrder - b.originalOrder;
+  });
+}
+
+function buildTodayConsecutivePresentationItems(taskModels, pinDirtyFirst) {
+  const periodOrderedTasks = sortTodayTaskModelsByPeriod(taskModels);
+  const taskBySidebarKey = Object.create(null);
+
+  periodOrderedTasks.forEach(function(task) {
+    taskBySidebarKey[task.sidebarKey] = task;
+  });
+
+  const presentationItems = buildConsecutiveLessonPresentationItems(
+    periodOrderedTasks.map(function(task) {
+      return task.cls;
+    })
+  ).map(function(item) {
+    const memberTaskModels = item.members.map(function(cls) {
+      return taskBySidebarKey[getSidebarCardKey(cls)];
+    }).filter(function(task) {
+      return !!task;
+    });
+
+    return {
+      type: item.type,
+      taskModels: memberTaskModels,
+      firstPeriod: item.firstPeriod,
+      lastPeriod: item.lastPeriod,
+      presentationKey: "today:" + item.presentationKey,
+      hasDirtyMember: memberTaskModels.some(function(task) {
+        return task.isDirty;
+      }),
+      originalOrder: memberTaskModels.length > 0
+        ? Math.min.apply(null, memberTaskModels.map(function(task) {
+          return task.originalOrder;
+        }))
+        : 0
+    };
+  });
+
+  return presentationItems.sort(function(a, b) {
+    if (pinDirtyFirst && a.hasDirtyMember !== b.hasDirtyMember) {
+      return a.hasDirtyMember ? -1 : 1;
+    }
+    if (a.firstPeriod !== null && b.firstPeriod !== null && a.firstPeriod !== b.firstPeriod) {
+      return a.firstPeriod - b.firstPeriod;
+    }
+    return a.originalOrder - b.originalOrder;
+  });
+}
+
+function createTodayTaskSection(title, cards, emptyText, sessionCount) {
   const section = document.createElement("section");
   section.className = "today-task-section";
 
@@ -3453,7 +3511,7 @@ function createTodayTaskSection(title, cards, emptyText) {
 
   const count = document.createElement("span");
   count.className = "today-task-section-count";
-  count.textContent = String(cards.length) + "授業";
+  count.textContent = String(Number.isFinite(sessionCount) ? sessionCount : cards.length) + "授業";
 
   header.appendChild(heading);
   header.appendChild(count);
@@ -3477,20 +3535,150 @@ function createTodayTaskSection(title, cards, emptyText) {
   return section;
 }
 
+function createTodayConsecutiveLessonGroupCard(presentationItem) {
+  const taskModels = presentationItem.taskModels || [];
+  const firstTask = taskModels[0] || {};
+  const firstClass = firstTask.cls || {};
+  const periodLabel = taskModels.map(function(task) {
+    return String(task.cls.period || "") + "限";
+  }).join("・");
+  const targetParts = [];
+  if (firstClass.grade) targetParts.push(String(firstClass.grade) + "年");
+  if (firstClass.unit) targetParts.push(String(firstClass.unit) + "組");
+  const targetText = targetParts.join(" ");
+  const teacherText = firstClass.teachers && firstClass.teachers.length > 0
+    ? formatTeachersText(firstClass.teachers)
+    : String(firstClass.teacherName || "");
+  const groupAriaLabel = periodLabel + " " + taskModels.length + "コマ連続授業 " +
+    String(firstClass.subjectName || "");
+
+  let html = '<article class="class-card consecutive-lesson-card today-consecutive-lesson-card" aria-label="' +
+    escapeHtml(groupAriaLabel) + '" data-presentation-key="' +
+    escapeHtml(presentationItem.presentationKey || "") + '">';
+  html += '  <div class="consecutive-lesson-heading">';
+  html += '    <span class="period-badge">' + escapeHtml(periodLabel) + '</span>';
+  html += '    <span class="consecutive-lesson-label">' + taskModels.length + 'コマ連続授業</span>';
+  html += '  </div>';
+  html += '  <div class="class-card-main">';
+  html += '    <div class="class-title">' + escapeHtml(firstClass.subjectName || "") + '</div>';
+  if (targetText) {
+    html += '    <div class="class-target">' + escapeHtml(targetText) + '</div>';
+  }
+  html += '  </div>';
+  if (teacherText) {
+    html += '  <div class="class-card-secondary">';
+    html += '    <div class="class-card-secondary-line">担当: ' + escapeHtml(teacherText) + '</div>';
+    html += '  </div>';
+  }
+  html += '  <div class="consecutive-lesson-members">';
+
+  taskModels.forEach(function(task) {
+    const cls = task.cls;
+    const displayInfo = getTodayTaskDisplayInfo(task);
+    const activeClass = !!(selectedClass && task.sidebarKey === getSidebarCardKey(selectedClass));
+    const sessionLabel = cls.sessionNumber
+      ? "第" + String(cls.sessionNumber) + "回"
+      : "回数未設定";
+    const actionContext = String(cls.period || "") + "限 " + sessionLabel;
+    const noAbsenceDisabledAttribute = task.sidebarStatus.disableNoAbsenceQuickSave
+      ? " disabled"
+      : "";
+    const noAbsenceButtonTitle = task.sidebarStatus.noAbsenceDisabledReason ||
+      "この授業を欠席者・遅刻・公欠なし（全員出席）として保存します。";
+
+    html += '    <section class="consecutive-lesson-member' + (activeClass ? ' active' : '') +
+      '" aria-label="' + escapeHtml(actionContext) + '">';
+    html += '      <div class="consecutive-lesson-member-header">';
+    html += '        <div class="consecutive-lesson-member-meta">';
+    html += '          <strong>' + escapeHtml(String(cls.period || "")) + '限</strong>';
+    html += '          <span>' + escapeHtml(sessionLabel) + '</span>';
+    html += '        </div>';
+    html += '        <div class="class-card-labels">';
+    if (activeClass) {
+      html += '          <span class="class-selected-label">選択中</span>';
+    }
+    html += '          <span class="class-status ' + escapeHtml(displayInfo.statusClass) + '">' +
+      escapeHtml(displayInfo.statusLabel) + '</span>';
+    html += '        </div>';
+    html += '      </div>';
+
+    if (task.sidebarStatus.lastSavedInfo && task.sidebarStatus.lastSavedInfo.savedAtText) {
+      html += '      <div class="consecutive-lesson-member-note">最終保存: ' +
+        escapeHtml(task.sidebarStatus.lastSavedInfo.savedAtText) + '</div>';
+    }
+    if (task.sidebarStatus.statusNote) {
+      html += '      <div class="class-card-status-note">' +
+        escapeHtml(task.sidebarStatus.statusNote) + '</div>';
+    }
+
+    html += '      <div class="class-card-actions consecutive-lesson-member-actions">';
+    html += '        <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' +
+      escapeHtml(task.sidebarKey) + '" aria-label="' + escapeHtml(actionContext + "の出席を入力・確認") +
+      '" title="名簿を開いて出席を入力・確認します。">出席を入力・確認</button>';
+    html += '        <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' +
+      escapeHtml(task.sidebarKey) + '"' + noAbsenceDisabledAttribute + ' aria-label="' +
+      escapeHtml(actionContext + "を全員出席で完了") + '" title="' +
+      escapeHtml(noAbsenceButtonTitle) + '">全員出席で完了</button>';
+    html += '      </div>';
+    html += '    </section>';
+  });
+
+  html += '  </div>';
+  html += '</article>';
+
+  const container = document.createElement("div");
+  container.innerHTML = html;
+  const card = container.firstElementChild;
+  const taskBySidebarKey = Object.create(null);
+  taskModels.forEach(function(task) {
+    taskBySidebarKey[task.sidebarKey] = task;
+  });
+
+  card.querySelectorAll(".class-action-btn").forEach(function(button) {
+    button.addEventListener("click", function(event) {
+      event.stopPropagation();
+
+      const task = taskBySidebarKey[button.dataset.sidebarKey];
+      if (!task) return;
+
+      if (isDirty) {
+        const ok = window.confirm("保存されていない変更があります。授業を切り替えますか？");
+        if (!ok) return;
+      }
+
+      if (button.dataset.action === "no-absence") {
+        handleNoAbsenceSaveClick(task.cls);
+        return;
+      }
+
+      if (button.dataset.action === "input-absence") {
+        selectClass(task.cls);
+        focusAttendanceWorkspace();
+      }
+    });
+  });
+
+  return card;
+}
+
 function renderTodayDashboard() {
   const area = document.getElementById("classListArea");
   const isLoading = isClassListLoading;
   const taskModels = isLoading ? [] : buildTodayTaskViewModels();
-  const remainingTaskModels = sortTodayTaskModels(taskModels.filter(function(task) {
+  const remainingTaskModels = taskModels.filter(function(task) {
     return task.state !== "saved";
-  }), true);
-  const completedTaskModels = sortTodayTaskModels(taskModels.filter(function(task) {
+  });
+  const completedTaskModels = taskModels.filter(function(task) {
     return task.state === "saved";
-  }), false);
-  const orderedTaskModels = remainingTaskModels.concat(completedTaskModels);
+  });
+  const remainingPresentationItems = buildTodayConsecutivePresentationItems(remainingTaskModels, true);
+  const completedPresentationItems = buildTodayConsecutivePresentationItems(completedTaskModels, false);
+  const orderedTaskModels = remainingPresentationItems.concat(completedPresentationItems).reduce(function(result, item) {
+    return result.concat(item.taskModels);
+  }, []);
   const metrics = getTodayDashboardMetrics(taskModels);
 
-  // 既存カードとaction listenerを再利用し、業務状態・集計・順序はTask View Modelから渡す。
+  // single cardは既存DOMを再利用し、group cardもTask View Modelをsourceに描画する。
   renderClassListContent(orderedTaskModels);
 
   const overview = area.querySelector(".class-list-overview");
@@ -3501,18 +3689,23 @@ function renderTodayDashboard() {
       cardBySidebarKey[sidebarKey] = child;
     }
   });
-  const remainingCards = remainingTaskModels.map(function(task) {
-    return cardBySidebarKey[task.sidebarKey];
-  }).filter(function(card) {
-    return !!card;
-  });
-  const completedCards = completedTaskModels.map(function(task) {
-    return cardBySidebarKey[task.sidebarKey];
-  }).filter(function(card) {
-    return !!card;
-  });
+  function createPresentationCards(presentationItems) {
+    return presentationItems.map(function(item) {
+      if (item.type === "group") {
+        return createTodayConsecutiveLessonGroupCard(item);
+      }
+      const task = item.taskModels[0];
+      return task ? cardBySidebarKey[task.sidebarKey] : null;
+    }).filter(function(card) {
+      return !!card;
+    });
+  }
 
-  remainingCards.concat(completedCards).forEach(function(card) {
+  const remainingCards = createPresentationCards(remainingPresentationItems);
+  const completedCards = createPresentationCards(completedPresentationItems);
+
+  Object.keys(cardBySidebarKey).forEach(function(sidebarKey) {
+    const card = cardBySidebarKey[sidebarKey];
     card.remove();
   });
   if (overview) {
@@ -3585,8 +3778,18 @@ function renderTodayDashboard() {
     ? "保存状態の確認後に表示します。"
     : "完了した授業はありません。";
 
-  dashboard.appendChild(createTodayTaskSection("未処理", remainingCards, remainingEmptyText));
-  dashboard.appendChild(createTodayTaskSection("完了", completedCards, completedEmptyText));
+  dashboard.appendChild(createTodayTaskSection(
+    "未処理",
+    remainingCards,
+    remainingEmptyText,
+    remainingTaskModels.length
+  ));
+  dashboard.appendChild(createTodayTaskSection(
+    "完了",
+    completedCards,
+    completedEmptyText,
+    completedTaskModels.length
+  ));
 
   area.innerHTML = "";
   area.appendChild(dashboard);
