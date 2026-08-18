@@ -204,6 +204,25 @@
       cursor: pointer;
     }
 
+    .lesson-workspace.past-list-view,
+    .lesson-workspace.past-detail-view {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .lesson-workspace.past-list-view .lesson-list-panel,
+    .lesson-workspace.past-detail-view .attendance-input-panel {
+      width: 100%;
+    }
+
+    .lesson-workspace.past-list-view .attendance-input-panel,
+    .lesson-workspace.past-detail-view .lesson-list-panel {
+      display: none;
+    }
+
+    .lesson-workspace.past-detail-view .return-to-list-btn {
+      display: inline-flex;
+    }
+
     .lesson-mode-tools-label {
       margin-bottom: 8px;
       color: #667;
@@ -1578,6 +1597,7 @@
     const TEACHER_UNSAVED_DETAILS_LIMIT = 50;
 
     let currentMode = "today";
+    let pastWorkspaceView = "list";
     let classesCache = [];
     let isClassListLoading = false;
     let selectedClass = null;
@@ -1890,8 +1910,8 @@ function goHome() {
       );
     }
 
-    function focusTeacherSection(headingId, sectionSelector) {
-      if (!isNarrowTeacherLayout()) return;
+    function focusTeacherSection(headingId, sectionSelector, forceFocus) {
+      if (!forceFocus && !isNarrowTeacherLayout()) return;
 
       const heading = document.getElementById(headingId);
       const section = document.querySelector(sectionSelector);
@@ -1915,12 +1935,77 @@ function goHome() {
       });
     }
 
-    function focusAttendanceWorkspace() {
-      focusTeacherSection("attendanceInputHeading", ".attendance-input-panel");
+    function focusAttendanceWorkspace(forceFocus) {
+      focusTeacherSection("attendanceInputHeading", ".attendance-input-panel", forceFocus);
     }
 
-    function focusLessonList() {
-      focusTeacherSection("lessonListHeading", ".lesson-list-panel");
+    function focusLessonList(forceFocus) {
+      focusTeacherSection("lessonListHeading", ".lesson-list-panel", forceFocus);
+    }
+
+    function updatePastWorkspaceViewUI() {
+      const workspace = document.querySelector(".lesson-workspace");
+      const lessonListPanel = document.querySelector(".lesson-list-panel");
+      const attendanceInputPanel = document.querySelector(".attendance-input-panel");
+      const isPastMode = currentMode === "past";
+      const isPastDetailView = isPastMode && pastWorkspaceView === "detail";
+
+      if (workspace) {
+        workspace.classList.toggle("past-list-view", isPastMode && !isPastDetailView);
+        workspace.classList.toggle("past-detail-view", isPastDetailView);
+      }
+      if (lessonListPanel) lessonListPanel.hidden = isPastDetailView;
+      if (attendanceInputPanel) attendanceInputPanel.hidden = isPastMode && !isPastDetailView;
+    }
+
+    function setPastWorkspaceView(view, shouldFocus) {
+      pastWorkspaceView = view === "detail" ? "detail" : "list";
+      updatePastWorkspaceViewUI();
+
+      if (currentMode !== "past" || !shouldFocus) return;
+      if (pastWorkspaceView === "detail") {
+        focusAttendanceWorkspace(true);
+      } else {
+        focusLessonList(true);
+      }
+    }
+
+    function returnToPastLessonList() {
+      if (currentMode !== "past") {
+        focusLessonList();
+        return;
+      }
+
+      if (isDirty) {
+        const ok = window.confirm("保存されていない変更があります。授業一覧へ戻りますか？");
+        if (!ok) return;
+      }
+
+      detailRequestToken++;
+      groupListRequestToken++;
+      riskRequestToken++;
+      selectedClass = null;
+      studentsCache = [];
+      attendanceState = {};
+      riskMapState = {};
+      isRiskLoading = false;
+      riskVisible = false;
+      isDirty = false;
+
+      updateGroupSelector(null);
+      setPastWorkspaceView("list", false);
+      renderClassList();
+      document.getElementById("selectedClassInfo").innerHTML =
+        "過去授業カードから操作を選択してください。";
+      document.getElementById("studentArea").innerHTML =
+        '<div class="empty-box">過去授業を修正する場合は「出席を入力・確認」から名簿を開いてください。</div>';
+      document.getElementById("summaryArea").innerHTML = "";
+      document.getElementById("sortNote").textContent = "";
+      renderLastSavedInfoBar(null);
+      setSaveStateText("");
+      setTopActionButtonsDisabled(true);
+      clearMessage();
+      focusLessonList(true);
     }
 
     function updateModeUI() {
@@ -1940,6 +2025,7 @@ function goHome() {
       lessonListHeading.textContent = isTodayMode ? "今日の出席管理" : "授業一覧";
       document.getElementById("pastSearchBox").style.display = currentMode === "past" ? "block" : "none";
       renderPageSubText();
+      updatePastWorkspaceViewUI();
     }
 
         function closeTeacherUnsavedDetails() {
@@ -2477,6 +2563,7 @@ function patchTeacherUnsavedLocalAfterSave(classId, dateStr, period, forceDecrem
       };
 
       currentMode = "past";
+      pastWorkspaceView = "list";
       updateModeUI();
       clearMessage();
 
@@ -4085,6 +4172,10 @@ function renderSelectedClassInfo() {
   renderSelectedClassInfo();
   clearMessage();
 
+  if (currentMode === "past") {
+    setPastWorkspaceView("detail", true);
+  }
+
   if (!requiresGroupSelection(cls)) {
     updateGroupSelector(cls);
     selectedGroupByClassCache[cls.classId] = "";
@@ -4566,6 +4657,7 @@ function isExperimentSubject(cls) {
       debugLog("loadPastClassesByDate targetDate", targetDate);
       debugLog("loadPastClassesByDate attempt", attempt);
 
+      setPastWorkspaceView("list", false);
       selectedClass = null;
       classesCache = [];
       isClassListLoading = true;
@@ -4573,6 +4665,7 @@ function isExperimentSubject(cls) {
       attendanceState = {};
       riskMapState = {};
       isRiskLoading = false;
+      isDirty = false;
 
       savedSessionKeys = {};
       studentsByClassCache = {};
@@ -4735,6 +4828,7 @@ function isExperimentSubject(cls) {
         if (!ok) return;
       }
       currentMode = "past";
+      pastWorkspaceView = "list";
       updateModeUI();
       clearMessage();
       
@@ -4787,7 +4881,7 @@ function isExperimentSubject(cls) {
   }
 
   if (returnToLessonListButton) {
-    returnToLessonListButton.addEventListener("click", focusLessonList);
+    returnToLessonListButton.addEventListener("click", returnToPastLessonList);
   }
 
   const groupSelect = document.getElementById("groupSelect");
