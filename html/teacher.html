@@ -551,6 +551,73 @@
       box-shadow: 0 0 0 2px rgba(208, 154, 27, 0.14);
     }
 
+    .consecutive-lesson-card {
+      border-left: 4px solid #7896c8;
+      background: #fbfcff;
+    }
+
+    .consecutive-lesson-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .consecutive-lesson-label {
+      color: #40577d;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .consecutive-lesson-members {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .consecutive-lesson-member {
+      padding-top: 10px;
+      border-top: 1px solid #d9e0ee;
+    }
+
+    .consecutive-lesson-member.active {
+      margin: 0 -6px;
+      padding: 10px 6px 0;
+      border-radius: 8px;
+      background: #eef4ff;
+    }
+
+    .consecutive-lesson-member-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .consecutive-lesson-member-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: #4a5568;
+      font-size: 13px;
+    }
+
+    .consecutive-lesson-member-actions {
+      margin-top: 8px;
+    }
+
+    .consecutive-lesson-member-note {
+      margin-top: 6px;
+      color: #667;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
     .class-card-header {
       display: flex;
       justify-content: space-between;
@@ -2758,6 +2825,117 @@ function buildQuickButtonLabel(cls, sameSubjectInPeriod) {
     });
   }
 
+  function normalizeConsecutiveIdentityValue(value) {
+    return value === null || value === undefined ? "" : String(value).trim();
+  }
+
+  function getConsecutiveNumericValue(value) {
+    const normalized = normalizeConsecutiveIdentityValue(value);
+    if (!normalized) return null;
+
+    const numericValue = Number(normalized);
+    return Number.isFinite(numericValue) ? numericValue : null;
+  }
+
+  function getConsecutiveLessonTeacherSignature(cls) {
+    const teachers = Array.isArray(cls && cls.teachers) && cls.teachers.length > 0
+      ? cls.teachers
+      : [{
+        teacherEmail: cls && cls.teacherEmail,
+        teacherName: cls && cls.teacherName,
+        roleType: cls && cls.roleType
+      }];
+
+    const teacherSignatures = teachers.map(function(teacher) {
+      return JSON.stringify([
+        normalizeConsecutiveIdentityValue(teacher && (teacher.teacherEmail || teacher.email)),
+        normalizeConsecutiveIdentityValue(teacher && (teacher.teacherName || teacher.name)),
+        normalizeConsecutiveIdentityValue(teacher && teacher.roleType)
+      ]);
+    }).filter(function(signature) {
+      return signature !== '["","",""]';
+    }).sort();
+
+    return teacherSignatures.join("|");
+  }
+
+  function canGroupConsecutiveLessons(previousClass, nextClass) {
+    if (!previousClass || !nextClass) return false;
+    if (
+      isExperimentSubject(previousClass) ||
+      isExperimentSubject(nextClass) ||
+      requiresGroupSelection(previousClass) ||
+      requiresGroupSelection(nextClass)
+    ) {
+      return false;
+    }
+
+    const previousDate = normalizeConsecutiveIdentityValue(previousClass.date);
+    const nextDate = normalizeConsecutiveIdentityValue(nextClass.date);
+    const previousClassId = normalizeConsecutiveIdentityValue(previousClass.classId);
+    const nextClassId = normalizeConsecutiveIdentityValue(nextClass.classId);
+    const previousSubjectId = normalizeConsecutiveIdentityValue(previousClass.subjectId);
+    const nextSubjectId = normalizeConsecutiveIdentityValue(nextClass.subjectId);
+
+    if (!previousDate || previousDate !== nextDate) return false;
+    if (!previousClassId || previousClassId !== nextClassId) return false;
+    if (!previousSubjectId || previousSubjectId !== nextSubjectId) return false;
+
+    const optionalIdentityFields = ["grade", "unit", "curriculumUnit"];
+    const optionalIdentityMatches = optionalIdentityFields.every(function(fieldName) {
+      return normalizeConsecutiveIdentityValue(previousClass[fieldName]) ===
+        normalizeConsecutiveIdentityValue(nextClass[fieldName]);
+    });
+    if (!optionalIdentityMatches) return false;
+
+    if (
+      getConsecutiveLessonTeacherSignature(previousClass) !==
+      getConsecutiveLessonTeacherSignature(nextClass)
+    ) {
+      return false;
+    }
+
+    const previousPeriod = getConsecutiveNumericValue(previousClass.period);
+    const nextPeriod = getConsecutiveNumericValue(nextClass.period);
+    if (previousPeriod === null || nextPeriod !== previousPeriod + 1) return false;
+
+    const previousSessionNumber = getConsecutiveNumericValue(previousClass.sessionNumber);
+    const nextSessionNumber = getConsecutiveNumericValue(nextClass.sessionNumber);
+    if (previousSessionNumber === null || nextSessionNumber !== previousSessionNumber + 1) return false;
+
+    return true;
+  }
+
+  function buildConsecutiveLessonPresentationItems(classes) {
+    const presentationItems = [];
+
+    (classes || []).forEach(function(cls) {
+      const currentItem = presentationItems[presentationItems.length - 1];
+      const previousMember = currentItem && currentItem.members[currentItem.members.length - 1];
+
+      if (previousMember && canGroupConsecutiveLessons(previousMember, cls)) {
+        currentItem.members.push(cls);
+        currentItem.type = "group";
+        currentItem.lastPeriod = getConsecutiveNumericValue(cls.period);
+        currentItem.presentationKey = "consecutive:" + currentItem.members.map(function(member) {
+          return getSidebarCardKey(member);
+        }).join("|");
+        return;
+      }
+
+      const period = getConsecutiveNumericValue(cls && cls.period);
+      presentationItems.push({
+        type: "single",
+        members: [cls],
+        firstPeriod: period,
+        lastPeriod: period,
+        presentationKey: "single:" + getSidebarCardKey(cls)
+      });
+    });
+
+    return presentationItems;
+  }
+
   function renderPastPeriodFilter(area) {
     const periodMap = {};
     (classesCache || []).forEach(function(cls) {
@@ -3398,6 +3576,113 @@ function renderTodayDashboard() {
   area.appendChild(dashboard);
 }
 
+function renderPastConsecutiveLessonGroupHtml(presentationItem, sidebarItemByKey) {
+  const members = presentationItem.members || [];
+  const firstClass = members[0] || {};
+  const periodLabel = members.map(function(member) {
+    return String(member.period || "") + "限";
+  }).join("・");
+  const targetParts = [];
+  if (firstClass.grade) targetParts.push(String(firstClass.grade) + "年");
+  if (firstClass.unit) targetParts.push(String(firstClass.unit) + "組");
+  const targetText = targetParts.join(" ");
+  const teacherText = firstClass.teachers && firstClass.teachers.length > 0
+    ? formatTeachersText(firstClass.teachers)
+    : String(firstClass.teacherName || "");
+  const groupAriaLabel = periodLabel + " " + members.length + "コマ連続授業 " +
+    String(firstClass.subjectName || "");
+
+  let html = '<article class="class-card consecutive-lesson-card" aria-label="' +
+    escapeHtml(groupAriaLabel) + '" data-presentation-key="' +
+    escapeHtml(presentationItem.presentationKey || "") + '">';
+  html += '  <div class="consecutive-lesson-heading">';
+  html += '    <span class="period-badge">' + escapeHtml(periodLabel) + '</span>';
+  html += '    <span class="consecutive-lesson-label">' + members.length + 'コマ連続授業</span>';
+  html += '  </div>';
+  html += '  <div class="class-card-main">';
+  html += '    <div class="class-title">' + escapeHtml(firstClass.subjectName || "") + '</div>';
+  if (targetText) {
+    html += '    <div class="class-target">' + escapeHtml(targetText) + '</div>';
+  }
+  html += '  </div>';
+  html += '  <div class="class-card-secondary">';
+  if (firstClass.date) {
+    html += '    <div class="class-card-secondary-line">日付: ' + escapeHtml(firstClass.date) + '</div>';
+  }
+  if (teacherText) {
+    html += '    <div class="class-card-secondary-line">担当: ' + escapeHtml(teacherText) + '</div>';
+  }
+  html += '  </div>';
+  html += '  <div class="consecutive-lesson-members">';
+
+  members.forEach(function(member) {
+    const sidebarKey = getSidebarCardKey(member);
+    const item = sidebarItemByKey[sidebarKey];
+    if (!item) return;
+
+    const sidebarStatus = item.sidebarStatus;
+    const activeClass = !!(selectedClass && sidebarKey === getSidebarCardKey(selectedClass));
+    const isEditing = activeClass && isDirty;
+    let statusLabel = sidebarStatus.label;
+    if (statusLabel === "未保存") {
+      statusLabel = "未入力";
+    } else if (statusLabel === "確認中...") {
+      statusLabel = "確認中";
+    }
+    if (isEditing) statusLabel = "入力途中（未保存）";
+
+    const sessionLabel = member.sessionNumber
+      ? "第" + String(member.sessionNumber) + "回"
+      : "回数未設定";
+    const actionContext = String(member.period || "") + "限 " + sessionLabel;
+    const noAbsenceDisabledAttribute = sidebarStatus.disableNoAbsenceQuickSave
+      ? " disabled"
+      : "";
+    const noAbsenceButtonTitle = sidebarStatus.noAbsenceDisabledReason ||
+      "この授業を欠席者・遅刻・公欠なし（全員出席）として保存します。";
+
+    html += '    <section class="consecutive-lesson-member' + (activeClass ? ' active' : '') +
+      '" aria-label="' + escapeHtml(actionContext) + '">';
+    html += '      <div class="consecutive-lesson-member-header">';
+    html += '        <div class="consecutive-lesson-member-meta">';
+    html += '          <strong>' + escapeHtml(String(member.period || "")) + '限</strong>';
+    html += '          <span>' + escapeHtml(sessionLabel) + '</span>';
+    html += '        </div>';
+    html += '        <div class="class-card-labels">';
+    if (activeClass) {
+      html += '          <span class="class-selected-label">選択中</span>';
+    }
+    html += '          <span class="class-status ' + escapeHtml(item.stateName) +
+      (isEditing ? ' editing' : '') + '">' + escapeHtml(statusLabel) + '</span>';
+    html += '        </div>';
+    html += '      </div>';
+
+    if (sidebarStatus.lastSavedInfo && sidebarStatus.lastSavedInfo.savedAtText) {
+      html += '      <div class="consecutive-lesson-member-note">最終保存: ' +
+        escapeHtml(sidebarStatus.lastSavedInfo.savedAtText) + '</div>';
+    }
+    if (sidebarStatus.statusNote) {
+      html += '      <div class="class-card-status-note">' +
+        escapeHtml(sidebarStatus.statusNote) + '</div>';
+    }
+
+    html += '      <div class="class-card-actions consecutive-lesson-member-actions">';
+    html += '        <button type="button" class="class-action-btn input-absence" data-action="input-absence" data-sidebar-key="' +
+      escapeHtml(sidebarKey) + '" aria-label="' + escapeHtml(actionContext + "の出席を入力・確認") +
+      '" title="名簿を開いて出席を入力・確認します。">出席を入力・確認</button>';
+    html += '        <button type="button" class="class-action-btn no-absence" data-action="no-absence" data-sidebar-key="' +
+      escapeHtml(sidebarKey) + '"' + noAbsenceDisabledAttribute + ' aria-label="' +
+      escapeHtml(actionContext + "を全員出席で完了") + '" title="' +
+      escapeHtml(noAbsenceButtonTitle) + '">全員出席で完了</button>';
+    html += '      </div>';
+    html += '    </section>';
+  });
+
+  html += '  </div>';
+  html += '</article>';
+  return html;
+}
+
 function renderClassListContent(todayTaskModels) {
   const area = document.getElementById("classListArea");
   const quickNav = document.getElementById("quickClassNav");
@@ -3522,6 +3807,25 @@ function renderClassListContent(todayTaskModels) {
     };
   });
 
+  const sidebarItemByKey = {};
+  sidebarItems.forEach(function(item) {
+    sidebarItemByKey[getSidebarCardKey(item.cls)] = item;
+  });
+
+  const consecutiveGroupByFirstKey = {};
+  const consecutiveGroupedMemberKeys = {};
+  if (isPastMode && !pastPeriodFilter) {
+    buildConsecutiveLessonPresentationItems(sidebarClasses).forEach(function(presentationItem) {
+      if (presentationItem.type !== "group") return;
+
+      const firstKey = getSidebarCardKey(presentationItem.members[0]);
+      consecutiveGroupByFirstKey[firstKey] = presentationItem;
+      presentationItem.members.slice(1).forEach(function(member) {
+        consecutiveGroupedMemberKeys[getSidebarCardKey(member)] = true;
+      });
+    });
+  }
+
   const overviewTitle = isPastMode && pastPeriodFilter
     ? "表示中の授業"
     : (currentMode === "today" ? "本日の担当授業" : "検索日の担当授業");
@@ -3544,6 +3848,13 @@ function renderClassListContent(todayTaskModels) {
   sidebarItems.forEach(function(item) {
     const cls = item.cls;
     const key = getSidebarCardKey(cls);
+    const consecutiveGroup = consecutiveGroupByFirstKey[key];
+    if (consecutiveGroup) {
+      html += renderPastConsecutiveLessonGroupHtml(consecutiveGroup, sidebarItemByKey);
+      return;
+    }
+    if (consecutiveGroupedMemberKeys[key]) return;
+
     const activeClass = !!(selectedClass && key === getSidebarCardKey(selectedClass));
     const isExperiment = isExperimentSubject(cls);
     const isEditing = item.taskModel ? item.taskModel.isDirty : (activeClass && isDirty);
