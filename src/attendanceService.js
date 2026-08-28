@@ -128,6 +128,13 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
       savedModeLabel
     ]);
 
+    tryInvalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(
+      targetClassId,
+      targetDate,
+      targetPeriod,
+      actionType
+    );
+
     invalidateAttendanceCaches_(targetClassId, targetDate, targetPeriod);
 
     const currentUser = getCurrentUserContext();
@@ -135,21 +142,25 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
       ? normalizeString_(currentUser.teacherId)
       : "";
 
+    const summaryBaseDate = new Date();
+    summaryBaseDate.setHours(0, 0, 0, 0);
+    summaryBaseDate.setDate(summaryBaseDate.getDate() - 1);
+
+    const summaryEndYmd = formatDateToYmd(summaryBaseDate);
+    const summaryStartYmd = formatDateToYmd(getTeacherUnsavedStartDate_(summaryBaseDate));
+    const teacherUnsavedCacheKeys = [
+      "savedSessionKeySetByRange__" + summaryStartYmd + "__" + summaryEndYmd,
+      "savedSessionKeySetByRange__v2__" + summaryStartYmd + "__" + summaryEndYmd,
+      "savedSessionKeySetByRange__v4__" + summaryStartYmd + "__" + summaryEndYmd
+    ];
+
     if (currentTeacherId) {
-      const summaryBaseDate = new Date();
-      summaryBaseDate.setHours(0, 0, 0, 0);
-      summaryBaseDate.setDate(summaryBaseDate.getDate() - 1);
-
-      const summaryEndYmd = formatDateToYmd(summaryBaseDate);
-      const summaryStartYmd = formatDateToYmd(getTeacherUnsavedStartDate_(summaryBaseDate));
-
-      removeScriptCacheKeys_([
+      teacherUnsavedCacheKeys.push(
         buildTeacherUnsavedSummaryCacheKey_(currentTeacherId, summaryEndYmd),
-        buildTeacherUnsavedDetailsCacheKey_(currentTeacherId, summaryEndYmd),
-        "savedSessionKeySetByRange__" + summaryStartYmd + "__" + summaryEndYmd,
-        "savedSessionKeySetByRange__v2__" + summaryStartYmd + "__" + summaryEndYmd
-      ]);
+        buildTeacherUnsavedDetailsCacheKey_(currentTeacherId, summaryEndYmd)
+      );
     }
+    removeScriptCacheKeys_(teacherUnsavedCacheKeys);
 
     const lastSavedInfo = {
       teacherEmail: currentUserEmail,
@@ -388,6 +399,13 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
   targetGroup
 ]);
 
+    tryInvalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(
+      targetClassId,
+      targetDate,
+      targetPeriod,
+      actionType
+    );
+
     relatedClassIds.forEach(function(classIdToClear) {
       invalidateAttendanceCaches_(classIdToClear, targetDate, targetPeriod);
     });
@@ -396,20 +414,25 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
       ? normalizeString_(currentUser.teacherId)
       : '';
 
+    const summaryBaseDate = new Date();
+    summaryBaseDate.setHours(0, 0, 0, 0);
+    summaryBaseDate.setDate(summaryBaseDate.getDate() - 1);
+
+    const summaryEndYmd = formatDateToYmd(summaryBaseDate);
+    const summaryStartYmd = formatDateToYmd(getTeacherUnsavedStartDate_(summaryBaseDate));
+    const teacherUnsavedCacheKeys = [
+      'savedSessionKeySetByRange__' + summaryStartYmd + '__' + summaryEndYmd,
+      'savedSessionKeySetByRange__v2__' + summaryStartYmd + '__' + summaryEndYmd,
+      'savedSessionKeySetByRange__v4__' + summaryStartYmd + '__' + summaryEndYmd
+    ];
+
     if (currentTeacherId) {
-      const summaryBaseDate = new Date();
-      summaryBaseDate.setHours(0, 0, 0, 0);
-      summaryBaseDate.setDate(summaryBaseDate.getDate() - 1);
-
-      const summaryEndYmd = formatDateToYmd(summaryBaseDate);
-      const summaryStartYmd = formatDateToYmd(getTeacherUnsavedStartDate_(summaryBaseDate));
-
-      removeScriptCacheKeys_([
+      teacherUnsavedCacheKeys.push(
         buildTeacherUnsavedSummaryCacheKey_(currentTeacherId, summaryEndYmd),
-        buildTeacherUnsavedDetailsCacheKey_(currentTeacherId, summaryEndYmd),
-        'savedSessionKeySetByRange__' + summaryStartYmd + '__' + summaryEndYmd
-      ]);
+        buildTeacherUnsavedDetailsCacheKey_(currentTeacherId, summaryEndYmd)
+      );
     }
+    removeScriptCacheKeys_(teacherUnsavedCacheKeys);
 
     const lastSavedInfo = {
       teacherEmail: currentUserEmail,
@@ -804,6 +827,41 @@ function appendAttendanceSessionLog_(sheet, baseRow) {
     row.push("");
   }
   sheet.appendRow(row.slice(0, headerCount));
+}
+
+function tryInvalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(
+  classId,
+  date,
+  period,
+  actionType
+) {
+  try {
+    return invalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(
+      classId,
+      date,
+      period
+    );
+  } catch (error) {
+    Logger.log(JSON.stringify({
+      ok: false,
+      event: 'teacher-unsaved-fast-cache-invalidation-failed',
+      warning: true,
+      attendanceSaveSucceeded: true,
+      actionType: actionType || '',
+      classId: String(classId || ''),
+      date: formatDateToYmd(date),
+      period: String(period == null ? '' : period),
+      errorName: error && error.name ? String(error.name) : '',
+      errorMessage: error && error.message ? String(error.message) : String(error),
+      errorStack: error && error.stack ? String(error.stack) : ''
+    }));
+
+    return {
+      ok: false,
+      warning: true,
+      errorMessage: error && error.message ? String(error.message) : String(error)
+    };
+  }
 }
 
 function isSequentialRows_(rowNumbers) {

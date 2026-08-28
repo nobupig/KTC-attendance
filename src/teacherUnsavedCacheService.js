@@ -7,6 +7,7 @@ const TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HANDLER_ =
   'runTeacherUnsavedSummaryCacheRebuildTrigger';
 const TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HOURS_ = Object.freeze([6, 12, 17, 21]);
 const TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_TIME_ZONE_ = 'Asia/Tokyo';
+const TEACHER_UNSAVED_CACHE_REBUILD_MAX_ATTEMPTS_ = 2;
 
 const TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_ = Object.freeze([
   'snapshotId',
@@ -75,19 +76,51 @@ function rebuildTeacherUnsavedSummaryCache() {
   }
 
   const startedAt = Date.now();
+  let conflictCount = 0;
 
-  try {
-    const snapshot = buildTeacherUnsavedCacheSnapshot_();
-    publishTeacherUnsavedCacheSnapshot_(snapshot);
-
-    return buildTeacherUnsavedCacheBuildResult_(snapshot, Date.now() - startedAt, true);
-  } catch (error) {
+  for (let attempt = 1; attempt <= TEACHER_UNSAVED_CACHE_REBUILD_MAX_ATTEMPTS_; attempt++) {
     try {
-      markTeacherUnsavedCachePublishError_(error);
-    } catch (markError) {
-      Logger.log('Teacher unsaved cache error status update failed: ' + markError);
+      const snapshot = buildTeacherUnsavedCacheSnapshot_();
+      publishTeacherUnsavedCacheSnapshot_(snapshot);
+
+      const result = buildTeacherUnsavedCacheBuildResult_(
+        snapshot,
+        Date.now() - startedAt,
+        true
+      );
+      result.attemptCount = attempt;
+      result.conflictRetryCount = conflictCount;
+      return result;
+    } catch (error) {
+      if (isTeacherUnsavedCachePublishConflict_(error)) {
+        conflictCount++;
+        Logger.log(JSON.stringify({
+          ok: false,
+          status: 'retryable-conflict',
+          attempt: attempt,
+          maxAttempts: TEACHER_UNSAVED_CACHE_REBUILD_MAX_ATTEMPTS_,
+          conflictReason: error.reason || '',
+          expectedAttendanceSessionsRowCount: error.expectedRowCount,
+          actualAttendanceSessionsRowCount: error.actualRowCount,
+          willRetry: attempt < TEACHER_UNSAVED_CACHE_REBUILD_MAX_ATTEMPTS_
+        }));
+
+        if (attempt < TEACHER_UNSAVED_CACHE_REBUILD_MAX_ATTEMPTS_) {
+          continue;
+        }
+
+        error.attemptCount = attempt;
+        error.conflictRetryCount = conflictCount;
+        throw error;
+      }
+
+      try {
+        markTeacherUnsavedCachePublishError_(error);
+      } catch (markError) {
+        Logger.log('Teacher unsaved cache error status update failed: ' + markError);
+      }
+      throw error;
     }
-    throw error;
   }
 }
 
@@ -100,6 +133,14 @@ function runTeacherUnsavedSummaryCacheRebuildTrigger() {
     Logger.log(JSON.stringify({
       ok: false,
       handlerFunction: TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HANDLER_,
+      status: isTeacherUnsavedCachePublishConflict_(error)
+        ? 'retryable-conflict'
+        : 'error',
+      retryable: isTeacherUnsavedCachePublishConflict_(error),
+      attemptCount: error && error.attemptCount ? error.attemptCount : null,
+      conflictRetryCount: error && error.conflictRetryCount
+        ? error.conflictRetryCount
+        : 0,
       errorName: error && error.name ? String(error.name) : '',
       errorMessage: error && error.message ? String(error.message) : String(error),
       errorStack: error && error.stack ? String(error.stack) : ''
@@ -243,6 +284,18 @@ function getTeacherUnsavedSummaryFastContext_() {
         'stale',
         row,
         'サマリーキャッシュが当日分ではありません。'
+      ),
+      validation: validation,
+      row: row
+    };
+  }
+
+  if (row.status === 'stale') {
+    return {
+      result: buildTeacherUnsavedFastSummaryFailureFromRow_(
+        'stale',
+        row,
+        row.errorMessage || '保存後にキャッシュが無効化され、次回再構築を待っています。'
       ),
       validation: validation,
       row: row
@@ -536,6 +589,7 @@ function debugLogCompareTeacherUnsavedCacheForCurrentUser() {
 
 function buildTeacherUnsavedCacheSnapshot_() {
   const checkedAt = new Date();
+  const attendanceSessionsRowCount = getTeacherUnsavedAttendanceSessionsRowCount_();
   const dateContext = getTeacherUnsavedCacheDateContext_(checkedAt);
   const snapshotId = buildTeacherUnsavedSnapshotId_(checkedAt);
   const warnings = [];
@@ -674,6 +728,7 @@ function buildTeacherUnsavedCacheSnapshot_() {
     startYmd: dateContext.startYmd,
     endYmd: dateContext.endYmd,
     checkedAt: checkedAt,
+    attendanceSessionsRowCount: attendanceSessionsRowCount,
     summaryRows: summaryRows,
     detailRows: detailRows,
     teacherCount: teacherIndex.teachers.length,
@@ -977,16 +1032,184 @@ function buildTeacherUnsavedSavedKeySet_(data, startYmd, endYmd) {
   return keySet;
 }
 
+function getTeacherUnsavedAttendanceSessionsRowCount_() {
+  const sheet = getOperationSpreadsheet()
+    .getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
+  if (!sheet) {
+    throw new Error('attendanceSessions シートが見つかりません。');
+  }
+  return Math.max(sheet.getLastRow() - 1, 0);
+}
+
+function buildTeacherUnsavedCachePublishConflict_(expectedRowCount, actualRowCount) {
+  const error = new Error(
+    'キャッシュ計算中に attendanceSessions が更新されました。' +
+    ' expected=' + expectedRowCount + ' actual=' + actualRowCount
+  );
+  error.name = 'TeacherUnsavedCachePublishConflictError';
+  error.retryable = true;
+  error.reason = 'attendance-sessions-row-count-changed';
+  error.expectedRowCount = expectedRowCount;
+  error.actualRowCount = actualRowCount;
+  return error;
+}
+
+function isTeacherUnsavedCachePublishConflict_(error) {
+  return !!(
+    error &&
+    error.name === 'TeacherUnsavedCachePublishConflictError' &&
+    error.retryable === true
+  );
+}
+
+function invalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(classId, date, period) {
+  const lock = LockService.getScriptLock();
+  if (!lock.hasLock()) {
+    throw new Error('Fastキャッシュ無効化には保存処理のScriptLockが必要です。');
+  }
+
+  const targetClassId = normalizeString_(classId);
+  const targetDate = formatDateToYmd(date);
+  const targetPeriod = normalizeString_(period);
+  if (!targetClassId || !targetDate || !targetPeriod) {
+    return { ok: true, matchedDetailCount: 0, invalidatedTeacherCount: 0 };
+  }
+
+  const dateContext = getTeacherUnsavedCacheDateContext_(new Date());
+  if (targetDate < dateContext.startYmd || targetDate > dateContext.endYmd) {
+    return { ok: true, matchedDetailCount: 0, invalidatedTeacherCount: 0 };
+  }
+
+  const todayYmd = dateContext.cacheDate;
+  const directKey = [targetClassId, targetDate, targetPeriod].join('__');
+  const experimentKey = buildExperimentSessionKeyForTimetable_(
+    targetClassId,
+    targetDate,
+    targetPeriod
+  );
+  const targetKeys = [directKey];
+  if (experimentKey && experimentKey !== directKey) targetKeys.push(experimentKey);
+
+  const validation = validateTeacherUnsavedCacheSheets_();
+  if (!validation.ok) {
+    throw new Error(buildTeacherUnsavedCacheValidationError_(validation));
+  }
+
+  const detailSheet = validation.detail.sheet;
+  const detailRowCount = Math.max(detailSheet.getLastRow() - 1, 0);
+  if (detailRowCount === 0) {
+    return { ok: true, matchedDetailCount: 0, invalidatedTeacherCount: 0 };
+  }
+
+  const detailKeyStartColumn = TEACHER_UNSAVED_DETAIL_CACHE_HEADERS_.indexOf('displayKey') + 1;
+  const detailKeyColumnCount = 2;
+  const detailKeyRange = detailSheet.getRange(
+    2,
+    detailKeyStartColumn,
+    detailRowCount,
+    detailKeyColumnCount
+  );
+  const matchedDetailRows = {};
+
+  targetKeys.forEach(function(targetKey) {
+    detailKeyRange
+      .createTextFinder(targetKey)
+      .matchEntireCell(true)
+      .useRegularExpression(false)
+      .findAll()
+      .forEach(function(cell) {
+        matchedDetailRows[cell.getRow()] = true;
+      });
+  });
+
+  const affectedSnapshotByTeacherId = {};
+  Object.keys(matchedDetailRows).forEach(function(rowNumberText) {
+    const rowNumber = Number(rowNumberText);
+    const values = detailSheet
+      .getRange(rowNumber, 1, 1, TEACHER_UNSAVED_DETAIL_CACHE_HEADERS_.length)
+      .getValues()[0];
+    const detail = buildTeacherUnsavedDetailObject_(values);
+    if (detail.cacheDate !== todayYmd || !detail.teacherId || !detail.snapshotId) return;
+    affectedSnapshotByTeacherId[detail.teacherId] = detail.snapshotId;
+  });
+
+  const affectedTeacherIds = Object.keys(affectedSnapshotByTeacherId);
+  if (affectedTeacherIds.length === 0) {
+    return {
+      ok: true,
+      matchedDetailCount: Object.keys(matchedDetailRows).length,
+      invalidatedTeacherCount: 0
+    };
+  }
+
+  const summarySheet = validation.summary.sheet;
+  const summaryRowCount = Math.max(summarySheet.getLastRow() - 1, 0);
+  if (summaryRowCount === 0) {
+    return {
+      ok: true,
+      matchedDetailCount: Object.keys(matchedDetailRows).length,
+      invalidatedTeacherCount: 0
+    };
+  }
+
+  const summaryValues = summarySheet
+    .getRange(2, 1, summaryRowCount, TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.length)
+    .getValues();
+  const statusColumn = TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.indexOf('status') + 1;
+  const errorColumn = TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.indexOf('errorMessage') + 1;
+  const invalidationMessage =
+    '出席保存後にFastキャッシュを無効化しました。次回rebuildを待っています。';
+  const rowsToInvalidate = [];
+
+  summaryValues.forEach(function(values, index) {
+    const summary = buildTeacherUnsavedSummaryObject_(values);
+    if (
+      summary.cacheDate === todayYmd &&
+      summary.status === 'ready' &&
+      affectedSnapshotByTeacherId[summary.teacherId] === summary.snapshotId
+    ) {
+      rowsToInvalidate.push(index + 2);
+    }
+  });
+
+  rowsToInvalidate.forEach(function(rowNumber) {
+    summarySheet.getRange(rowNumber, statusColumn).setValue('stale');
+    summarySheet.getRange(rowNumber, errorColumn).setValue(invalidationMessage);
+  });
+  if (rowsToInvalidate.length > 0) SpreadsheetApp.flush();
+
+  return {
+    ok: true,
+    matchedDetailCount: Object.keys(matchedDetailRows).length,
+    invalidatedTeacherCount: rowsToInvalidate.length,
+    targetKeys: targetKeys
+  };
+}
+
 function publishTeacherUnsavedCacheSnapshot_(snapshot) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) {
-    throw new Error('キャッシュ公開用ロックを取得できませんでした。');
+    const lockError = buildTeacherUnsavedCachePublishConflict_(
+      snapshot.attendanceSessionsRowCount,
+      null
+    );
+    lockError.reason = 'publish-lock-timeout';
+    throw lockError;
   }
 
   try {
     const validation = validateTeacherUnsavedCacheSheets_();
     if (!validation.ok) {
       throw new Error(buildTeacherUnsavedCacheValidationError_(validation));
+    }
+
+    const currentAttendanceSessionsRowCount =
+      getTeacherUnsavedAttendanceSessionsRowCount_();
+    if (currentAttendanceSessionsRowCount !== snapshot.attendanceSessionsRowCount) {
+      throw buildTeacherUnsavedCachePublishConflict_(
+        snapshot.attendanceSessionsRowCount,
+        currentAttendanceSessionsRowCount
+      );
     }
 
     markTeacherUnsavedSummaryRowsStatus_(
@@ -1482,6 +1705,7 @@ function buildTeacherUnsavedCacheBuildResult_(snapshot, elapsedMs, wroteSheets) 
     startYmd: snapshot.startYmd,
     endYmd: snapshot.endYmd,
     checkedAt: formatTeacherUnsavedCacheDateTime_(snapshot.checkedAt),
+    attendanceSessionsRowCountAtStart: snapshot.attendanceSessionsRowCount,
     teacherCount: snapshot.teacherCount,
     unsavedTeacherCount: snapshot.unsavedTeacherCount,
     summaryRowCount: snapshot.summaryRows.length,
