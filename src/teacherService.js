@@ -336,7 +336,8 @@ function getTeacherAssignmentsByClassId_(classId) {
   const targetClassId = normalizeString_(classId);
   if (!targetClassId) return [];
 
-  const cacheKey = 'teacherAssignmentsByClassId__' + targetClassId;
+  const cacheKey = 'teacherAssignmentsByClassId__' + targetClassId +
+    '__assignmentRevision__' + getTeachingAssignmentRevision_();
   const cached = getScriptCacheJson_(cacheKey);
   if (cached !== null) {
     return cached;
@@ -386,7 +387,8 @@ function getTeacherAssignmentsByClassPeriod_(classId, weekday, period) {
 
   if (!targetClassId || !targetPeriod) return [];
 
-  const cacheKey = 'teacherAssignmentsByClassPeriod__' + [targetClassId, targetWeekday, targetPeriod].join('__');
+  const cacheKey = 'teacherAssignmentsByClassPeriod__' + [targetClassId, targetWeekday, targetPeriod].join('__') +
+    '__assignmentRevision__' + getTeachingAssignmentRevision_();
   const cached = getScriptCacheJson_(cacheKey);
   if (cached !== null) {
     return cached;

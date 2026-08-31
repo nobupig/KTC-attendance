@@ -12,8 +12,16 @@ const TEACHER_UNSAVED_CALENDAR_REVISION_PROPERTY_ =
   'teacherUnsavedCalendarRevision';
 const TEACHER_UNSAVED_CLASS_SESSIONS_REVISION_PROPERTY_ =
   'teacherUnsavedClassSessionsRevision';
+const TEACHING_ASSIGNMENT_REVISION_PROPERTY_ =
+  'teachingAssignmentRevision';
 
-const TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_ = Object.freeze([
+const TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_ = Object.freeze({
+  LEGACY: 'legacy',
+  REVISIONED: 'revisioned',
+  INVALID: 'invalid'
+});
+
+const TEACHER_UNSAVED_SUMMARY_CACHE_LEGACY_HEADERS_ = Object.freeze([
   'snapshotId',
   'cacheDate',
   'teacherId',
@@ -30,6 +38,12 @@ const TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_ = Object.freeze([
   'status',
   'errorMessage'
 ]);
+
+const TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_ = Object.freeze(
+  TEACHER_UNSAVED_SUMMARY_CACHE_LEGACY_HEADERS_.concat([
+    'teachingAssignmentRevision'
+  ])
+);
 
 const TEACHER_UNSAVED_DETAIL_CACHE_HEADERS_ = Object.freeze([
   'snapshotId',
@@ -54,7 +68,9 @@ function getTeacherUnsavedCacheSchema() {
   return {
     summary: {
       sheetName: TEACHER_UNSAVED_CACHE_SHEETS_.SUMMARY,
-      headers: TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.slice()
+      headers: TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.slice(),
+      legacyHeaders: TEACHER_UNSAVED_SUMMARY_CACHE_LEGACY_HEADERS_.slice(),
+      revisionedHeaders: TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.slice()
     },
     detail: {
       sheetName: TEACHER_UNSAVED_CACHE_SHEETS_.DETAIL,
@@ -84,7 +100,7 @@ function rebuildTeacherUnsavedSummaryCache() {
 
   for (let attempt = 1; attempt <= TEACHER_UNSAVED_CACHE_REBUILD_MAX_ATTEMPTS_; attempt++) {
     try {
-      const snapshot = buildTeacherUnsavedCacheSnapshot_();
+      const snapshot = buildTeacherUnsavedCacheSnapshot_(validation.summary.schemaMode);
       publishTeacherUnsavedCacheSnapshot_(snapshot);
 
       const result = buildTeacherUnsavedCacheBuildResult_(
@@ -106,6 +122,8 @@ function rebuildTeacherUnsavedSummaryCache() {
           conflictReason: error.reason || '',
           expectedAttendanceSessionsRowCount: error.expectedRowCount,
           actualAttendanceSessionsRowCount: error.actualRowCount,
+          expectedTeachingAssignmentRevision: error.expectedTeachingAssignmentRevision,
+          actualTeachingAssignmentRevision: error.actualTeachingAssignmentRevision,
           willRetry: attempt < TEACHER_UNSAVED_CACHE_REBUILD_MAX_ATTEMPTS_
         }));
 
@@ -221,7 +239,11 @@ function debugLogTeacherUnsavedCacheRebuildTriggerStatus() {
 
 function debugBuildTeacherUnsavedCachePreview() {
   const startedAt = Date.now();
-  const snapshot = buildTeacherUnsavedCacheSnapshot_();
+  const validation = validateTeacherUnsavedCacheSheets_();
+  if (!validation.ok) {
+    throw new Error(buildTeacherUnsavedCacheValidationError_(validation));
+  }
+  const snapshot = buildTeacherUnsavedCacheSnapshot_(validation.summary.schemaMode);
   const result = buildTeacherUnsavedCacheBuildResult_(snapshot, Date.now() - startedAt, false);
   result.cacheSheets = validateTeacherUnsavedCacheSheets();
   return result;
@@ -264,7 +286,8 @@ function getTeacherUnsavedSummaryFastContext_() {
   const summaryState = readTeacherUnsavedSummaryState_(
     validation.summary.sheet,
     teacherId,
-    todayYmd
+    todayYmd,
+    validation.summary.schemaMode
   );
 
   if (!summaryState.row) {
@@ -281,6 +304,7 @@ function getTeacherUnsavedSummaryFastContext_() {
   }
 
   const row = summaryState.row;
+  row.summarySchemaMode = validation.summary.schemaMode;
 
   if (row.cacheDate !== todayYmd) {
     return {
@@ -288,6 +312,23 @@ function getTeacherUnsavedSummaryFastContext_() {
         'stale',
         row,
         'サマリーキャッシュが当日分ではありません。'
+      ),
+      validation: validation,
+      row: row
+    };
+  }
+
+  const assignmentRevisionState = getTeacherUnsavedTeachingAssignmentRevisionState_(
+    row.teachingAssignmentRevision,
+    getTeachingAssignmentRevision_(),
+    validation.summary.schemaMode
+  );
+  if (!assignmentRevisionState.ok) {
+    return {
+      result: buildTeacherUnsavedFastSummaryFailureFromRow_(
+        'stale',
+        row,
+        assignmentRevisionState.errorMessage
       ),
       validation: validation,
       row: row
@@ -371,6 +412,8 @@ function getTeacherUnsavedSummaryFastContext_() {
     },
     cacheDate: row.cacheDate,
     snapshotId: row.snapshotId,
+    teachingAssignmentRevision: row.teachingAssignmentRevision,
+    summarySchemaMode: validation.summary.schemaMode,
     errorMessage: ''
   };
 
@@ -411,6 +454,12 @@ function getTeacherUnsavedDetailsFast(options) {
   }
 
   if (totalCount === 0 || paging.offset >= totalCount) {
+    const emptyRevisionFailure = buildTeacherUnsavedFastDetailsRevisionFailureIfAny_(
+      summary,
+      currentRow,
+      paging
+    );
+    if (emptyRevisionFailure) return emptyRevisionFailure;
     return buildTeacherUnsavedFastDetailsSuccess_(summary, paging, [], totalCount);
   }
 
@@ -451,7 +500,31 @@ function getTeacherUnsavedDetailsFast(options) {
     items.push(item);
   }
 
+  const revisionFailure = buildTeacherUnsavedFastDetailsRevisionFailureIfAny_(
+    summary,
+    currentRow,
+    paging
+  );
+  if (revisionFailure) return revisionFailure;
+
   return buildTeacherUnsavedFastDetailsSuccess_(summary, paging, items, totalCount);
+}
+
+function buildTeacherUnsavedFastDetailsRevisionFailureIfAny_(summary, row, paging) {
+  const state = getTeacherUnsavedTeachingAssignmentRevisionState_(
+    summary && summary.teachingAssignmentRevision,
+    getTeachingAssignmentRevision_(),
+    summary && summary.summarySchemaMode
+  );
+  if (state.ok) return null;
+  return buildTeacherUnsavedFastDetailsFailure_(
+    buildTeacherUnsavedFastSummaryFailureFromRow_(
+      'stale',
+      row || summary,
+      state.errorMessage
+    ),
+    paging
+  );
 }
 
 function debugCompareTeacherUnsavedCacheForCurrentUser() {
@@ -591,8 +664,19 @@ function debugLogCompareTeacherUnsavedCacheForCurrentUser() {
   return result;
 }
 
-function buildTeacherUnsavedCacheSnapshot_() {
+function buildTeacherUnsavedCacheSnapshot_(summarySchemaMode) {
   const checkedAt = new Date();
+  const teachingAssignmentRevision = getTeachingAssignmentRevision_();
+  const summaryHeaders = getTeacherUnsavedSummaryHeadersForMode_(summarySchemaMode);
+  if (!summaryHeaders.length) {
+    throw new Error('teacherUnsavedSummaryCache schema modeが不正です: ' + summarySchemaMode);
+  }
+  if (
+    summarySchemaMode === TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.LEGACY &&
+    teachingAssignmentRevision
+  ) {
+    throw buildTeacherUnsavedTeachingAssignmentRevisionConflict_('', teachingAssignmentRevision);
+  }
   const calendarRevision = getTeacherUnsavedCalendarRevision_();
   const classSessionsRevision = getTeacherUnsavedClassSessionsRevision_();
   const attendanceSessionsRowCount = getTeacherUnsavedAttendanceSessionsRowCount_();
@@ -719,7 +803,7 @@ function buildTeacherUnsavedCacheSnapshot_() {
       detailRows.push(buildTeacherUnsavedDetailRow_(item));
     });
 
-    summaryRows.push([
+    const summaryRow = buildTeacherUnsavedSummaryRowForSchema_([
       snapshotId,
       dateContext.cacheDate,
       teacher.teacherId,
@@ -735,7 +819,8 @@ function buildTeacherUnsavedCacheSnapshot_() {
       checkedAt,
       'ready',
       ''
-    ]);
+    ], summarySchemaMode, teachingAssignmentRevision);
+    summaryRows.push(summaryRow);
   });
 
   return {
@@ -744,6 +829,9 @@ function buildTeacherUnsavedCacheSnapshot_() {
     startYmd: dateContext.startYmd,
     endYmd: dateContext.endYmd,
     checkedAt: checkedAt,
+    summarySchemaMode: summarySchemaMode,
+    summaryColumnCount: summaryHeaders.length,
+    teachingAssignmentRevision: teachingAssignmentRevision,
     calendarRevision: calendarRevision,
     classSessionsRevision: classSessionsRevision,
     attendanceSessionsRowCount: attendanceSessionsRowCount,
@@ -762,6 +850,21 @@ function buildTeacherUnsavedCacheSnapshot_() {
       attendanceSessions: sources.attendanceSessions.rows.length
     }
   };
+}
+
+function buildTeacherUnsavedSummaryRowForSchema_(legacyRow, summarySchemaMode, revision) {
+  const row = Array.isArray(legacyRow) ? legacyRow.slice() : [];
+  if (row.length !== TEACHER_UNSAVED_SUMMARY_CACHE_LEGACY_HEADERS_.length) {
+    throw new Error('teacherUnsavedSummaryCache legacy row列数が不正です: ' + row.length);
+  }
+  if (summarySchemaMode === TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.LEGACY) {
+    return row;
+  }
+  if (summarySchemaMode === TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.REVISIONED) {
+    row.push(normalizeString_(revision));
+    return row;
+  }
+  throw new Error('teacherUnsavedSummaryCache schema modeが不正です: ' + summarySchemaMode);
 }
 
 function loadTeacherUnsavedCacheSources_() {
@@ -1100,6 +1203,68 @@ function buildTeacherUnsavedClassSessionsRevisionConflict_(expectedRevision, act
   return error;
 }
 
+function buildTeacherUnsavedTeachingAssignmentRevisionConflict_(expectedRevision, actualRevision) {
+  const error = new Error(
+    'キャッシュ計算中に timetable または classTeacherTeams が更新されました。' +
+    ' expected=' + expectedRevision + ' actual=' + actualRevision
+  );
+  error.name = 'TeacherUnsavedCachePublishConflictError';
+  error.retryable = true;
+  error.reason = 'teaching-assignment-revision-changed';
+  error.expectedTeachingAssignmentRevision = expectedRevision;
+  error.actualTeachingAssignmentRevision = actualRevision;
+  return error;
+}
+
+function buildTeacherUnsavedSummarySchemaModeConflict_(expectedMode, actualMode) {
+  const error = new Error(
+    'キャッシュ計算中にteacherUnsavedSummaryCache schemaが変更されました。' +
+    ' expected=' + expectedMode + ' actual=' + actualMode
+  );
+  error.name = 'TeacherUnsavedCachePublishConflictError';
+  error.retryable = true;
+  error.reason = 'summary-schema-mode-changed';
+  error.expectedSummarySchemaMode = expectedMode;
+  error.actualSummarySchemaMode = actualMode;
+  return error;
+}
+
+function getTeacherUnsavedTeachingAssignmentRevisionState_(snapshotRevision, currentRevision, schemaMode) {
+  const expected = normalizeString_(snapshotRevision);
+  const actual = normalizeString_(currentRevision);
+  const mode = normalizeString_(schemaMode);
+  const legacyUsable = mode === TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.LEGACY && !actual;
+  const revisionedUsable =
+    mode === TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.REVISIONED &&
+    !!expected &&
+    !!actual &&
+    expected === actual;
+  if (legacyUsable || revisionedUsable) {
+    return { ok: true, status: 'ready', errorMessage: '' };
+  }
+  return {
+    ok: false,
+    status: 'stale',
+    errorMessage: 'teaching assignment revisionが利用可能条件を満たしません。' +
+      ' schemaMode=' + mode + ' snapshot=' + expected + ' current=' + actual
+  };
+}
+
+function assertTeacherUnsavedTeachingAssignmentRevisionCurrent_(snapshotRevision, currentRevision, schemaMode) {
+  const state = getTeacherUnsavedTeachingAssignmentRevisionState_(
+    snapshotRevision,
+    currentRevision,
+    schemaMode
+  );
+  if (!state.ok) {
+    throw buildTeacherUnsavedTeachingAssignmentRevisionConflict_(
+      normalizeString_(snapshotRevision),
+      normalizeString_(currentRevision)
+    );
+  }
+  return true;
+}
+
 function isTeacherUnsavedCachePublishConflict_(error) {
   return !!(
     error &&
@@ -1116,6 +1281,11 @@ function getTeacherUnsavedCalendarRevision_() {
 function getTeacherUnsavedClassSessionsRevision_() {
   return PropertiesService.getScriptProperties()
     .getProperty(TEACHER_UNSAVED_CLASS_SESSIONS_REVISION_PROPERTY_) || '';
+}
+
+function getTeachingAssignmentRevision_() {
+  return PropertiesService.getScriptProperties()
+    .getProperty(TEACHING_ASSIGNMENT_REVISION_PROPERTY_) || '';
 }
 
 function advanceTeacherUnsavedCalendarRevisionUnderLock_() {
@@ -1144,6 +1314,77 @@ function advanceTeacherUnsavedClassSessionsRevisionUnderLock_() {
     revision
   );
   return revision;
+}
+
+function bumpTeachingAssignmentRevisionUnderLock_() {
+  const lock = LockService.getScriptLock();
+  if (!lock.hasLock()) {
+    throw new Error('teaching assignment revision更新にはScriptLockが必要です。');
+  }
+
+  const revision = Utilities.getUuid();
+  PropertiesService.getScriptProperties().setProperty(
+    TEACHING_ASSIGNMENT_REVISION_PROPERTY_,
+    revision
+  );
+  return revision;
+}
+
+function getTeachingAssignmentSourceCacheKeys_() {
+  return [
+    'sheetData__OPERATION__' + CONFIG.SHEETS.TIMETABLE,
+    'sheetData__OPERATION__' + CONFIG.SHEETS.CLASS_TEACHER_TEAMS,
+    'classTeacherTeamRows__all'
+  ];
+}
+
+function notifyTeachingAssignmentDataChanged() {
+  const lock = LockService.getScriptLock();
+  const alreadyLocked = lock.hasLock();
+  if (!alreadyLocked && !lock.tryLock(10000)) {
+    throw new Error('teaching assignment変更通知用Lockを取得できませんでした。');
+  }
+
+  try {
+    return notifyTeachingAssignmentDataChangedUnderLock_();
+  } finally {
+    if (!alreadyLocked) lock.releaseLock();
+  }
+}
+
+function notifyTeachingAssignmentDataChangedUnderLock_() {
+  const lock = LockService.getScriptLock();
+  if (!lock.hasLock()) {
+    throw new Error('teaching assignment変更通知にはScriptLockが必要です。');
+  }
+
+  const validation = validateTeacherUnsavedCacheSheets_();
+  if (!validation.ok) {
+    throw new Error(buildTeacherUnsavedCacheValidationError_(validation));
+  }
+  if (validation.summary.schemaMode === TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.LEGACY) {
+    return {
+      ok: false,
+      status: 'migration-required',
+      requiresSummarySchemaMigration: true,
+      summarySchemaMode: validation.summary.schemaMode,
+      teachingAssignmentRevision: getTeachingAssignmentRevision_(),
+      invalidatedSourceCacheKeys: [],
+      invalidatedSummaryCount: 0,
+      invalidatedDetailCount: 0
+    };
+  }
+
+  // Invalidate fixed source keys before exposing the new revision token.
+  const sourceCacheKeys = getTeachingAssignmentSourceCacheKeys_();
+  removeScriptCacheKeys_(sourceCacheKeys);
+  const teachingAssignmentRevision = bumpTeachingAssignmentRevisionUnderLock_();
+  const result = invalidateAllTeacherUnsavedFastSnapshotsUnderLock_(
+    'timetable/classTeacherTeams更新後にFastキャッシュを無効化しました。次回rebuildを待っています。'
+  );
+  result.teachingAssignmentRevision = teachingAssignmentRevision;
+  result.invalidatedSourceCacheKeys = sourceCacheKeys.slice();
+  return result;
 }
 
 function invalidateTeacherUnsavedFastSnapshotsAfterCalendarChange_() {
@@ -1358,6 +1599,27 @@ function publishTeacherUnsavedCacheSnapshot_(snapshot) {
   }
 
   try {
+    const validation = validateTeacherUnsavedCacheSheets_();
+    if (!validation.ok) {
+      throw new Error(buildTeacherUnsavedCacheValidationError_(validation));
+    }
+    const snapshotSummarySchemaMode = normalizeString_(snapshot.summarySchemaMode);
+    const currentSummarySchemaMode = validation.summary.schemaMode;
+    if (snapshotSummarySchemaMode !== currentSummarySchemaMode) {
+      throw buildTeacherUnsavedSummarySchemaModeConflict_(
+        snapshotSummarySchemaMode,
+        currentSummarySchemaMode
+      );
+    }
+
+    const currentTeachingAssignmentRevision = getTeachingAssignmentRevision_();
+    const snapshotTeachingAssignmentRevision = snapshot.teachingAssignmentRevision || '';
+    assertTeacherUnsavedTeachingAssignmentRevisionCurrent_(
+      snapshotTeachingAssignmentRevision,
+      currentTeachingAssignmentRevision,
+      currentSummarySchemaMode
+    );
+
     const currentCalendarRevision = getTeacherUnsavedCalendarRevision_();
     const snapshotCalendarRevision = snapshot.calendarRevision || '';
     if (currentCalendarRevision !== snapshotCalendarRevision) {
@@ -1374,11 +1636,6 @@ function publishTeacherUnsavedCacheSnapshot_(snapshot) {
         snapshotClassSessionsRevision,
         currentClassSessionsRevision
       );
-    }
-
-    const validation = validateTeacherUnsavedCacheSheets_();
-    if (!validation.ok) {
-      throw new Error(buildTeacherUnsavedCacheValidationError_(validation));
     }
 
     const currentAttendanceSessionsRowCount =
@@ -1407,7 +1664,7 @@ function publishTeacherUnsavedCacheSnapshot_(snapshot) {
     replaceTeacherUnsavedCacheRows_(
       validation.summary.sheet,
       snapshot.summaryRows,
-      TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.length
+      getTeacherUnsavedSummaryHeadersForMode_(currentSummarySchemaMode).length
     );
     SpreadsheetApp.flush();
   } finally {
@@ -1461,11 +1718,7 @@ function markTeacherUnsavedCachePublishError_(error) {
 
 function validateTeacherUnsavedCacheSheets_() {
   const operation = getOperationSpreadsheet();
-  const summary = validateTeacherUnsavedCacheSheet_(
-    operation,
-    TEACHER_UNSAVED_CACHE_SHEETS_.SUMMARY,
-    TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_
-  );
+  const summary = validateTeacherUnsavedSummaryCacheSheet_(operation);
   const detail = validateTeacherUnsavedCacheSheet_(
     operation,
     TEACHER_UNSAVED_CACHE_SHEETS_.DETAIL,
@@ -1478,6 +1731,78 @@ function validateTeacherUnsavedCacheSheets_() {
     summary: summary,
     detail: detail,
     errors: errors
+  };
+}
+
+function getTeacherUnsavedSummarySchemaMode_(headers) {
+  const actual = Array.isArray(headers) ? headers : [];
+  if (areTeacherUnsavedCacheHeadersExact_(actual, TEACHER_UNSAVED_SUMMARY_CACHE_LEGACY_HEADERS_)) {
+    return TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.LEGACY;
+  }
+  if (areTeacherUnsavedCacheHeadersExact_(actual, TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_)) {
+    return TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.REVISIONED;
+  }
+  return TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.INVALID;
+}
+
+function areTeacherUnsavedCacheHeadersExact_(actualHeaders, expectedHeaders) {
+  if (actualHeaders.length !== expectedHeaders.length) return false;
+  for (let i = 0; i < expectedHeaders.length; i++) {
+    if (actualHeaders[i] !== expectedHeaders[i]) return false;
+  }
+  return true;
+}
+
+function getTeacherUnsavedSummaryHeadersForMode_(schemaMode) {
+  if (schemaMode === TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.LEGACY) {
+    return TEACHER_UNSAVED_SUMMARY_CACHE_LEGACY_HEADERS_;
+  }
+  if (schemaMode === TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.REVISIONED) {
+    return TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_;
+  }
+  return [];
+}
+
+function validateTeacherUnsavedSummaryCacheSheet_(spreadsheet) {
+  const sheetName = TEACHER_UNSAVED_CACHE_SHEETS_.SUMMARY;
+  const sheet = spreadsheet.getSheetByName(sheetName);
+  const errors = [];
+  let actualHeaders = [];
+  let schemaMode = TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.INVALID;
+
+  if (!sheet) {
+    errors.push(sheetName + ': シートが存在しません。');
+  } else {
+    const lastColumn = sheet.getLastColumn();
+    if (lastColumn < 1) {
+      errors.push(sheetName + ': ヘッダー行がありません。');
+    } else {
+      actualHeaders = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
+      schemaMode = getTeacherUnsavedSummarySchemaMode_(actualHeaders);
+      if (schemaMode === TEACHER_UNSAVED_SUMMARY_SCHEMA_MODES_.INVALID) {
+        errors.push(
+          sheetName + ': ヘッダーはlegacy 15列またはrevisioned 16列のexact schemaではありません。' +
+          ' actual=' + actualHeaders.length
+        );
+      }
+    }
+  }
+
+  return {
+    sheet: sheet,
+    schemaMode: schemaMode,
+    errors: errors,
+    publicResult: {
+      ok: errors.length === 0,
+      sheetName: sheetName,
+      exists: !!sheet,
+      schemaMode: schemaMode,
+      expectedHeaders: getTeacherUnsavedSummaryHeadersForMode_(schemaMode).slice(),
+      expectedLegacyHeaders: TEACHER_UNSAVED_SUMMARY_CACHE_LEGACY_HEADERS_.slice(),
+      expectedRevisionedHeaders: TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.slice(),
+      actualHeaders: actualHeaders,
+      errors: errors.slice()
+    }
   };
 }
 
@@ -1534,12 +1859,15 @@ function buildTeacherUnsavedCacheValidationError_(validation) {
   return 'キャッシュシート検証エラー: ' + validation.errors.join(' / ');
 }
 
-function readTeacherUnsavedSummaryState_(sheet, teacherId, todayYmd) {
+function readTeacherUnsavedSummaryState_(sheet, teacherId, todayYmd, schemaMode) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return { row: null };
 
+  const headers = getTeacherUnsavedSummaryHeadersForMode_(schemaMode);
+  if (!headers.length) return { row: null };
+
   const values = sheet
-    .getRange(2, 1, lastRow - 1, TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.length)
+    .getRange(2, 1, lastRow - 1, headers.length)
     .getValues();
   let current = null;
   let latest = null;
@@ -1579,7 +1907,8 @@ function buildTeacherUnsavedSummaryObject_(row) {
     detailCount: parseTeacherUnsavedNonNegativeInteger_(row[11]),
     checkedAt: row[12],
     status: normalizeString_(row[13]).toLowerCase(),
-    errorMessage: normalizeString_(row[14])
+    errorMessage: normalizeString_(row[14]),
+    teachingAssignmentRevision: normalizeString_(row[15])
   };
 }
 
@@ -1708,6 +2037,8 @@ function buildTeacherUnsavedFastSummaryFailure_(status, teacherId, cacheDate, me
     checkedRange: null,
     cacheDate: cacheDate || '',
     snapshotId: '',
+    teachingAssignmentRevision: '',
+    summarySchemaMode: '',
     errorMessage: message || ''
   };
 }
@@ -1734,6 +2065,10 @@ function buildTeacherUnsavedFastSummaryFailureFromRow_(status, row, message, cac
     ? { start: result.startYmd, end: result.endYmd }
     : null;
   result.snapshotId = row && row.snapshotId ? row.snapshotId : '';
+  result.teachingAssignmentRevision = row && row.teachingAssignmentRevision
+    ? row.teachingAssignmentRevision
+    : '';
+  result.summarySchemaMode = row && row.summarySchemaMode ? row.summarySchemaMode : '';
   return result;
 }
 
@@ -1753,6 +2088,8 @@ function buildTeacherUnsavedFastDetailsFailure_(summary, paging) {
     checkedRange: summary.checkedRange || null,
     cacheDate: summary.cacheDate || '',
     snapshotId: summary.snapshotId || '',
+    teachingAssignmentRevision: summary.teachingAssignmentRevision || '',
+    summarySchemaMode: summary.summarySchemaMode || '',
     errorMessage: summary.errorMessage || ''
   };
 }
@@ -1776,6 +2113,8 @@ function buildTeacherUnsavedFastDetailsSuccess_(summary, paging, items, totalCou
     },
     cacheDate: summary.cacheDate,
     snapshotId: summary.snapshotId,
+    teachingAssignmentRevision: summary.teachingAssignmentRevision || '',
+    summarySchemaMode: summary.summarySchemaMode || '',
     errorMessage: ''
   };
 }
@@ -1884,6 +2223,7 @@ function buildTeacherUnsavedCacheBuildResult_(snapshot, elapsedMs, wroteSheets) 
     endYmd: snapshot.endYmd,
     checkedAt: formatTeacherUnsavedCacheDateTime_(snapshot.checkedAt),
     attendanceSessionsRowCountAtStart: snapshot.attendanceSessionsRowCount,
+    teachingAssignmentRevision: snapshot.teachingAssignmentRevision || '',
     teacherCount: snapshot.teacherCount,
     unsavedTeacherCount: snapshot.unsavedTeacherCount,
     summaryRowCount: snapshot.summaryRows.length,

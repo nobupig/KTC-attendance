@@ -878,16 +878,19 @@ function getTeacherUnsavedContext_(teacherId) {
 }
 
 function buildTeacherUnsavedSummaryCacheKey_(teacherId, endYmd) {
-  return 'teacherUnsavedSummary__v3__' + String(teacherId || '') + '__' + String(endYmd || '');
+  return 'teacherUnsavedSummary__v3__' + String(teacherId || '') + '__' + String(endYmd || '') +
+    '__assignmentRevision__' + getTeachingAssignmentRevision_();
 }
 
 function buildTeacherUnsavedDetailsCacheKey_(teacherId, endYmd) {
-  return 'teacherUnsavedDetails__v3__' + String(teacherId || '') + '__' + String(endYmd || '');
+  return 'teacherUnsavedDetails__v3__' + String(teacherId || '') + '__' + String(endYmd || '') +
+    '__assignmentRevision__' + getTeachingAssignmentRevision_();
 }
 
 function buildTeacherUnsavedContextCacheKey_(teacherId) {
   // v4 adds the term-aware assignment index; v3 values have no assignmentIndex.
-  return 'teacherUnsavedContext__v4__' + String(teacherId || '');
+  return 'teacherUnsavedContext__v4__' + String(teacherId || '') +
+    '__assignmentRevision__' + getTeachingAssignmentRevision_();
 }
 
 function getTeacherUnsavedStartDate_(baseDate) {
