@@ -34,7 +34,7 @@ function getClassesForCurrentUserByDate(targetDate) {
   const assignmentIndex = buildTeachingAssignmentIndex_(
     timetableData,
     teamData,
-    buildTeacherTeamMember_
+    createTeacherTeamMemberResolver_()
   );
 
   const savedSessionStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
@@ -841,7 +841,7 @@ function getTeacherUnsavedContext_(teacherId) {
   const assignmentIndex = buildTeachingAssignmentIndex_(
     timetableData,
     teamData,
-    buildTeacherTeamMember_
+    createTeacherTeamMemberResolver_()
   );
 
   const classHeaders = classesData.headers;

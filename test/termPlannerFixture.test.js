@@ -239,6 +239,55 @@ const calendarHeaders = ['date', 'weekday', 'isClassDay', 'term'];
 }
 
 {
+  let teacherBundleLoadCount = 0;
+  sandbox.getTeacherMasterBundle_ = () => {
+    teacherBundleLoadCount += 1;
+    return {
+      byId: {
+        T_FA: { teacherId: 'T_FA', name: 'Normalized FA', email: 'fa@example.com', roles: ['teacher'] },
+        T_FY: { teacherId: 'T_FY', name: 'Normalized FY', email: 'fy@example.com', roles: ['teacher'] },
+        T_SUPPORT: { teacherId: 'T_SUPPORT', name: 'Normalized Support', email: 'support@example.com', roles: ['teacher'] }
+      },
+      byName: {
+        'Fallback Teacher': { teacherId: 'T_SP', name: 'Normalized SP', email: 'sp@example.com', roles: ['teacher'] }
+      }
+    };
+  };
+  const resolver = sandbox.createTeacherTeamMemberResolver_();
+  const index = sandbox.buildTeachingAssignmentIndex_({
+    headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'term'],
+    rows: [
+      ['faResolver', 'Mon', 1, 'T_FA', 'Raw FA', 'FA'],
+      ['spResolver', 'Mon', '01', '', 'Fallback Teacher', 'SP'],
+      ['fyResolver', 'Mon', 1, 'T_FY', 'Raw FY', 'FY']
+    ]
+  }, {
+    headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'roleType', 'term'],
+    rows: [
+      ['faResolver', 'Mon', 1, 'T_SUPPORT', 'Raw Support', 'support', 'FA'],
+      ['spResolver', 'Mon', 1, 'T_SUPPORT', 'Raw Support', 'support', 'SP']
+    ]
+  }, resolver);
+  assert.strictEqual(teacherBundleLoadCount, 1);
+  assert.strictEqual(resolver.teacherBundleLoadCount, 1);
+
+  const faContext = sandbox.getEffectiveClassDayContext_('2026-04-13', {
+    '2026-04-13': { weekday: 'Mon', isClassDay: true, term: 'FA' }
+  });
+  const spContext = sandbox.getEffectiveClassDayContext_('2026-10-15', {
+    '2026-10-15': { weekday: 'Mon', isClassDay: true, term: 'SP' }
+  });
+  const fa = sandbox.getTeachingAssignmentForSessionFromIndex_(index, 'faResolver', '2026-04-13', 1, faContext);
+  const sp = sandbox.getTeachingAssignmentForSessionFromIndex_(index, 'spResolver', '2026-10-15', 1, spContext);
+  const fy = sandbox.getTeachingAssignmentForSessionFromIndex_(index, 'fyResolver', '2026-04-13', 1, faContext);
+  assert.strictEqual(fa.teacherName, 'Normalized FA');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(fa.teacherIds)), ['T_FA', 'T_SUPPORT']);
+  assert.strictEqual(sp.teacherId, 'T_SP');
+  assert.strictEqual(sp.teacherName, 'Normalized SP');
+  assert.strictEqual(fy.teacherId, 'T_FY');
+}
+
+{
   const headers = ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'term'];
   const teamHeaders = ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'roleType', 'term'];
   const index = sandbox.buildTeachingAssignmentIndex_({

@@ -299,7 +299,11 @@ function buildAttendanceCheckAssignmentContext_() {
   const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
   const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 300);
   return {
-    assignmentIndex: buildTeachingAssignmentIndex_(timetableData, teamData, buildTeacherTeamMember_),
+    assignmentIndex: buildTeachingAssignmentIndex_(
+      timetableData,
+      teamData,
+      createTeacherTeamMemberResolver_()
+    ),
     calendarIndex: buildEffectiveClassDayIndex_(calendarData)
   };
 }

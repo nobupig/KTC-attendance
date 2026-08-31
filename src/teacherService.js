@@ -112,6 +112,45 @@ function buildTeacherTeamMember_(teacherId, teacherName, roleType) {
   };
 }
 
+/**
+ * Resolves teacher members from one teacher-master snapshot for one teaching
+ * assignment index build. This prevents one CacheService read/JSON parse per
+ * timetable or team row while preserving buildTeacherTeamMember_ semantics.
+ */
+function createTeacherTeamMemberResolver_() {
+  const startedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const bundle = getTeacherMasterBundle_() || {};
+  const byId = bundle.byId || {};
+  const byName = bundle.byName || {};
+  const teacherCount = Object.keys(byId).length;
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_('teaching assignment teacher bundle', startedAt, 'teacherCount=' + teacherCount);
+  }
+
+  const resolver = function(teacherId, teacherName, roleType) {
+    let record = null;
+
+    // Keep the original branch order: a supplied teacherId is authoritative;
+    // only an absent teacherId permits teacherName fallback.
+    if (teacherId) {
+      record = byId[normalizeString_(teacherId)] || null;
+    } else if (teacherName) {
+      record = byName[normalizeString_(teacherName)] || null;
+    }
+
+    return {
+      teacherId: record ? record.teacherId : normalizeString_(teacherId),
+      teacherName: record ? record.name : normalizeString_(teacherName),
+      teacherEmail: record ? record.email : '',
+      roles: record ? record.roles : [],
+      roleType: normalizeString_(roleType || 'support').toLowerCase() || 'support'
+    };
+  };
+  resolver.teacherBundleLoadCount = 1;
+  return resolver;
+}
+
 function buildTeachingAssignmentKey_(classId, term, weekday, period) {
   const normalizedClassId = normalizeString_(classId);
   const normalizedTerm = normalizeAcademicTerm_(term);
@@ -147,6 +186,7 @@ function validateTeachingAssignmentColumns_(sheetName, colMap, requiredKeys) {
  * explicit legacy mode; a present-but-empty term is never legacy data.
  */
 function buildTeachingAssignmentIndex_(timetableData, teamData, resolveMember) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const ttHeaders = timetableData.headers || [];
   const teamHeaders = teamData.headers || [];
   const ttCol = {
@@ -187,6 +227,11 @@ function buildTeachingAssignmentIndex_(timetableData, teamData, resolveMember) {
         };
       };
 
+  const timetableStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  let timetableValidRows = 0;
+  let timetableDuplicateCount = 0;
+  let timetableMemberResolveCount = 0;
+
   (timetableData.rows || []).forEach(function(row, index) {
     const classId = normalizeString_(row[ttCol.classId]);
     const weekday = normalizeWeekday_(row[ttCol.weekday]);
@@ -201,8 +246,10 @@ function buildTeachingAssignmentIndex_(timetableData, teamData, resolveMember) {
 
     const key = buildTeachingAssignmentKey_(classId, term, weekday, period);
     if (!key) return;
+    timetableValidRows++;
     if (invalidKeys[key]) {
       duplicateKeys[key].rowNumbers.push(index + 2);
+      timetableDuplicateCount++;
       warnings.push('timetable row ' + (index + 2) + ': duplicate assignment key (invalid)');
       return;
     }
@@ -213,11 +260,13 @@ function buildTeachingAssignmentIndex_(timetableData, teamData, resolveMember) {
       };
       invalidKeys[key] = true;
       delete byKey[key];
+      timetableDuplicateCount++;
       warnings.push('timetable row ' + (index + 2) + ': duplicate assignment key (invalid)');
       return;
     }
     const teacherId = ttCol.teacherId === -1 ? '' : normalizeString_(row[ttCol.teacherId]);
     const teacherName = ttCol.teacherName === -1 ? '' : normalizeString_(row[ttCol.teacherName]);
+    timetableMemberResolveCount++;
     const member = makeMember(teacherId, teacherName, 'main');
     byKey[key] = {
       classId: classId,
@@ -232,16 +281,36 @@ function buildTeachingAssignmentIndex_(timetableData, teamData, resolveMember) {
     };
   });
 
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'buildTeachingAssignmentIndex timetable',
+      timetableStartedAt,
+      'totalRows=' + (timetableData.rows || []).length +
+        ' validRows=' + timetableValidRows +
+        ' duplicateCount=' + timetableDuplicateCount +
+        ' memberResolveCount=' + timetableMemberResolveCount
+    );
+  }
+
   // A termful timetable cannot safely consume a termless team row. In legacy
   // mode both sheets are matched by the original classId/weekday/period key.
+  const teamsStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  let teamMergedRows = 0;
+  let teamOrphanCount = 0;
+  let teamRejectedCount = 0;
+  let teamMemberResolveCount = 0;
   (teamData.rows || []).forEach(function(row, index) {
     const classId = teamCol.classId === -1 ? '' : normalizeString_(row[teamCol.classId]);
     const weekday = teamCol.weekday === -1 ? '' : normalizeWeekday_(row[teamCol.weekday]);
     const period = teamCol.period === -1 ? '' : normalizeTeachingAssignmentPeriod_(row[teamCol.period]);
     const rawTerm = legacyTeam ? '' : normalizeString_(row[teamCol.term]);
     const term = legacyTeam ? '' : normalizeAcademicTerm_(rawTerm);
-    if (!classId || !weekday || !period) return;
+    if (!classId || !weekday || !period) {
+      teamRejectedCount++;
+      return;
+    }
     if ((!legacyTeam && !term) || (legacyTimetable !== legacyTeam)) {
+      teamRejectedCount++;
       warnings.push('classTeacherTeams row ' + (index + 2) + ': term契約がtimetableと一致しません');
       return;
     }
@@ -249,11 +318,13 @@ function buildTeachingAssignmentIndex_(timetableData, teamData, resolveMember) {
     const key = buildTeachingAssignmentKey_(classId, term, weekday, period);
     const bucket = byKey[key];
     if (!bucket) {
+      teamOrphanCount++;
       warnings.push('classTeacherTeams row ' + (index + 2) + ': ' +
         (invalidKeys[key] ? '対応するtimetable行がduplicateで無効です' : '対応するtimetable行がありません'));
       return;
     }
 
+    teamMemberResolveCount++;
     const member = makeMember(
       teamCol.teacherId === -1 ? '' : row[teamCol.teacherId],
       teamCol.teacherName === -1 ? '' : row[teamCol.teacherName],
@@ -262,7 +333,27 @@ function buildTeachingAssignmentIndex_(timetableData, teamData, resolveMember) {
     if (!member || !member.teacherId || bucket.teacherIds.indexOf(member.teacherId) !== -1) return;
     bucket.teacherIds.push(member.teacherId);
     bucket.teachers.push(member);
+    teamMergedRows++;
   });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'buildTeachingAssignmentIndex teams',
+      teamsStartedAt,
+      'totalRows=' + (teamData.rows || []).length +
+        ' mergedRows=' + teamMergedRows +
+        ' orphanCount=' + teamOrphanCount +
+        ' rejectedCount=' + teamRejectedCount +
+        ' memberResolveCount=' + teamMemberResolveCount
+    );
+    logPerf_(
+      'buildTeachingAssignmentIndex total',
+      totalStartedAt,
+      'bucketCount=' + Object.keys(byKey).length +
+        ' warningCount=' + warnings.length +
+        ' teacherBundleLoadCount=' + (Number(makeMember.teacherBundleLoadCount) || 0)
+    );
+  }
 
   return {
     byKey: byKey,
@@ -320,7 +411,11 @@ function getTeachingAssignmentForSessionFromIndex_(index, classId, date, period,
 function getTeacherAssignmentsForClassSession_(classId, date, period) {
   const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 300);
   const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
-  const index = buildTeachingAssignmentIndex_(timetableData, teamData, buildTeacherTeamMember_);
+  const index = buildTeachingAssignmentIndex_(
+    timetableData,
+    teamData,
+    createTeacherTeamMemberResolver_()
+  );
   const assignment = getTeachingAssignmentForSessionFromIndex_(index, classId, date, period);
   return assignment ? assignment.teachers : [];
 }
