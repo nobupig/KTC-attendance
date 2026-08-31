@@ -274,7 +274,7 @@ function getClassSessionsByDateCached_(ymd) {
     return [];
   }
 
-  const cacheKey = 'classSessionsByDate__v6__' + targetYmd;
+  const cacheKey = buildClassSessionsByDateCacheKey_(targetYmd);
 
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
@@ -379,7 +379,7 @@ function getClassSessionsByDateCached_(ymd) {
 function getClassSessionsByDateIndexCached_() {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
-  const cacheKey = 'classSessionsByDateIndex__v4';
+  const cacheKey = getClassSessionsByDateIndexCacheKey_();
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
     if (typeof logPerf_ === 'function') {

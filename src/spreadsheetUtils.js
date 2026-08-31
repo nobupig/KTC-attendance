@@ -135,6 +135,18 @@ function getAttendanceSessionsSheetCacheKey_() {
   return 'sheetData__OPERATION__' + CONFIG.SHEETS.ATTENDANCE_SESSIONS;
 }
 
+function getClassSessionsSheetCacheKey_() {
+  return 'sheetData__OPERATION__' + CONFIG.SHEETS.CLASS_SESSIONS;
+}
+
+function buildClassSessionsByDateCacheKey_(ymd) {
+  return 'classSessionsByDate__v6__' + formatDateToYmd(ymd);
+}
+
+function getClassSessionsByDateIndexCacheKey_() {
+  return 'classSessionsByDateIndex__v4';
+}
+
 function buildHomeroomSummaryCacheKey_(grade, unit, termFilter) {
   return 'homeroomSummary__' +
     String(grade || '').trim() + '__' +
