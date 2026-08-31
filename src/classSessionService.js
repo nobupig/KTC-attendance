@@ -282,7 +282,8 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
       weekday: ['weekday', '曜日'],
       period: ['period', '時限'],
       teacherName: ['teacherName', '担当者名', 'name'],
-      teacherId: ['teacherId', 'TeacherID']
+      teacherId: ['teacherId', 'TeacherID'],
+      term: ['term', '学期']
     },
     ['classId', 'weekday', 'period']
   );
@@ -292,7 +293,8 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
     {
       date: ['date', '日付'],
       weekday: ['weekday', '曜日'],
-      isClassDay: ['isClassDay', '授業日']
+      isClassDay: ['isClassDay', '授業日'],
+      term: ['term', '学期']
     },
     ['date', 'weekday', 'isClassDay']
   );
@@ -318,25 +320,41 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
     );
   }
 
+  const hasTimetableTermColumn = ttCol.term !== -1;
   let invalidTimetableCount = 0;
+  let invalidTimetableTermCount = 0;
+  const timetableRowsByTerm = {};
   const timetableByKey = {};
   const timetableDuplicateKeys = {};
   timetable.rows.forEach(function(row, index) {
     const classId = normalizeString_(row[ttCol.classId]);
     const weekday = normalizeWeekday_(row[ttCol.weekday]);
     const period = normalizeClassSessionPeriod_(row[ttCol.period]);
+    const rawTerm = hasTimetableTermColumn ? normalizeString_(row[ttCol.term]) : '';
+    const term = normalizeAcademicTerm_(rawTerm);
     if (!classId || !validWeekdays[weekday] || !period) {
       invalidTimetableCount += 1;
       return;
     }
 
-    const key = JSON.stringify([classId, weekday, period]);
+    // A missing term column is legacy-compatible for the existing SP+FY DEV
+    // timetable. Once the column exists, every schedule row must declare it.
+    if (hasTimetableTermColumn && !term) {
+      invalidTimetableTermCount += 1;
+      return;
+    }
+
+    const key = JSON.stringify([classId, term, weekday, period]);
     const item = {
       classId: classId,
+      term: term,
+      usesLegacyTermFallback: !hasTimetableTermColumn,
       weekday: weekday,
       period: period,
       sourceRow: index + 2
     };
+    const termBucket = hasTimetableTermColumn ? term : 'legacy-no-column';
+    timetableRowsByTerm[termBucket] = (timetableRowsByTerm[termBucket] || 0) + 1;
     if (timetableByKey[key]) {
       timetableDuplicateKeys[key] = (timetableDuplicateKeys[key] || 1) + 1;
     } else {
@@ -349,17 +367,23 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
   if (invalidTimetableCount > 0) {
     blockingErrors.push('timetableに不正行があります: ' + invalidTimetableCount + '件');
   }
+  if (invalidTimetableTermCount > 0) {
+    blockingErrors.push('timetableに空欄または不正なtermがあります: ' + invalidTimetableTermCount + '件');
+  }
   if (timetableDuplicateCount > 0) {
     blockingErrors.push(
-      'timetableにclassId + weekday + period重複があります: ' +
+      'timetableにclassId + term + weekday + period重複があります: ' +
       timetableDuplicateCount + '件 keys=' + Object.keys(timetableDuplicateKeys).sort().join(',')
     );
   }
 
   let calendarRowsInRange = 0;
   let invalidCalendarCount = 0;
+  let invalidCalendarTermCount = 0;
+  let termFallbackCount = 0;
   const calendarByDate = {};
   const calendarDuplicateDates = {};
+  const effectiveCalendarIndex = buildEffectiveClassDayIndex_(calendar);
   calendar.rows.forEach(function(row, index) {
     const ymd = normalizeClassSessionPlanningYmd_(
       row[calCol.date],
@@ -374,8 +398,13 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
     calendarRowsInRange += 1;
     const isClassDay = row[calCol.isClassDay] === true;
     const weekday = normalizeWeekday_(row[calCol.weekday]);
+    const rawTerm = calCol.term === -1 ? '' : normalizeString_(row[calCol.term]);
+    const normalizedTerm = normalizeAcademicTerm_(rawTerm);
     if (isClassDay && !validWeekdays[weekday]) {
       invalidCalendarCount += 1;
+    }
+    if (isClassDay && rawTerm && normalizedTerm !== 'FA' && normalizedTerm !== 'SP') {
+      invalidCalendarTermCount += 1;
     }
     if (calendarByDate[ymd]) {
       calendarDuplicateDates[ymd] = (calendarDuplicateDates[ymd] || 1) + 1;
@@ -384,6 +413,7 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
         date: ymd,
         weekday: weekday,
         isClassDay: isClassDay,
+        term: rawTerm,
         sourceRow: index + 2
       };
     }
@@ -395,10 +425,16 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
   if (invalidCalendarCount > 0) {
     blockingErrors.push('calendarに不正行または日付重複があります: ' + invalidCalendarCount + '件');
   }
+  if (invalidCalendarTermCount > 0) {
+    blockingErrors.push('calendarに不正なtermがあります: ' + invalidCalendarTermCount + '件');
+  }
 
   const classDays = Object.keys(calendarByDate).filter(function(ymd) {
     const item = calendarByDate[ymd];
-    return item.isClassDay && !!item.weekday;
+    const context = getEffectiveClassDayContext_(ymd, effectiveCalendarIndex);
+    item.context = context;
+    if (context.usedTermFallback) termFallbackCount += 1;
+    return context.isClassDay && !!context.effectiveWeekday && !!context.term;
   }).sort();
 
   let invalidSessionNumberCount = 0;
@@ -493,15 +529,23 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
     return timetableByKey[key];
   });
   const candidates = [];
+  const candidateCountByTerm = {};
   classDays.forEach(function(ymd) {
     const calendarItem = calendarByDate[ymd];
+    const context = calendarItem.context || getEffectiveClassDayContext_(ymd, effectiveCalendarIndex);
     timetableRows.forEach(function(timetableItem) {
-      if (timetableItem.weekday !== calendarItem.weekday) return;
+      if (timetableItem.weekday !== context.effectiveWeekday) return;
+      if (!timetableItem.usesLegacyTermFallback && !isTimetableTermActive_(timetableItem.term, context.term)) {
+        return;
+      }
+
+      candidateCountByTerm[context.term] = (candidateCountByTerm[context.term] || 0) + 1;
       candidates.push({
         classId: timetableItem.classId,
         date: ymd,
         period: timetableItem.period,
-        weekday: calendarItem.weekday,
+        weekday: context.effectiveWeekday,
+        term: context.term,
         identity: buildClassSessionIdentity_(
           timetableItem.classId,
           ymd,
@@ -511,6 +555,23 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
     });
   });
   candidates.sort(compareClassSessionChronology_);
+
+  const candidateIdentityCounts = {};
+  candidates.forEach(function(candidate) {
+    candidateIdentityCounts[candidate.identity] = (candidateIdentityCounts[candidate.identity] || 0) + 1;
+  });
+  const duplicateCandidateKeys = Object.keys(candidateIdentityCounts).filter(function(key) {
+    return candidateIdentityCounts[key] > 1;
+  });
+  const candidateDuplicateCount = duplicateCandidateKeys.reduce(function(total, key) {
+    return total + candidateIdentityCounts[key] - 1;
+  }, 0);
+  if (candidateDuplicateCount > 0) {
+    blockingErrors.push(
+      'term filter後のcandidateにclassId + date + period重複があります: ' +
+      candidateDuplicateCount + '件 keys=' + duplicateCandidateKeys.sort().join(',')
+    );
+  }
 
   let existingExactCount = 0;
   const pendingCandidates = candidates.filter(function(candidate) {
@@ -574,13 +635,19 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
     calendarRowsInRange: calendarRowsInRange,
     classDays: classDays.length,
     timetableRows: timetable.rows.length,
+    timetableRowsByTerm: sortObjectByKey_(timetableRowsByTerm),
     candidateCount: candidates.length,
+    candidateCountByTerm: sortObjectByKey_(candidateCountByTerm),
+    candidateDuplicateCount: candidateDuplicateCount,
     existingExactCount: existingExactCount,
     insertCount: pendingCandidates.length,
     timetableDuplicateCount: timetableDuplicateCount,
     existingClassSessionDuplicateCount: existingClassSessionDuplicateCount,
     invalidCalendarCount: invalidCalendarCount,
+    invalidCalendarTermCount: invalidCalendarTermCount,
     invalidTimetableCount: invalidTimetableCount,
+    invalidTimetableTermCount: invalidTimetableTermCount,
+    termFallbackCount: termFallbackCount,
     invalidSessionNumberCount: invalidSessionNumberCount,
     chronologicalInsertionConflictCount: chronologicalInsertionConflictCount,
     blockingErrors: uniqueSortedStrings_(blockingErrors),
@@ -594,6 +661,16 @@ function buildRangeLimitedClassSessionPlan_(startDate, endDate, sources) {
       calendarHeaders: normalizeClassSessionHashRows_([calendar.headers])[0] || [],
       calendar: normalizeClassSessionHashRows_(calendar.rows),
       calendarDateDisplayValues: (calendar.dateDisplayValues || []).slice(),
+      effectiveCalendarContexts: classDays.map(function(ymd) {
+        const context = calendarByDate[ymd].context;
+        return [ymd, context.effectiveWeekday, context.term, context.usedTermFallback];
+      }),
+      timetableTermContract: timetableRows.map(function(item) {
+        return [item.classId, item.term, item.weekday, item.period, item.usesLegacyTermFallback];
+      }),
+      filteredCandidates: candidates.map(function(candidate) {
+        return [candidate.classId, candidate.date, candidate.period, candidate.term];
+      }),
       classSessionsHeaders: normalizeClassSessionHashRows_([existing.headers])[0] || [],
       classSessions: existingHashRows
     }
@@ -664,13 +741,19 @@ function buildClassSessionPlanPreview_(plan) {
     calendarRowsInRange: plan.calendarRowsInRange,
     classDays: plan.classDays,
     timetableRows: plan.timetableRows,
+    timetableRowsByTerm: plan.timetableRowsByTerm,
     candidateCount: plan.candidateCount,
+    candidateCountByTerm: plan.candidateCountByTerm,
+    candidateDuplicateCount: plan.candidateDuplicateCount,
     existingExactCount: plan.existingExactCount,
     insertCount: plan.insertCount,
     timetableDuplicateCount: plan.timetableDuplicateCount,
     existingClassSessionDuplicateCount: plan.existingClassSessionDuplicateCount,
     invalidCalendarCount: plan.invalidCalendarCount,
+    invalidCalendarTermCount: plan.invalidCalendarTermCount,
     invalidTimetableCount: plan.invalidTimetableCount,
+    invalidTimetableTermCount: plan.invalidTimetableTermCount,
+    termFallbackCount: plan.termFallbackCount,
     invalidSessionNumberCount: plan.invalidSessionNumberCount,
     chronologicalInsertionConflictCount: plan.chronologicalInsertionConflictCount,
     blockingErrors: plan.blockingErrors.slice(),
@@ -769,11 +852,15 @@ function normalizeClassSessionHashRows_(rows) {
 
 function buildClassSessionPlanHash_(plan) {
   const hashInput = {
-    version: 1,
+    version: 2,
     startDate: plan.startDate,
     endDate: plan.endDate,
     sourceSignature: plan.sourceSignature,
     insertRows: plan.insertRows,
+    timetableRowsByTerm: plan.timetableRowsByTerm,
+    candidateCountByTerm: plan.candidateCountByTerm,
+    candidateDuplicateCount: plan.candidateDuplicateCount,
+    termFallbackCount: plan.termFallbackCount,
     blockingErrors: plan.blockingErrors,
     warnings: plan.warnings
   };

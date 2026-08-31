@@ -1,7 +1,12 @@
 const CALENDAR_SERVICE_CONFIG = {
   EXCEPTION_SHEET_NAME: 'calendarExceptions',
-  CALENDAR_HEADER: ['date', 'weekday', 'isClassDay'],
+  CALENDAR_HEADER: ['date', 'weekday', 'isClassDay', 'term'],
   WEEKDAY_LABELS: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+
+  ACADEMIC_TERM_RANGES_2026: [
+    { term: 'FA', start: '2026-04-08', end: '2026-09-11' },
+    { term: 'SP', start: '2026-09-24', end: '2027-02-02' }
+  ],
 
   FIRST_TERM_2026: {
     start: '2026-04-08',
@@ -116,7 +121,14 @@ function upsertCalendarRangeUnderLock_(startDateStr, endDateStr, closedRanges) {
   });
 
   Object.keys(generatedMap).forEach(dateKey => {
-    mergedMap[dateKey] = generatedMap[dateKey];
+    const generatedRow = generatedMap[dateKey].slice();
+    const existingRow = existingMap[dateKey];
+    // Keep an explicitly maintained term when rebuilding an existing 4-column
+    // calendar. Generated fallback terms only fill the legacy blank case.
+    if (existingRow && normalizeString_(existingRow[3])) {
+      generatedRow[3] = existingRow[3];
+    }
+    mergedMap[dateKey] = generatedRow;
   });
 
   const sortedKeys = Object.keys(mergedMap).sort();
@@ -175,7 +187,12 @@ function buildGeneratedCalendarMap_(startDate, endDate, closedRanges, exceptionM
       isClassDay = exceptionMap[dateKey];
     }
 
-    map[dateKey] = [dateKey, weekday, isClassDay];
+    map[dateKey] = [
+      dateKey,
+      weekday,
+      isClassDay,
+      getAcademicTermFallbackForYmd_(dateKey)
+    ];
 
     current.setDate(current.getDate() + 1);
   }
@@ -231,7 +248,8 @@ function readExistingCalendarMap_(sheet) {
   const col = {
     date: headers.indexOf('date'),
     weekday: headers.indexOf('weekday'),
-    isClassDay: headers.indexOf('isClassDay')
+    isClassDay: headers.indexOf('isClassDay'),
+    term: headers.indexOf('term')
   };
 
   if (col.date === -1 || col.weekday === -1 || col.isClassDay === -1) {
@@ -246,7 +264,8 @@ function readExistingCalendarMap_(sheet) {
     map[dateKey] = [
       dateKey,
       String(row[col.weekday] || '').trim(),
-      toBooleanForCalendar_(row[col.isClassDay])
+      toBooleanForCalendar_(row[col.isClassDay]),
+      col.term === -1 ? '' : String(row[col.term] || '').trim()
     ];
   });
 
@@ -279,6 +298,38 @@ function toBooleanForCalendar_(value) {
 }
 
 /**
+ * Accept calendar/timetable term labels at the sheet boundary only.
+ * classId suffixes are intentionally not used as a term source.
+ */
+function normalizeAcademicTerm_(value) {
+  const text = normalizeString_(value).toUpperCase();
+  if (text === 'FA' || text === 'SP' || text === 'FY') return text;
+
+  const original = normalizeString_(value);
+  if (original === '前期') return 'FA';
+  if (original === '後期') return 'SP';
+  if (original === '通年') return 'FY';
+  return '';
+}
+
+function isTimetableTermActive_(rowTerm, activeTerm) {
+  const normalizedRowTerm = normalizeAcademicTerm_(rowTerm);
+  const normalizedActiveTerm = normalizeAcademicTerm_(activeTerm);
+  if (normalizedActiveTerm !== 'FA' && normalizedActiveTerm !== 'SP') return false;
+  return normalizedRowTerm === normalizedActiveTerm || normalizedRowTerm === 'FY';
+}
+
+function getAcademicTermFallbackForYmd_(ymd) {
+  const normalizedYmd = normalizeEffectiveCalendarYmd_(ymd, '');
+  if (!normalizedYmd) return '';
+
+  const range = CALENDAR_SERVICE_CONFIG.ACADEMIC_TERM_RANGES_2026.find(function(item) {
+    return normalizedYmd >= item.start && normalizedYmd <= item.end;
+  });
+  return range ? range.term : '';
+}
+
+/**
  * 対象日に実施する授業曜日を calendar から解決する。
  * calendar に行がない日付だけは、従来互換として実曜日へフォールバックする。
  *
@@ -286,30 +337,79 @@ function toBooleanForCalendar_(value) {
  * @param {Object=} calendarIndex buildEffectiveClassDayIndex_ の戻り値
  * @returns {{date:string,hasCalendarEntry:boolean,isClassDay:boolean,weekday:string,usedActualWeekdayFallback:boolean}}
  */
-function getEffectiveClassDayInfo_(value, calendarIndex) {
+function getEffectiveClassDayContext_(value, calendarIndex) {
   const ymd = normalizeEffectiveCalendarYmd_(value, '');
   const index = calendarIndex || getEffectiveClassDayIndex_();
   const hasCalendarEntry = Object.prototype.hasOwnProperty.call(index, ymd);
 
   if (hasCalendarEntry) {
     const entry = index[ymd] || {};
-    const isClassDay = entry.isClassDay === true;
+    if (entry.isClassDay !== true) {
+      return {
+        ymd: ymd,
+        date: ymd,
+        hasCalendarEntry: true,
+        isClassDay: false,
+        effectiveWeekday: '',
+        weekday: '',
+        term: '',
+        usedActualWeekdayFallback: false,
+        usedTermFallback: false
+      };
+    }
+
+    const effectiveWeekday = normalizeWeekday_(entry.weekday);
+    const rawTerm = normalizeString_(entry.term);
+    const normalizedTerm = normalizeAcademicTerm_(rawTerm);
+    const usedTermFallback = !rawTerm;
+    const term = usedTermFallback ? getAcademicTermFallbackForYmd_(ymd) : normalizedTerm;
+    // A blank legacy term may be outside the 2026 migration boundaries. Keep
+    // the existing Effective Weekday behavior in that case; term-aware flows
+    // decide whether an empty term can form a timetable candidate. A non-empty
+    // invalid term remains fail-closed.
+    const hasValidCalendarTerm = usedTermFallback || term === 'FA' || term === 'SP';
+    const isClassDay = !!effectiveWeekday && hasValidCalendarTerm;
 
     return {
+      ymd: ymd,
       date: ymd,
       hasCalendarEntry: true,
       isClassDay: isClassDay,
-      weekday: isClassDay ? normalizeWeekday_(entry.weekday) : '',
-      usedActualWeekdayFallback: false
+      effectiveWeekday: isClassDay ? effectiveWeekday : '',
+      weekday: isClassDay ? effectiveWeekday : '',
+      term: isClassDay ? term : '',
+      usedActualWeekdayFallback: false,
+      usedTermFallback: usedTermFallback
     };
   }
 
+  const fallbackTerm = getAcademicTermFallbackForYmd_(ymd);
+  const fallbackWeekday = getWeekdayFromYmdJst_(ymd);
   return {
+    ymd: ymd,
     date: ymd,
     hasCalendarEntry: false,
     isClassDay: true,
-    weekday: getWeekdayFromYmdJst_(ymd),
-    usedActualWeekdayFallback: true
+    effectiveWeekday: fallbackWeekday,
+    weekday: fallbackWeekday,
+    term: fallbackTerm,
+    usedActualWeekdayFallback: true,
+    usedTermFallback: true
+  };
+}
+
+/**
+ * Existing callers expect the Effective Weekday shape. Keep it as a wrapper
+ * while new date-sensitive flows can consume the full term-aware context.
+ */
+function getEffectiveClassDayInfo_(value, calendarIndex) {
+  const context = getEffectiveClassDayContext_(value, calendarIndex);
+  return {
+    date: context.ymd,
+    hasCalendarEntry: context.hasCalendarEntry,
+    isClassDay: context.isClassDay,
+    weekday: context.effectiveWeekday,
+    usedActualWeekdayFallback: context.usedActualWeekdayFallback
   };
 }
 
@@ -337,7 +437,8 @@ function buildEffectiveClassDayIndex_(calendarData) {
   const col = {
     date: findColumnIndex_(headers, ['date', '日付']),
     weekday: findColumnIndex_(headers, ['weekday', '曜日']),
-    isClassDay: findColumnIndex_(headers, ['isClassDay', '授業日'])
+    isClassDay: findColumnIndex_(headers, ['isClassDay', '授業日']),
+    term: findColumnIndex_(headers, ['term', '学期'])
   };
 
   ['date', 'weekday', 'isClassDay'].forEach(function(key) {
@@ -357,7 +458,8 @@ function buildEffectiveClassDayIndex_(calendarData) {
 
     index[ymd] = {
       weekday: normalizeWeekday_(row[col.weekday]),
-      isClassDay: row[col.isClassDay] === true
+      isClassDay: row[col.isClassDay] === true,
+      term: col.term === -1 ? '' : normalizeString_(row[col.term])
     };
   });
 
