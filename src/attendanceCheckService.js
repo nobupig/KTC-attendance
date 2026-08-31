@@ -1,4 +1,10 @@
 function getUnsubmittedClasses(targetDate) {
+  const target = formatDateToYmd(targetDate);
+  const classDayInfo = getEffectiveClassDayInfo_(target);
+  if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
+    return [];
+  }
+
   const ss = getOperationSpreadsheet();
 
   const sessionsSheet = ss.getSheetByName(CONFIG.SHEETS.CLASS_SESSIONS);
@@ -53,8 +59,6 @@ function getUnsubmittedClasses(targetDate) {
   validateRequiredColumnsForAttendanceCheck_('classSessions', colSession, ['classId', 'date', 'period']);
   validateRequiredColumnsForAttendanceCheck_('attendance', colAttendance, ['classId', 'date', 'period']);
   validateRequiredColumnsForAttendanceCheck_('attendanceSessions', colAttendanceSession, ['classId', 'date', 'period']);
-
-  const target = formatDateToYmd(targetDate);
 
   const targetSessionRows = sessionRows.filter(function(row) {
     const classId = normalizeString_(row[colSession.classId]);
@@ -114,6 +118,10 @@ if (!hasAttendanceSession) {
 
 function getUnsubmittedClassesFast_(targetDate) {
   const target = formatDateToYmd(targetDate);
+  const classDayInfo = getEffectiveClassDayInfo_(target);
+  if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
+    return [];
+  }
 
   const sessionData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_SESSIONS, 30);
   const attendanceData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE, 15);
@@ -200,12 +208,20 @@ function checkYesterdayAttendance() {
     return;
   }
 
+  const classDayInfo = getEffectiveClassDayInfo_(unsubmitted[0].date);
+  if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
+    return;
+  }
+
   const grouped = {};
   const logData = [];
 
   unsubmitted.forEach(function(item) {
-    const weekday = getWeekdayFromYmdJst_(item.date);
-    const assignment = getTeacherAssignmentByClassPeriod_(item.classId, weekday, item.period);
+    const assignment = getTeacherAssignmentByClassPeriod_(
+      item.classId,
+      classDayInfo.weekday,
+      item.period
+    );
 
     if (!assignment || !Array.isArray(assignment.teachers) || assignment.teachers.length === 0) {
       return;

@@ -182,6 +182,7 @@ function getAdminMissingSummaryRangeGrouped(startDate, endDate, gradeFilter) {
   const assignmentMap = buildAdminAssignmentMap_(timetableData, teamData, teacherLookup);
 
   const savedKeySet = getSavedSessionKeySetByRangeCached_(startYmd, endYmd);
+  const effectiveClassDayIndex = getEffectiveClassDayIndex_();
   const grouped = {};
 
   classSessionsData.rows.forEach(function(row) {
@@ -198,8 +199,10 @@ function getAdminMissingSummaryRangeGrouped(startDate, endDate, gradeFilter) {
     const saveKey = [classId, ymd, period].join('__');
     if (savedKeySet[saveKey]) return;
 
-    const weekday = getWeekdayFromYmdJst_(ymd);
-    const assignKey = buildAdminAssignKey_(classId, weekday, period);
+    const classDayInfo = getEffectiveClassDayInfo_(ymd, effectiveClassDayIndex);
+    if (!classDayInfo.isClassDay || !classDayInfo.weekday) return;
+
+    const assignKey = buildAdminAssignKey_(classId, classDayInfo.weekday, period);
     const teacherAssign = assignmentMap[assignKey] || { teachers: [] };
 
     const teacherLabel = buildAdminTeacherSummaryLabel_(classId, teacherAssign.teachers);
@@ -409,7 +412,12 @@ function buildAdminMissingSummaryCopyText_(startYmd, endYmd, rows) {
 
 function getAdminTargetSessions_(targetDate) {
   const ymd = formatDateToYmd(targetDate);
-  const weekday = getWeekdayFromYmdJst_(ymd);
+  const classDayInfo = getEffectiveClassDayInfo_(ymd);
+  if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
+    return [];
+  }
+
+  const weekday = classDayInfo.weekday;
 
   const classSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_SESSIONS, 60);
   const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);

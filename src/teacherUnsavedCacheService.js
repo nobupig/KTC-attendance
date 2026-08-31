@@ -8,6 +8,8 @@ const TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HANDLER_ =
 const TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_HOURS_ = Object.freeze([6, 12, 17, 21]);
 const TEACHER_UNSAVED_CACHE_REBUILD_TRIGGER_TIME_ZONE_ = 'Asia/Tokyo';
 const TEACHER_UNSAVED_CACHE_REBUILD_MAX_ATTEMPTS_ = 2;
+const TEACHER_UNSAVED_CALENDAR_REVISION_PROPERTY_ =
+  'teacherUnsavedCalendarRevision';
 
 const TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_ = Object.freeze([
   'snapshotId',
@@ -589,11 +591,13 @@ function debugLogCompareTeacherUnsavedCacheForCurrentUser() {
 
 function buildTeacherUnsavedCacheSnapshot_() {
   const checkedAt = new Date();
+  const calendarRevision = getTeacherUnsavedCalendarRevision_();
   const attendanceSessionsRowCount = getTeacherUnsavedAttendanceSessionsRowCount_();
   const dateContext = getTeacherUnsavedCacheDateContext_(checkedAt);
   const snapshotId = buildTeacherUnsavedSnapshotId_(checkedAt);
   const warnings = [];
   const sources = loadTeacherUnsavedCacheSources_();
+  const effectiveClassDayIndex = buildEffectiveClassDayIndex_(sources.calendar);
   const teacherIndex = buildTeacherUnsavedTeacherIndex_(sources.teachers, warnings);
   const classMap = buildTeacherUnsavedClassMap_(sources.classes);
   const assignmentMap = buildTeacherUnsavedAssignmentMap_(
@@ -641,8 +645,10 @@ function buildTeacherUnsavedCacheSnapshot_() {
       const period = normalizeString_(row[csCol.period]);
       if (!classId || !period) return;
 
-      const weekday = getWeekdayFromYmdJst_(ymd);
-      const assignmentKey = [classId, weekday, period].join('__');
+      const classDayInfo = getEffectiveClassDayInfo_(ymd, effectiveClassDayIndex);
+      if (!classDayInfo.isClassDay || !classDayInfo.weekday) return;
+
+      const assignmentKey = [classId, classDayInfo.weekday, period].join('__');
       const assignment = assignmentMap[assignmentKey];
       if (!assignment || !assignment.teacherIds.length) return;
 
@@ -728,6 +734,7 @@ function buildTeacherUnsavedCacheSnapshot_() {
     startYmd: dateContext.startYmd,
     endYmd: dateContext.endYmd,
     checkedAt: checkedAt,
+    calendarRevision: calendarRevision,
     attendanceSessionsRowCount: attendanceSessionsRowCount,
     summaryRows: summaryRows,
     detailRows: detailRows,
@@ -736,6 +743,7 @@ function buildTeacherUnsavedCacheSnapshot_() {
     warnings: warnings,
     sourceRowCounts: {
       teachers: sources.teachers.rows.length,
+      calendar: sources.calendar.rows.length,
       timetable: sources.timetable.rows.length,
       classTeacherTeams: sources.classTeacherTeams.rows.length,
       classes: sources.classes.rows.length,
@@ -751,6 +759,7 @@ function loadTeacherUnsavedCacheSources_() {
 
   return {
     teachers: readTeacherUnsavedSourceSheet_(operation, CONFIG.SHEETS.TEACHERS, false),
+    calendar: readTeacherUnsavedSourceSheet_(operation, CONFIG.SHEETS.CALENDAR, true),
     timetable: readTeacherUnsavedSourceSheet_(operation, CONFIG.SHEETS.TIMETABLE, false),
     classTeacherTeams: readTeacherUnsavedSourceSheet_(
       operation,
@@ -1054,12 +1063,110 @@ function buildTeacherUnsavedCachePublishConflict_(expectedRowCount, actualRowCou
   return error;
 }
 
+function buildTeacherUnsavedCalendarRevisionConflict_(expectedRevision, actualRevision) {
+  const error = new Error(
+    'キャッシュ計算中に calendar が更新されました。' +
+    ' expected=' + expectedRevision + ' actual=' + actualRevision
+  );
+  error.name = 'TeacherUnsavedCachePublishConflictError';
+  error.retryable = true;
+  error.reason = 'calendar-revision-changed';
+  error.expectedCalendarRevision = expectedRevision;
+  error.actualCalendarRevision = actualRevision;
+  return error;
+}
+
 function isTeacherUnsavedCachePublishConflict_(error) {
   return !!(
     error &&
     error.name === 'TeacherUnsavedCachePublishConflictError' &&
     error.retryable === true
   );
+}
+
+function getTeacherUnsavedCalendarRevision_() {
+  return PropertiesService.getScriptProperties()
+    .getProperty(TEACHER_UNSAVED_CALENDAR_REVISION_PROPERTY_) || '';
+}
+
+function advanceTeacherUnsavedCalendarRevisionUnderLock_() {
+  const lock = LockService.getScriptLock();
+  if (!lock.hasLock()) {
+    throw new Error('calendar revision更新にはScriptLockが必要です。');
+  }
+
+  const revision = Utilities.getUuid();
+  PropertiesService.getScriptProperties().setProperty(
+    TEACHER_UNSAVED_CALENDAR_REVISION_PROPERTY_,
+    revision
+  );
+  return revision;
+}
+
+function invalidateTeacherUnsavedFastSnapshotsAfterCalendarChange_() {
+  const lock = LockService.getScriptLock();
+  const alreadyLocked = lock.hasLock();
+
+  if (!alreadyLocked && !lock.tryLock(10000)) {
+    throw new Error('calendar変更後のFastキャッシュ無効化用Lockを取得できませんでした。');
+  }
+
+  try {
+    return invalidateTeacherUnsavedFastSnapshotsAfterCalendarChangeUnderLock_();
+  } finally {
+    if (!alreadyLocked) {
+      lock.releaseLock();
+    }
+  }
+}
+
+function invalidateTeacherUnsavedFastSnapshotsAfterCalendarChangeUnderLock_() {
+  const lock = LockService.getScriptLock();
+  if (!lock.hasLock()) {
+    throw new Error('calendar変更後のFastキャッシュ無効化にはScriptLockが必要です。');
+  }
+
+  const calendarRevision = advanceTeacherUnsavedCalendarRevisionUnderLock_();
+  const validation = validateTeacherUnsavedCacheSheets_();
+
+  if (!validation.ok) {
+    const hasSummarySheet = !!validation.summary.sheet;
+    const hasDetailSheet = !!validation.detail.sheet;
+
+    if (!hasSummarySheet && !hasDetailSheet) {
+      return {
+        ok: true,
+        calendarRevision: calendarRevision,
+        invalidatedSummaryCount: 0,
+        invalidatedDetailCount: 0,
+        cacheSheetsPresent: false
+      };
+    }
+
+    throw new Error(buildTeacherUnsavedCacheValidationError_(validation));
+  }
+
+  const summarySheet = validation.summary.sheet;
+  const detailSheet = validation.detail.sheet;
+  const summaryCount = Math.max(summarySheet.getLastRow() - 1, 0);
+  const detailCount = Math.max(detailSheet.getLastRow() - 1, 0);
+  const invalidationMessage =
+    'calendar更新後にFastキャッシュを無効化しました。次回rebuildを待っています。';
+
+  markTeacherUnsavedSummaryRowsStatus_(
+    summarySheet,
+    'stale',
+    invalidationMessage
+  );
+  if (summaryCount > 0) SpreadsheetApp.flush();
+
+  return {
+    ok: true,
+    calendarRevision: calendarRevision,
+    invalidatedSummaryCount: summaryCount,
+    invalidatedDetailCount: detailCount,
+    cacheSheetsPresent: true
+  };
 }
 
 function invalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(classId, date, period) {
@@ -1198,6 +1305,15 @@ function publishTeacherUnsavedCacheSnapshot_(snapshot) {
   }
 
   try {
+    const currentCalendarRevision = getTeacherUnsavedCalendarRevision_();
+    const snapshotCalendarRevision = snapshot.calendarRevision || '';
+    if (currentCalendarRevision !== snapshotCalendarRevision) {
+      throw buildTeacherUnsavedCalendarRevisionConflict_(
+        snapshotCalendarRevision,
+        currentCalendarRevision
+      );
+    }
+
     const validation = validateTeacherUnsavedCacheSheets_();
     if (!validation.ok) {
       throw new Error(buildTeacherUnsavedCacheValidationError_(validation));

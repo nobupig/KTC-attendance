@@ -261,6 +261,19 @@ function getClassSessionsByDateCached_(ymd) {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
   const targetYmd = formatDateToYmd(ymd);
+  const classDayInfo = getEffectiveClassDayInfo_(targetYmd);
+
+  if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getClassSessionsByDateCached_ total',
+        totalStartedAt,
+        'non-class-day ymd=' + targetYmd
+      );
+    }
+    return [];
+  }
+
   const cacheKey = 'classSessionsByDate__v6__' + targetYmd;
 
   const cached = getScriptCacheJson_(cacheKey);
@@ -272,7 +285,9 @@ function getClassSessionsByDateCached_(ymd) {
         'cache=hit rows=' + cached.length + ' ymd=' + targetYmd
       );
     }
-    return cached;
+    return cached.map(function(session) {
+      return Object.assign({}, session, { weekday: classDayInfo.weekday });
+    });
   }
 
   const ss = getOperationSpreadsheet();
@@ -324,7 +339,7 @@ function getClassSessionsByDateCached_(ymd) {
   }
 
   const buildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const weekday = getWeekdayFromYmdJst_(targetYmd);
+  const weekday = classDayInfo.weekday;
   const result = [];
 
   values.forEach(function(row, index) {
@@ -374,7 +389,7 @@ function getClassSessionsByDateIndexCached_() {
         'cache=hit dates=' + Object.keys(cached).length
       );
     }
-    return cached;
+    return applyEffectiveClassDayInfoToSessionIndex_(cached, getEffectiveClassDayIndex_());
   }
 
   const ss = getOperationSpreadsheet();
@@ -426,15 +441,10 @@ function getClassSessionsByDateIndexCached_() {
 
   const buildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const byDateMap = {};
-  const weekdayCache = {};
 
   values.forEach(function(row, index) {
     const rowYmd = normalizeYmdDisplayText_(dateDisplayValues[index][0]);
     if (!rowYmd) return;
-
-    if (!weekdayCache[rowYmd]) {
-      weekdayCache[rowYmd] = getWeekdayFromYmdJst_(rowYmd);
-    }
 
     if (!byDateMap[rowYmd]) {
       byDateMap[rowYmd] = [];
@@ -445,7 +455,7 @@ function getClassSessionsByDateIndexCached_() {
       date: rowYmd,
       period: normalizeString_(row[csCol.period]),
       sessionNumber: csCol.sessionNumber !== -1 ? row[csCol.sessionNumber] : '',
-      weekday: weekdayCache[rowYmd]
+      weekday: ''
     });
   });
 
@@ -468,7 +478,26 @@ function getClassSessionsByDateIndexCached_() {
     );
   }
 
-  return byDateMap;
+  return applyEffectiveClassDayInfoToSessionIndex_(byDateMap, getEffectiveClassDayIndex_());
+}
+
+function applyEffectiveClassDayInfoToSessionIndex_(byDateMap, calendarIndex) {
+  const result = byDateMap || {};
+
+  Object.keys(result).forEach(function(ymd) {
+    const classDayInfo = getEffectiveClassDayInfo_(ymd, calendarIndex);
+
+    if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
+      delete result[ymd];
+      return;
+    }
+
+    (result[ymd] || []).forEach(function(session) {
+      session.weekday = classDayInfo.weekday;
+    });
+  });
+
+  return result;
 }
 
 
@@ -1163,8 +1192,15 @@ function debugTeacherClassesByDate() {
     period: findColumnIndex_(classSessionsData.headers, ['period', '時限'])
   };
 
-  const weekday = getWeekdayFromYmdJst_(ymd);
-  Logger.log('targetDate=' + ymd + ', weekday=' + weekday + ', teacherId=' + currentTeacherId);
+  const classDayInfo = getEffectiveClassDayInfo_(ymd);
+  const weekday = classDayInfo.weekday;
+  Logger.log(
+    'targetDate=' + ymd +
+    ', effectiveWeekday=' + weekday +
+    ', isClassDay=' + classDayInfo.isClassDay +
+    ', calendarEntry=' + classDayInfo.hasCalendarEntry +
+    ', teacherId=' + currentTeacherId
+  );
 
   const targetSessions = classSessions.filter(row => formatDateToYmd(row[csCol.date]) === ymd);
   Logger.log('targetSessions=' + JSON.stringify(targetSessions, null, 2));

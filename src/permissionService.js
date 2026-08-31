@@ -44,6 +44,15 @@ function canEditAttendance(session) {
     return false;
   }
 
+  if (!session || !session.classId || !session.period || !session.date) {
+    return false;
+  }
+
+  const classDayInfo = getEffectiveClassDayInfo_(session.date);
+  if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
+    return false;
+  }
+
   if (hasRole_(user, 'admin')) {
     return true;
   }
@@ -53,12 +62,11 @@ function canEditAttendance(session) {
     return false;
   }
 
-  if (!session || !session.classId || !session.period || !session.date) {
-    return false;
-  }
-
-  const weekday = getWeekdayFromYmdJst_(formatDateToYmd(session.date));
-  const assignment = getTeacherAssignmentByClassPeriod_(session.classId, weekday, session.period);
+  const assignment = getTeacherAssignmentByClassPeriod_(
+    session.classId,
+    classDayInfo.weekday,
+    session.period
+  );
 
   if (!assignment || !Array.isArray(assignment.teachers)) {
     return false;

@@ -54,6 +54,12 @@ function testGenerateFirstTermCalendar2026() {
  * calendar を全消去してヘッダーだけ残す
  */
 function clearCalendarSheet() {
+  return runCalendarWriteWithLock_(function() {
+    return clearCalendarSheetUnderLock_();
+  });
+}
+
+function clearCalendarSheetUnderLock_() {
   const ss = getOperationSpreadsheet();
   const sheet = ss.getSheetByName(CONFIG.SHEETS.CALENDAR);
 
@@ -64,6 +70,8 @@ function clearCalendarSheet() {
   sheet.clearContents();
   sheet.getRange(1, 1, 1, CALENDAR_SERVICE_CONFIG.CALENDAR_HEADER.length)
     .setValues([CALENDAR_SERVICE_CONFIG.CALENDAR_HEADER]);
+
+  invalidateEffectiveCalendarCache_();
 }
 
 /* =========================
@@ -71,6 +79,12 @@ function clearCalendarSheet() {
  * ========================= */
 
 function upsertCalendarRange_(startDateStr, endDateStr, closedRanges) {
+  return runCalendarWriteWithLock_(function() {
+    return upsertCalendarRangeUnderLock_(startDateStr, endDateStr, closedRanges);
+  });
+}
+
+function upsertCalendarRangeUnderLock_(startDateStr, endDateStr, closedRanges) {
   const ss = getOperationSpreadsheet();
   const calendarSheet = ss.getSheetByName(CONFIG.SHEETS.CALENDAR);
 
@@ -119,6 +133,8 @@ function upsertCalendarRange_(startDateStr, endDateStr, closedRanges) {
       .getRange(2, 1, rows.length, rows[0].length)
       .setValues(rows);
   }
+
+  invalidateEffectiveCalendarCache_();
 
   return {
     start: startKey,
@@ -260,4 +276,199 @@ function toBooleanForCalendar_(value) {
   const normalized = String(value || '').trim().toUpperCase();
 
   return normalized === 'TRUE' || normalized === '1';
+}
+
+/**
+ * 対象日に実施する授業曜日を calendar から解決する。
+ * calendar に行がない日付だけは、従来互換として実曜日へフォールバックする。
+ *
+ * @param {*} value 日付
+ * @param {Object=} calendarIndex buildEffectiveClassDayIndex_ の戻り値
+ * @returns {{date:string,hasCalendarEntry:boolean,isClassDay:boolean,weekday:string,usedActualWeekdayFallback:boolean}}
+ */
+function getEffectiveClassDayInfo_(value, calendarIndex) {
+  const ymd = normalizeEffectiveCalendarYmd_(value, '');
+  const index = calendarIndex || getEffectiveClassDayIndex_();
+  const hasCalendarEntry = Object.prototype.hasOwnProperty.call(index, ymd);
+
+  if (hasCalendarEntry) {
+    const entry = index[ymd] || {};
+    const isClassDay = entry.isClassDay === true;
+
+    return {
+      date: ymd,
+      hasCalendarEntry: true,
+      isClassDay: isClassDay,
+      weekday: isClassDay ? normalizeWeekday_(entry.weekday) : '',
+      usedActualWeekdayFallback: false
+    };
+  }
+
+  return {
+    date: ymd,
+    hasCalendarEntry: false,
+    isClassDay: true,
+    weekday: getWeekdayFromYmdJst_(ymd),
+    usedActualWeekdayFallback: true
+  };
+}
+
+function getEffectiveWeekdayForDate_(value, calendarIndex) {
+  const info = getEffectiveClassDayInfo_(value, calendarIndex);
+  return info.isClassDay ? info.weekday : '';
+}
+
+function getEffectiveClassDayIndex_() {
+  const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 300);
+  return buildEffectiveClassDayIndex_(calendarData);
+}
+
+function buildEffectiveClassDayIndex_(calendarData) {
+  const headers = Array.isArray(calendarData && calendarData.headers)
+    ? calendarData.headers
+    : [];
+  const rows = Array.isArray(calendarData && calendarData.rows)
+    ? calendarData.rows
+    : [];
+  const dateDisplayValues = Array.isArray(calendarData && calendarData.dateDisplayValues)
+    ? calendarData.dateDisplayValues
+    : [];
+
+  const col = {
+    date: findColumnIndex_(headers, ['date', '日付']),
+    weekday: findColumnIndex_(headers, ['weekday', '曜日']),
+    isClassDay: findColumnIndex_(headers, ['isClassDay', '授業日'])
+  };
+
+  ['date', 'weekday', 'isClassDay'].forEach(function(key) {
+    if (col[key] === -1) {
+      throw new Error('calendar シートに必要な列がありません: ' + key);
+    }
+  });
+
+  const index = {};
+
+  rows.forEach(function(row, rowIndex) {
+    const rawDate = row[col.date];
+    const displayDate = dateDisplayValues[rowIndex];
+    const ymd = normalizeEffectiveCalendarYmd_(rawDate, displayDate);
+
+    if (!ymd) return;
+
+    index[ymd] = {
+      weekday: normalizeWeekday_(row[col.weekday]),
+      isClassDay: row[col.isClassDay] === true
+    };
+  });
+
+  return index;
+}
+
+function normalizeEffectiveCalendarYmd_(rawDate, displayDate) {
+  const displayYmd = normalizeYmdDisplayText_(displayDate);
+  if (displayYmd) return displayYmd;
+
+  if (!rawDate) return '';
+  if (rawDate instanceof Date) return formatDateToYmd(rawDate);
+
+  const rawText = String(rawDate).trim();
+  if (!rawText) return '';
+
+  // getSheetDataCached_ 経由の Date は UTC の ISO 文字列になるため、
+  // 先頭10文字ではなく JST に戻して日付を確定する。
+  if (/^\d{4}-\d{2}-\d{2}T/.test(rawText)) {
+    return formatDateToYmd(rawText);
+  }
+
+  return normalizeYmdDisplayText_(rawText) || formatDateToYmd(rawText);
+}
+
+function invalidateEffectiveCalendarCache_() {
+  removeScriptCacheKeys_([
+    'sheetData__OPERATION__' + CONFIG.SHEETS.CALENDAR
+  ]);
+
+  invalidateTeacherUnsavedFastSnapshotsAfterCalendarChange_();
+}
+
+function runCalendarWriteWithLock_(callback) {
+  const lock = LockService.getScriptLock();
+  const alreadyLocked = lock.hasLock();
+
+  if (!alreadyLocked) {
+    lock.waitLock(10000);
+  }
+
+  try {
+    return callback();
+  } finally {
+    if (!alreadyLocked) {
+      lock.releaseLock();
+    }
+  }
+}
+
+function testEffectiveWeekdayContract() {
+  const cases = [
+    { name: 'A', date: '2026-10-12', weekday: '月', isClassDay: true, expected: 'Mon', actual: 'Mon' },
+    { name: 'B', date: '2026-10-15', weekday: '月', isClassDay: true, expected: 'Mon', actual: 'Thu' },
+    { name: 'C', date: '2026-11-27', weekday: '月', isClassDay: true, expected: 'Mon', actual: 'Fri' },
+    { name: 'D', date: '2027-01-14', weekday: '火', isClassDay: true, expected: 'Tue', actual: 'Thu' },
+    { name: 'E', date: '2026-10-16', weekday: '金', isClassDay: false, expected: '', actual: 'Fri' }
+  ];
+
+  const results = cases.map(function(testCase) {
+    const index = {};
+    index[testCase.date] = {
+      weekday: testCase.weekday,
+      isClassDay: testCase.isClassDay
+    };
+
+    const actual = getEffectiveClassDayInfo_(testCase.date, index);
+    const actualCalendarWeekday = getWeekdayFromYmdJst_(testCase.date);
+    const passed = actual.isClassDay === testCase.isClassDay &&
+      actual.weekday === testCase.expected &&
+      actualCalendarWeekday === testCase.actual;
+
+    if (!passed) {
+      throw new Error(
+        'Effective Weekday test ' + testCase.name + ' failed: ' + JSON.stringify(actual)
+      );
+    }
+
+    return {
+      name: testCase.name,
+      date: testCase.date,
+      isClassDay: actual.isClassDay,
+      weekday: actual.weekday,
+      actualCalendarWeekday: actualCalendarWeekday,
+      passed: true
+    };
+  });
+
+  const cachedCalendarIndex = buildEffectiveClassDayIndex_({
+    headers: ['date', 'weekday', 'isClassDay'],
+    rows: [['2026-10-14T15:00:00.000Z', '月', true]]
+  });
+  if (!cachedCalendarIndex['2026-10-15']) {
+    throw new Error('Effective Weekday cached calendar date normalization failed');
+  }
+
+  const missingCalendarFallback = getEffectiveClassDayInfo_('2026-10-15', {});
+  if (
+    missingCalendarFallback.weekday !== 'Thu' ||
+    missingCalendarFallback.usedActualWeekdayFallback !== true
+  ) {
+    throw new Error('Effective Weekday missing-row fallback failed');
+  }
+
+  const directIsoInput = getEffectiveClassDayInfo_('2026-10-14T15:00:00.000Z', {
+    '2026-10-15': { weekday: '月', isClassDay: true }
+  });
+  if (directIsoInput.date !== '2026-10-15' || directIsoInput.weekday !== 'Mon') {
+    throw new Error('Effective Weekday direct ISO normalization failed');
+  }
+
+  Logger.log(JSON.stringify(results, null, 2));
+  return results;
 }
