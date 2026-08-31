@@ -603,12 +603,22 @@ function buildTeacherUnsavedCacheSnapshot_() {
   const effectiveClassDayIndex = buildEffectiveClassDayIndex_(sources.calendar);
   const teacherIndex = buildTeacherUnsavedTeacherIndex_(sources.teachers, warnings);
   const classMap = buildTeacherUnsavedClassMap_(sources.classes);
-  const assignmentMap = buildTeacherUnsavedAssignmentMap_(
+  const assignmentIndex = buildTeachingAssignmentIndex_(
     sources.timetable,
     sources.classTeacherTeams,
-    teacherIndex,
-    warnings
+    function(teacherId, teacherName, roleType) {
+      const id = normalizeString_(teacherId) || (teacherIndex.byName[normalizeString_(teacherName)] || {}).teacherId || '';
+      const teacher = teacherIndex.byId[id] || {};
+      return {
+        teacherId: id,
+        teacherName: teacher.teacherName || normalizeString_(teacherName),
+        teacherEmail: teacher.teacherEmail || '',
+        roles: teacher.roles || [],
+        roleType: normalizeString_(roleType || 'support').toLowerCase() || 'support'
+      };
+    }
   );
+  assignmentIndex.warnings.forEach(function(warning) { addTeacherUnsavedWarning_(warnings, warning); });
   const savedKeySet = buildTeacherUnsavedSavedKeySet_(
     sources.attendanceSessions,
     dateContext.startYmd,
@@ -648,11 +658,8 @@ function buildTeacherUnsavedCacheSnapshot_() {
       const period = normalizeString_(row[csCol.period]);
       if (!classId || !period) return;
 
-      const classDayInfo = getEffectiveClassDayInfo_(ymd, effectiveClassDayIndex);
-      if (!classDayInfo.isClassDay || !classDayInfo.weekday) return;
-
-      const assignmentKey = [classId, classDayInfo.weekday, period].join('__');
-      const assignment = assignmentMap[assignmentKey];
+      const classDayInfo = getEffectiveClassDayContext_(ymd, effectiveClassDayIndex);
+      const assignment = getTeachingAssignmentForSessionFromIndex_(assignmentIndex, classId, ymd, period, classDayInfo);
       if (!assignment || !assignment.teacherIds.length) return;
 
       const cls = classMap[classId] || {};

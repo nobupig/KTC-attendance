@@ -208,7 +208,10 @@ function checkYesterdayAttendance() {
     return;
   }
 
-  const classDayInfo = getEffectiveClassDayInfo_(unsubmitted[0].date);
+  // Build all assignment/calendar sources once per check. Individual sessions
+  // still resolve their own effective class-day context from this same index.
+  const assignmentContext = buildAttendanceCheckAssignmentContext_();
+  const classDayInfo = getEffectiveClassDayContext_(unsubmitted[0].date, assignmentContext.calendarIndex);
   if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
     return;
   }
@@ -217,10 +220,13 @@ function checkYesterdayAttendance() {
   const logData = [];
 
   unsubmitted.forEach(function(item) {
-    const assignment = getTeacherAssignmentByClassPeriod_(
+    const itemClassDayInfo = getEffectiveClassDayContext_(item.date, assignmentContext.calendarIndex);
+    const assignment = getTeachingAssignmentForSessionFromIndex_(
+      assignmentContext.assignmentIndex,
       item.classId,
-      classDayInfo.weekday,
-      item.period
+      item.date,
+      item.period,
+      itemClassDayInfo
     );
 
     if (!assignment || !Array.isArray(assignment.teachers) || assignment.teachers.length === 0) {
@@ -286,6 +292,16 @@ function checkYesterdayAttendance() {
   });
 
   recordMissingAttendanceLog(logData);
+}
+
+function buildAttendanceCheckAssignmentContext_() {
+  const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 300);
+  const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
+  const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 300);
+  return {
+    assignmentIndex: buildTeachingAssignmentIndex_(timetableData, teamData, buildTeacherTeamMember_),
+    calendarIndex: buildEffectiveClassDayIndex_(calendarData)
+  };
 }
 
 function recordMissingAttendanceLog(data) {

@@ -179,7 +179,16 @@ function getAdminMissingSummaryRangeGrouped(startDate, endDate, gradeFilter) {
 
   const classMap = buildAdminClassMap_(classesData);
   const teacherLookup = buildAdminTeacherLookup_(teachersData);
-  const assignmentMap = buildAdminAssignmentMap_(timetableData, teamData, teacherLookup);
+  const assignmentIndex = buildTeachingAssignmentIndex_(timetableData, teamData, function(teacherId, teacherName, roleType) {
+    const record = teacherLookup.byId[normalizeString_(teacherId)] || teacherLookup.byName[normalizeString_(teacherName)] || {};
+    return {
+      teacherId: record.teacherId || normalizeString_(teacherId),
+      teacherName: record.teacherName || normalizeString_(teacherName),
+      teacherEmail: record.teacherEmail || '',
+      roles: record.roles || [],
+      roleType: normalizeString_(roleType || 'support').toLowerCase() || 'support'
+    };
+  });
 
   const savedKeySet = getSavedSessionKeySetByRangeCached_(startYmd, endYmd);
   const effectiveClassDayIndex = getEffectiveClassDayIndex_();
@@ -199,11 +208,10 @@ function getAdminMissingSummaryRangeGrouped(startDate, endDate, gradeFilter) {
     const saveKey = [classId, ymd, period].join('__');
     if (savedKeySet[saveKey]) return;
 
-    const classDayInfo = getEffectiveClassDayInfo_(ymd, effectiveClassDayIndex);
+    const classDayInfo = getEffectiveClassDayContext_(ymd, effectiveClassDayIndex);
     if (!classDayInfo.isClassDay || !classDayInfo.weekday) return;
 
-    const assignKey = buildAdminAssignKey_(classId, classDayInfo.weekday, period);
-    const teacherAssign = assignmentMap[assignKey] || { teachers: [] };
+    const teacherAssign = getTeachingAssignmentForSessionFromIndex_(assignmentIndex, classId, ymd, period, classDayInfo) || { teachers: [] };
 
     const teacherLabel = buildAdminTeacherSummaryLabel_(classId, teacherAssign.teachers);
     const groupKey = [
@@ -412,12 +420,10 @@ function buildAdminMissingSummaryCopyText_(startYmd, endYmd, rows) {
 
 function getAdminTargetSessions_(targetDate) {
   const ymd = formatDateToYmd(targetDate);
-  const classDayInfo = getEffectiveClassDayInfo_(ymd);
+  const classDayInfo = getEffectiveClassDayContext_(ymd);
   if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
     return [];
   }
-
-  const weekday = classDayInfo.weekday;
 
   const classSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_SESSIONS, 60);
   const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
@@ -435,7 +441,16 @@ function getAdminTargetSessions_(targetDate) {
 
   const classMap = buildAdminClassMap_(classesData);
   const teacherLookup = buildAdminTeacherLookup_(teachersData);
-  const assignmentMap = buildAdminAssignmentMap_(timetableData, teamData, teacherLookup);
+  const assignmentIndex = buildTeachingAssignmentIndex_(timetableData, teamData, function(teacherId, teacherName, roleType) {
+    const record = teacherLookup.byId[normalizeString_(teacherId)] || teacherLookup.byName[normalizeString_(teacherName)] || {};
+    return {
+      teacherId: record.teacherId || normalizeString_(teacherId),
+      teacherName: record.teacherName || normalizeString_(teacherName),
+      teacherEmail: record.teacherEmail || '',
+      roles: record.roles || [],
+      roleType: normalizeString_(roleType || 'support').toLowerCase() || 'support'
+    };
+  });
 
   return classSessionsData.rows
     .filter(function(row) {
@@ -446,8 +461,7 @@ function getAdminTargetSessions_(targetDate) {
       const period = normalizeString_(row[csCol.period]);
       const sessionNumber = csCol.sessionNumber !== -1 ? row[csCol.sessionNumber] : '';
       const classInfo = classMap[classId] || {};
-      const assignKey = buildAdminAssignKey_(classId, weekday, period);
-      const teacherAssign = assignmentMap[assignKey] || null;
+      const teacherAssign = getTeachingAssignmentForSessionFromIndex_(assignmentIndex, classId, ymd, period, classDayInfo) || null;
 
       const mainTeacher = teacherAssign
         ? (teacherAssign.teachers.find(function(t) { return t.roleType === 'main'; }) || teacherAssign.teachers[0] || null)

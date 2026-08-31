@@ -43,7 +43,7 @@ const sandbox = {
   }
 };
 vm.createContext(sandbox);
-['src/calendarService.js', 'src/classSessionService.js'].forEach(file => {
+['src/calendarService.js', 'src/classSessionService.js', 'src/teacherService.js'].forEach(file => {
   vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
 });
 
@@ -178,6 +178,185 @@ const calendarHeaders = ['date', 'weekday', 'isClassDay', 'term'];
   assert.strictEqual(legacy.insertCount, 1);
   assert.strictEqual(legacy.termFallbackCount, 1);
   assertFixtureEqual(legacy.timetableRowsByTerm, { 'legacy-no-column': 1 });
+}
+
+{
+  const timetable = {
+    headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'term'],
+    rows: [
+      ['faOnly', 'Mon', 1, 'T_FA', 'FA Teacher', 'FA'],
+      ['spOnly', 'Mon', 1, 'T_SP', 'SP Teacher', 'SP'],
+      ['yearRound', 'Mon', 1, 'T_FY', 'FY Teacher', 'FY']
+    ]
+  };
+  const teams = {
+    headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'roleType', 'term'],
+    rows: [
+      ['spOnly', 'Mon', 1, 'T_SUPPORT', 'Support', 'support', 'SP'],
+      ['orphan', 'Mon', 1, 'T_ORPHAN', 'Orphan', 'support', 'SP']
+    ]
+  };
+  const index = sandbox.buildTeachingAssignmentIndex_(timetable, teams);
+  const faContext = sandbox.getEffectiveClassDayContext_('2026-04-13', {
+    '2026-04-13': { weekday: 'Mon', isClassDay: true, term: 'FA' }
+  });
+  const spContext = sandbox.getEffectiveClassDayContext_('2026-10-15', {
+    '2026-10-15': { weekday: 'Mon', isClassDay: true, term: 'SP' }
+  });
+  assert.strictEqual(sandbox.getTeachingAssignmentForSessionFromIndex_(index, 'spOnly', '2026-04-13', 1, faContext), null);
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(sandbox.getTeachingAssignmentForSessionFromIndex_(index, 'spOnly', '2026-10-15', 1, spContext).teacherIds)),
+    ['T_SP', 'T_SUPPORT']
+  );
+  assert.strictEqual(sandbox.getTeachingAssignmentForSessionFromIndex_(index, 'yearRound', '2026-04-13', 1, faContext).teacherId, 'T_FY');
+  assert.ok(index.warnings.some(warning => warning.includes('対応するtimetable行がありません')));
+
+  const strict = sandbox.buildTeachingAssignmentIndex_({
+    headers: timetable.headers,
+    rows: [['bad', 'Mon', 1, 'T_BAD', 'Bad', '']]
+  }, teams);
+  assert.strictEqual(Object.keys(strict.byKey).length, 0);
+  assert.ok(strict.warnings.some(warning => warning.includes('termが空欄または不正')));
+}
+
+{
+  const timetable = {
+    headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'term'],
+    rows: [['canonical', 'Mon', '01', 'T_CANON', 'Canonical', 'FA']]
+  };
+  const teams = { headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'roleType', 'term'], rows: [] };
+  const index = sandbox.buildTeachingAssignmentIndex_(timetable, teams);
+  const context = sandbox.getEffectiveClassDayContext_('2026-04-13', {
+    '2026-04-13': { weekday: 'Mon', isClassDay: true, term: 'FA' }
+  });
+  assert.strictEqual(sandbox.normalizeTeachingAssignmentPeriod_('001'), '1');
+  assert.strictEqual(sandbox.normalizeTeachingAssignmentPeriod_(1), '1');
+  [0, -1, '1.5', '', 'x'].forEach(value => assert.strictEqual(sandbox.normalizeTeachingAssignmentPeriod_(value), ''));
+  assert.strictEqual(
+    sandbox.getTeachingAssignmentForSessionFromIndex_(index, 'canonical', '2026-04-13', 1, context).teacherId,
+    'T_CANON'
+  );
+}
+
+{
+  const headers = ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'term'];
+  const teamHeaders = ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'roleType', 'term'];
+  const index = sandbox.buildTeachingAssignmentIndex_({
+    headers,
+    rows: [
+      ['duplicate', 'Mon', '1', 'T_A', 'Teacher A', 'SP'],
+      ['duplicate', 'Mon', '01', 'T_B', 'Teacher B', 'SP'],
+      ['unrelated', 'Mon', 1, 'T_OK', 'Teacher OK', 'SP']
+    ]
+  }, {
+    headers: teamHeaders,
+    rows: [['duplicate', 'Mon', 1, 'T_SUPPORT', 'Support', 'support', 'SP']]
+  });
+  const context = sandbox.getEffectiveClassDayContext_('2026-10-15', {
+    '2026-10-15': { weekday: 'Mon', isClassDay: true, term: 'SP' }
+  });
+  assert.strictEqual(sandbox.getTeachingAssignmentForSessionFromIndex_(index, 'duplicate', '2026-10-15', 1, context), null);
+  assert.strictEqual(
+    sandbox.getTeachingAssignmentForSessionFromIndex_(index, 'unrelated', '2026-10-15', 1, context).teacherId,
+    'T_OK'
+  );
+  assert.strictEqual(Object.keys(index.duplicateKeys).length, 1);
+  assert.ok(index.warnings.some(warning => warning.includes('duplicate assignment key')));
+  assert.ok(index.warnings.some(warning => warning.includes('duplicateで無効')));
+}
+
+{
+  const legacyHeaders = ['classId', 'weekday', 'period', 'teacherId', 'teacherName'];
+  const legacyTeamHeaders = ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'roleType'];
+  const legacy = sandbox.buildTeachingAssignmentIndex_({
+    headers: legacyHeaders,
+    rows: [['legacy', 'Mon', 1, 'T_A', 'Teacher A'], ['legacy', 'Mon', '01', 'T_B', 'Teacher B']]
+  }, {
+    headers: legacyTeamHeaders,
+    rows: [['legacy', 'Mon', 1, 'T_SUPPORT', 'Support', 'support']]
+  });
+  const context = sandbox.getEffectiveClassDayContext_('2026-10-15', {
+    '2026-10-15': { weekday: 'Mon', isClassDay: true, term: 'SP' }
+  });
+  assert.strictEqual(sandbox.getTeachingAssignmentForSessionFromIndex_(legacy, 'legacy', '2026-10-15', 1, context), null);
+  assert.strictEqual(Object.keys(legacy.duplicateKeys).length, 1);
+
+  const termful = sandbox.buildTeachingAssignmentIndex_({
+    headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'term'],
+    rows: [['termful', 'Mon', 1, 'T_MAIN', 'Main', 'FA']]
+  }, {
+    headers: legacyTeamHeaders,
+    rows: [['termful', 'Mon', 1, 'T_BAD_TEAM', 'Bad Team', 'support']]
+  });
+  const faContext = sandbox.getEffectiveClassDayContext_('2026-04-13', {
+    '2026-04-13': { weekday: 'Mon', isClassDay: true, term: 'FA' }
+  });
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(sandbox.getTeachingAssignmentForSessionFromIndex_(termful, 'termful', '2026-04-13', 1, faContext).teacherIds)),
+    ['T_MAIN']
+  );
+  assert.ok(termful.warnings.some(warning => warning.includes('term契約がtimetableと一致しません')));
+}
+
+{
+  sandbox.CONFIG = {
+    SHEETS: { TIMETABLE: 'timetable', CLASS_TEACHER_TEAMS: 'classTeacherTeams', CALENDAR: 'calendar' },
+    APP: { BASE_URL: 'https://example.invalid' }
+  };
+  sandbox.getTeacherRecordById_ = () => null;
+  sandbox.getTeacherRecordByName_ = () => null;
+  const cachedSources = {
+    timetable: { headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'term'], rows: [
+      ['a', 'Mon', 1, 'T_A', 'Teacher A', 'FA'], ['b', 'Mon', 1, 'T_B', 'Teacher B', 'FA']
+    ] },
+    classTeacherTeams: { headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'roleType', 'term'], rows: [] },
+    calendar: { headers: ['date', 'weekday', 'isClassDay', 'term'], rows: [
+      ['2026-04-13', 'Mon', true, 'FA']
+    ], dateDisplayValues: ['2026-04-13'] }
+  };
+  sandbox.getSheetDataCached_ = (_scope, sheetName) => cachedSources[sheetName];
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/attendanceCheckService.js'), 'utf8'), sandbox, { filename: 'src/attendanceCheckService.js' });
+  const originalBuildIndex = sandbox.buildTeachingAssignmentIndex_;
+  let assignmentIndexBuildCount = 0;
+  sandbox.buildTeachingAssignmentIndex_ = function() {
+    assignmentIndexBuildCount += 1;
+    return originalBuildIndex.apply(this, arguments);
+  };
+  sandbox.getUnsubmittedClasses = () => [
+    { classId: 'a', date: '2026-04-13', period: 1 },
+    { classId: 'b', date: '2026-04-13', period: 1 }
+  ];
+  sandbox.getClassDisplayName = classId => classId;
+  sandbox.sendSlackMessage = () => {};
+  sandbox.recordMissingAttendanceLog = () => {};
+  sandbox.checkYesterdayAttendance();
+  assert.strictEqual(assignmentIndexBuildCount, 1);
+}
+
+{
+  const permissionSources = {
+    timetable: { headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'term'], rows: [
+      ['switch', 'Mon', 1, 'T_FA', 'FA Teacher', 'FA'],
+      ['switch', 'Mon', 1, 'T_SP', 'SP Teacher', 'SP'],
+      ['both', 'Mon', 1, 'T_FY', 'FY Teacher', 'FY']
+    ] },
+    classTeacherTeams: { headers: ['classId', 'weekday', 'period', 'teacherId', 'teacherName', 'roleType', 'term'], rows: [] },
+    calendar: { headers: ['date', 'weekday', 'isClassDay', 'term'], rows: [
+      ['2026-04-13', 'Mon', true, 'FA'], ['2026-10-15', 'Mon', true, 'SP']
+    ], dateDisplayValues: ['2026-04-13', '2026-10-15'] }
+  };
+  sandbox.getSheetDataCached_ = (_scope, sheetName) => permissionSources[sheetName];
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/permissionService.js'), 'utf8'), sandbox, { filename: 'src/permissionService.js' });
+  sandbox.hasAnyTeachingAssignmentByTeacherId_ = () => true;
+  sandbox.getCurrentUserContext = () => ({ teacherId: 'T_FA', roles: ['teacher'] });
+  assert.strictEqual(sandbox.canEditAttendance({ classId: 'switch', date: '2026-04-13', period: 1 }), true);
+  assert.strictEqual(sandbox.canEditAttendance({ classId: 'switch', date: '2026-10-15', period: 1 }), false);
+  sandbox.getCurrentUserContext = () => ({ teacherId: 'T_SP', roles: ['teacher'] });
+  assert.strictEqual(sandbox.canEditAttendance({ classId: 'switch', date: '2026-04-13', period: 1 }), false);
+  assert.strictEqual(sandbox.canEditAttendance({ classId: 'switch', date: '2026-10-15', period: 1 }), true);
+  sandbox.getCurrentUserContext = () => ({ teacherId: 'T_FY', roles: ['teacher'] });
+  assert.strictEqual(sandbox.canEditAttendance({ classId: 'both', date: '2026-04-13', period: 1 }), true);
+  assert.strictEqual(sandbox.canEditAttendance({ classId: 'both', date: '2026-10-15', period: 1 }), true);
 }
 
 console.log('termPlannerFixture.test.js: PASS');

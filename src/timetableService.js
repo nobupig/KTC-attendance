@@ -25,121 +25,17 @@ function getClassesForCurrentUserByDate(targetDate) {
     logPerf_('getClassesForCurrentUserByDate load base sheet data', loadSheetsStartedAt);
   }
 
-  const timetable = timetableData.rows;
   const classes = classesData.rows;
-  const teamRows = teamData.rows;
-
-  const timetableHeaders = timetableData.headers;
-  const ttCol = {
-    classId: findColumnIndex_(timetableHeaders, ['classId', 'ClassID']),
-    weekday: findColumnIndex_(timetableHeaders, ['weekday', '曜日']),
-    period: findColumnIndex_(timetableHeaders, ['period', '時限']),
-    teacherName: findColumnIndex_(timetableHeaders, ['teacherName', '担当者名', 'name']),
-    teacherId: findColumnIndex_(timetableHeaders, ['teacherId', 'TeacherID'])
-  };
-  validateRequiredColumnsForTimetable_('timetable', ttCol, ['classId', 'weekday', 'period']);
-
-  const teamHeaders = teamData.headers;
-  const teamCol = {
-    classId: findColumnIndex_(teamHeaders, ['classId', 'ClassID']),
-    weekday: findColumnIndex_(teamHeaders, ['weekday', '曜日']),
-    period: findColumnIndex_(teamHeaders, ['period', '時限']),
-    teacherName: findColumnIndex_(teamHeaders, ['teacherName', '担当者名', 'name']),
-    teacherId: findColumnIndex_(teamHeaders, ['teacherId', 'TeacherID']),
-    roleType: findColumnIndex_(teamHeaders, ['roleType', '役割'])
-  };
-
-  const timetableMapStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const timetableMap = {};
-  timetable.forEach(function(row) {
-    const classId = normalizeString_(row[ttCol.classId]);
-    const period = normalizeString_(row[ttCol.period]);
-    const weekday = ttCol.weekday !== -1 ? normalizeWeekday_(row[ttCol.weekday]) : '';
-    const teacherName = ttCol.teacherName !== -1 ? normalizeString_(row[ttCol.teacherName]) : '';
-    let teacherId = ttCol.teacherId !== -1 ? normalizeString_(row[ttCol.teacherId]) : '';
-
-    if (!teacherId && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherId = teacher ? teacher.teacherId : '';
-    }
-
-    if (!classId || !period || !weekday) return;
-
-    const key = classId + '__' + weekday + '__' + period;
-    timetableMap[key] = {
-      classId: classId,
-      weekday: weekday,
-      period: period,
-      teacherId: teacherId,
-      teacherName: teacherName,
-      teacherIds: teacherId ? [teacherId] : [],
-      teachers: teacherId ? [{
-        teacherId: teacherId,
-        teacherName: teacherName,
-        roleType: 'main'
-      }] : []
-    };
-  });
-  if (typeof logPerf_ === 'function') {
-    logPerf_('getClassesForCurrentUserByDate build timetableMap', timetableMapStartedAt, 'rows=' + timetable.length);
+  const classDayContext = getEffectiveClassDayContext_(ymd);
+  if (!classDayContext.isClassDay || !classDayContext.effectiveWeekday) {
+    return [];
   }
-
-  const teamMergeStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  teamRows.forEach(function(row) {
-    const classId = teamCol.classId !== -1 ? normalizeString_(row[teamCol.classId]) : '';
-    const period = teamCol.period !== -1 ? normalizeString_(row[teamCol.period]) : '';
-    const weekday = teamCol.weekday !== -1 ? normalizeWeekday_(row[teamCol.weekday]) : '';
-    const teacherName = teamCol.teacherName !== -1 ? normalizeString_(row[teamCol.teacherName]) : '';
-    let teacherId = teamCol.teacherId !== -1 ? normalizeString_(row[teamCol.teacherId]) : '';
-    const roleType = teamCol.roleType !== -1
-      ? normalizeString_(row[teamCol.roleType]).toLowerCase()
-      : 'support';
-
-    if (!teacherId && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherId = teacher ? teacher.teacherId : '';
-    }
-
-    if (!classId || !period || !weekday || !teacherId) return;
-
-    const key = classId + '__' + weekday + '__' + period;
-    if (!timetableMap[key]) {
-      timetableMap[key] = {
-        classId: classId,
-        weekday: weekday,
-        period: period,
-        teacherId: '',
-        teacherName: '',
-        teacherIds: [],
-        teachers: []
-      };
-    }
-
-    if (!timetableMap[key].teacherIds.includes(teacherId)) {
-      timetableMap[key].teacherIds.push(teacherId);
-      timetableMap[key].teachers.push({
-        teacherId: teacherId,
-        teacherName: teacherName,
-        roleType: roleType || 'support'
-      });
-    }
-  });
-  if (typeof logPerf_ === 'function') {
-    logPerf_('getClassesForCurrentUserByDate merge classTeacherTeams', teamMergeStartedAt, 'rows=' + teamRows.length);
-  }
-
-  // 先に「この教員が担当する授業キー」だけを抽出
-    const teacherKeyStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-    const teacherSessionKeyMap = {};
-    Object.keys(timetableMap).forEach(function(key) {
-      const tt = timetableMap[key];
-      if (tt && Array.isArray(tt.teacherIds) && tt.teacherIds.includes(currentTeacherId)) {
-        teacherSessionKeyMap[key] = true;
-      }
-    });
-    if (typeof logPerf_ === 'function') {
-      logPerf_('getClassesForCurrentUserByDate build teacherSessionKeyMap', teacherKeyStartedAt, 'keys=' + Object.keys(teacherSessionKeyMap).length);
-    }
+  // 年間累積 timetable では date の有効termで解決する。index はこのリクエスト中で共有する。
+  const assignmentIndex = buildTeachingAssignmentIndex_(
+    timetableData,
+    teamData,
+    buildTeacherTeamMember_
+  );
 
   const savedSessionStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
@@ -200,15 +96,14 @@ function getClassesForCurrentUserByDate(targetDate) {
     const period = session.period;
     const sessionNumber = session.sessionNumber;
     const sessionYmd = session.date;
-    const weekday = session.weekday;
-
-    const teacherKey = classId + '__' + weekday + '__' + period;
-    if (!teacherSessionKeyMap[teacherKey]) {
-      return;
-    }
-
-    const tt = timetableMap[teacherKey];
-    if (!tt) {
+    const tt = getTeachingAssignmentForSessionFromIndex_(
+      assignmentIndex,
+      classId,
+      sessionYmd,
+      period,
+      classDayContext
+    );
+    if (!tt || !tt.teacherIds.includes(currentTeacherId)) {
       return;
     }
 
@@ -831,6 +726,7 @@ function getTeacherUnsavedCount_(teacherId, startYmd, endYmd) {
 
   const context = getTeacherUnsavedContext_(teacherId);
   const byDateMap = getClassSessionsByDateIndexCached_();
+  const effectiveClassDayIndex = getEffectiveClassDayIndex_();
   const savedKeySet = getSavedSessionKeySetByRangeCached_(startYmd, endYmd);
   const dateKeys = Object.keys(byDateMap).sort();
 
@@ -844,10 +740,9 @@ function getTeacherUnsavedCount_(teacherId, startYmd, endYmd) {
     daySessions.forEach(function(session) {
       const classId = normalizeString_(session.classId);
       const period = normalizeString_(session.period);
-      const weekday = normalizeWeekday_(session.weekday);
-      const teacherKey = [classId, weekday, period].join('__');
-
-      if (!context.teacherSessionKeyMap[teacherKey]) return;
+      const classDayContext = getEffectiveClassDayContext_(ymd, effectiveClassDayIndex);
+      const assignment = getTeachingAssignmentForSessionFromIndex_(context.assignmentIndex, classId, ymd, period, classDayContext);
+      if (!assignment || !assignment.teacherIds.includes(teacherId)) return;
 
       const cls = context.classMap[classId] || {};
       const displayKey = buildTeacherUnsavedDisplayKey_(cls, classId, ymd, period);
@@ -873,6 +768,7 @@ function getTeacherUnsavedSessionItems_(teacherId, startYmd, endYmd) {
 
   const context = getTeacherUnsavedContext_(teacherId);
   const byDateMap = getClassSessionsByDateIndexCached_();
+  const effectiveClassDayIndex = getEffectiveClassDayIndex_();
   const savedKeySet = getSavedSessionKeySetByRangeCached_(startYmd, endYmd);
   const dateKeys = Object.keys(byDateMap).sort();
   const result = [];
@@ -886,10 +782,9 @@ function getTeacherUnsavedSessionItems_(teacherId, startYmd, endYmd) {
     daySessions.forEach(function(session) {
       const classId = normalizeString_(session.classId);
       const period = normalizeString_(session.period);
-      const weekday = normalizeWeekday_(session.weekday);
-      const teacherKey = [classId, weekday, period].join('__');
-
-      if (!context.teacherSessionKeyMap[teacherKey]) return;
+      const classDayContext = getEffectiveClassDayContext_(ymd, effectiveClassDayIndex);
+      const assignment = getTeachingAssignmentForSessionFromIndex_(context.assignmentIndex, classId, ymd, period, classDayContext);
+      if (!assignment || !assignment.teacherIds.includes(teacherId)) return;
 
       const cls = context.classMap[classId] || {};
       const displayKey = buildTeacherUnsavedDisplayKey_(cls, classId, ymd, period);
@@ -942,95 +837,12 @@ function getTeacherUnsavedContext_(teacherId) {
   const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
   const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
 
-  const timetable = timetableData.rows;
   const classes = classesData.rows;
-  const teamRows = teamData.rows;
-
-  const timetableHeaders = timetableData.headers;
-  const ttCol = {
-    classId: findColumnIndex_(timetableHeaders, ['classId', 'ClassID']),
-    weekday: findColumnIndex_(timetableHeaders, ['weekday', '曜日']),
-    period: findColumnIndex_(timetableHeaders, ['period', '時限']),
-    teacherName: findColumnIndex_(timetableHeaders, ['teacherName', '担当者名', 'name']),
-    teacherId: findColumnIndex_(timetableHeaders, ['teacherId', 'TeacherID'])
-  };
-  validateRequiredColumnsForTimetable_('timetable', ttCol, ['classId', 'weekday', 'period']);
-
-  const teamHeaders = teamData.headers;
-  const teamCol = {
-    classId: findColumnIndex_(teamHeaders, ['classId', 'ClassID']),
-    weekday: findColumnIndex_(teamHeaders, ['weekday', '曜日']),
-    period: findColumnIndex_(teamHeaders, ['period', '時限']),
-    teacherName: findColumnIndex_(teamHeaders, ['teacherName', '担当者名', 'name']),
-    teacherId: findColumnIndex_(teamHeaders, ['teacherId', 'TeacherID']),
-    roleType: findColumnIndex_(teamHeaders, ['roleType', '役割'])
-  };
-
-  const timetableMap = {};
-
-  timetable.forEach(function(row) {
-    const classId = normalizeString_(row[ttCol.classId]);
-    const period = normalizeString_(row[ttCol.period]);
-    const weekday = ttCol.weekday !== -1 ? normalizeWeekday_(row[ttCol.weekday]) : '';
-    const teacherName = ttCol.teacherName !== -1 ? normalizeString_(row[ttCol.teacherName]) : '';
-    let teacherIdInRow = ttCol.teacherId !== -1 ? normalizeString_(row[ttCol.teacherId]) : '';
-
-    if (!teacherIdInRow && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherIdInRow = teacher ? teacher.teacherId : '';
-    }
-
-    if (!classId || !period || !weekday) return;
-
-    const key = classId + '__' + weekday + '__' + period;
-    timetableMap[key] = {
-      classId: classId,
-      weekday: weekday,
-      period: period,
-      teacherId: teacherIdInRow,
-      teacherName: teacherName,
-      teacherIds: teacherIdInRow ? [teacherIdInRow] : []
-    };
-  });
-
-  teamRows.forEach(function(row) {
-    const classId = teamCol.classId !== -1 ? normalizeString_(row[teamCol.classId]) : '';
-    const period = teamCol.period !== -1 ? normalizeString_(row[teamCol.period]) : '';
-    const weekday = teamCol.weekday !== -1 ? normalizeWeekday_(row[teamCol.weekday]) : '';
-    const teacherName = teamCol.teacherName !== -1 ? normalizeString_(row[teamCol.teacherName]) : '';
-    let teacherIdInRow = teamCol.teacherId !== -1 ? normalizeString_(row[teamCol.teacherId]) : '';
-
-    if (!teacherIdInRow && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherIdInRow = teacher ? teacher.teacherId : '';
-    }
-
-    if (!classId || !period || !weekday || !teacherIdInRow) return;
-
-    const key = classId + '__' + weekday + '__' + period;
-    if (!timetableMap[key]) {
-      timetableMap[key] = {
-        classId: classId,
-        weekday: weekday,
-        period: period,
-        teacherId: '',
-        teacherName: '',
-        teacherIds: []
-      };
-    }
-
-    if (!timetableMap[key].teacherIds.includes(teacherIdInRow)) {
-      timetableMap[key].teacherIds.push(teacherIdInRow);
-    }
-  });
-
-  const teacherSessionKeyMap = {};
-  Object.keys(timetableMap).forEach(function(key) {
-    const tt = timetableMap[key];
-    if (tt && Array.isArray(tt.teacherIds) && tt.teacherIds.includes(teacherId)) {
-      teacherSessionKeyMap[key] = true;
-    }
-  });
+  const assignmentIndex = buildTeachingAssignmentIndex_(
+    timetableData,
+    teamData,
+    buildTeacherTeamMember_
+  );
 
   const classHeaders = classesData.headers;
   const clsCol = {
@@ -1057,8 +869,7 @@ function getTeacherUnsavedContext_(teacherId) {
   });
 
   const result = {
-    timetableMap: timetableMap,
-    teacherSessionKeyMap: teacherSessionKeyMap,
+    assignmentIndex: assignmentIndex,
     classMap: classMap
   };
 
@@ -1075,7 +886,8 @@ function buildTeacherUnsavedDetailsCacheKey_(teacherId, endYmd) {
 }
 
 function buildTeacherUnsavedContextCacheKey_(teacherId) {
-  return 'teacherUnsavedContext__v3__' + String(teacherId || '');
+  // v4 adds the term-aware assignment index; v3 values have no assignmentIndex.
+  return 'teacherUnsavedContext__v4__' + String(teacherId || '');
 }
 
 function getTeacherUnsavedStartDate_(baseDate) {

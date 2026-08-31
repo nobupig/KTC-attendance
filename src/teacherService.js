@@ -112,6 +112,226 @@ function buildTeacherTeamMember_(teacherId, teacherName, roleType) {
   };
 }
 
+function buildTeachingAssignmentKey_(classId, term, weekday, period) {
+  const normalizedClassId = normalizeString_(classId);
+  const normalizedTerm = normalizeAcademicTerm_(term);
+  const normalizedWeekday = normalizeWeekday_(weekday);
+  const normalizedPeriod = normalizeTeachingAssignmentPeriod_(period);
+  if (!normalizedClassId || !normalizedWeekday || !normalizedPeriod || (term && !normalizedTerm)) {
+    return '';
+  }
+  return [normalizedClassId, normalizedTerm, normalizedWeekday, normalizedPeriod].join('__');
+}
+
+/**
+ * Canonical period contract for teaching-assignment identity. Keep this local
+ * to the assignment domain so file load order does not depend on planner code.
+ */
+function normalizeTeachingAssignmentPeriod_(value) {
+  const text = normalizeString_(value);
+  if (!/^\d+$/.test(text)) return '';
+  const number = Number(text);
+  return Number.isSafeInteger(number) && number > 0 ? String(number) : '';
+}
+
+function validateTeachingAssignmentColumns_(sheetName, colMap, requiredKeys) {
+  requiredKeys.forEach(function(key) {
+    if (colMap[key] === -1) {
+      throw new Error(sheetName + ' シートに必要な列がありません: ' + key);
+    }
+  });
+}
+
+/**
+ * Build the annual timetable/team index once. A termless timetable is the
+ * explicit legacy mode; a present-but-empty term is never legacy data.
+ */
+function buildTeachingAssignmentIndex_(timetableData, teamData, resolveMember) {
+  const ttHeaders = timetableData.headers || [];
+  const teamHeaders = teamData.headers || [];
+  const ttCol = {
+    classId: findColumnIndex_(ttHeaders, ['classId', 'ClassID']),
+    weekday: findColumnIndex_(ttHeaders, ['weekday', '曜日']),
+    period: findColumnIndex_(ttHeaders, ['period', '時限']),
+    teacherId: findColumnIndex_(ttHeaders, ['teacherId', 'TeacherID']),
+    teacherName: findColumnIndex_(ttHeaders, ['teacherName', '担当者名', 'name']),
+    term: findColumnIndex_(ttHeaders, ['term', '学期'])
+  };
+  validateTeachingAssignmentColumns_('timetable', ttCol, ['classId', 'weekday', 'period']);
+
+  const teamCol = {
+    classId: findColumnIndex_(teamHeaders, ['classId', 'ClassID']),
+    weekday: findColumnIndex_(teamHeaders, ['weekday', '曜日']),
+    period: findColumnIndex_(teamHeaders, ['period', '時限']),
+    teacherId: findColumnIndex_(teamHeaders, ['teacherId', 'TeacherID']),
+    teacherName: findColumnIndex_(teamHeaders, ['teacherName', '担当者名', 'name']),
+    roleType: findColumnIndex_(teamHeaders, ['roleType', '役割']),
+    term: findColumnIndex_(teamHeaders, ['term', '学期'])
+  };
+
+  const legacyTimetable = ttCol.term === -1;
+  const legacyTeam = teamCol.term === -1;
+  const byKey = {};
+  const invalidKeys = {};
+  const duplicateKeys = {};
+  const warnings = [];
+  const makeMember = typeof resolveMember === 'function'
+    ? resolveMember
+    : function(teacherId, teacherName, roleType) {
+        return {
+          teacherId: normalizeString_(teacherId),
+          teacherName: normalizeString_(teacherName),
+          teacherEmail: '',
+          roles: [],
+          roleType: normalizeString_(roleType || 'support').toLowerCase() || 'support'
+        };
+      };
+
+  (timetableData.rows || []).forEach(function(row, index) {
+    const classId = normalizeString_(row[ttCol.classId]);
+    const weekday = normalizeWeekday_(row[ttCol.weekday]);
+    const period = normalizeTeachingAssignmentPeriod_(row[ttCol.period]);
+    const rawTerm = legacyTimetable ? '' : normalizeString_(row[ttCol.term]);
+    const term = legacyTimetable ? '' : normalizeAcademicTerm_(rawTerm);
+    if (!classId || !weekday || !period) return;
+    if (!legacyTimetable && !term) {
+      warnings.push('timetable row ' + (index + 2) + ': termが空欄または不正です');
+      return;
+    }
+
+    const key = buildTeachingAssignmentKey_(classId, term, weekday, period);
+    if (!key) return;
+    if (invalidKeys[key]) {
+      duplicateKeys[key].rowNumbers.push(index + 2);
+      warnings.push('timetable row ' + (index + 2) + ': duplicate assignment key (invalid)');
+      return;
+    }
+    if (byKey[key]) {
+      duplicateKeys[key] = {
+        key: key,
+        rowNumbers: [byKey[key].sourceRowNumber, index + 2]
+      };
+      invalidKeys[key] = true;
+      delete byKey[key];
+      warnings.push('timetable row ' + (index + 2) + ': duplicate assignment key (invalid)');
+      return;
+    }
+    const teacherId = ttCol.teacherId === -1 ? '' : normalizeString_(row[ttCol.teacherId]);
+    const teacherName = ttCol.teacherName === -1 ? '' : normalizeString_(row[ttCol.teacherName]);
+    const member = makeMember(teacherId, teacherName, 'main');
+    byKey[key] = {
+      classId: classId,
+      term: term,
+      weekday: weekday,
+      period: period,
+      teacherId: member && member.teacherId ? member.teacherId : '',
+      teacherName: member && member.teacherName ? member.teacherName : teacherName,
+      teacherIds: member && member.teacherId ? [member.teacherId] : [],
+      teachers: member && member.teacherId ? [member] : [],
+      sourceRowNumber: index + 2
+    };
+  });
+
+  // A termful timetable cannot safely consume a termless team row. In legacy
+  // mode both sheets are matched by the original classId/weekday/period key.
+  (teamData.rows || []).forEach(function(row, index) {
+    const classId = teamCol.classId === -1 ? '' : normalizeString_(row[teamCol.classId]);
+    const weekday = teamCol.weekday === -1 ? '' : normalizeWeekday_(row[teamCol.weekday]);
+    const period = teamCol.period === -1 ? '' : normalizeTeachingAssignmentPeriod_(row[teamCol.period]);
+    const rawTerm = legacyTeam ? '' : normalizeString_(row[teamCol.term]);
+    const term = legacyTeam ? '' : normalizeAcademicTerm_(rawTerm);
+    if (!classId || !weekday || !period) return;
+    if ((!legacyTeam && !term) || (legacyTimetable !== legacyTeam)) {
+      warnings.push('classTeacherTeams row ' + (index + 2) + ': term契約がtimetableと一致しません');
+      return;
+    }
+
+    const key = buildTeachingAssignmentKey_(classId, term, weekday, period);
+    const bucket = byKey[key];
+    if (!bucket) {
+      warnings.push('classTeacherTeams row ' + (index + 2) + ': ' +
+        (invalidKeys[key] ? '対応するtimetable行がduplicateで無効です' : '対応するtimetable行がありません'));
+      return;
+    }
+
+    const member = makeMember(
+      teamCol.teacherId === -1 ? '' : row[teamCol.teacherId],
+      teamCol.teacherName === -1 ? '' : row[teamCol.teacherName],
+      teamCol.roleType === -1 ? 'support' : row[teamCol.roleType]
+    );
+    if (!member || !member.teacherId || bucket.teacherIds.indexOf(member.teacherId) !== -1) return;
+    bucket.teacherIds.push(member.teacherId);
+    bucket.teachers.push(member);
+  });
+
+  return {
+    byKey: byKey,
+    legacyTimetable: legacyTimetable,
+    legacyTeam: legacyTeam,
+    warnings: warnings,
+    invalidKeys: invalidKeys,
+    duplicateKeys: duplicateKeys
+  };
+}
+
+function getTeachingAssignmentForSessionFromIndex_(index, classId, date, period, context) {
+  const classDayContext = context || getEffectiveClassDayContext_(date);
+  if (!classDayContext.isClassDay || !classDayContext.effectiveWeekday) return null;
+  const targetClassId = normalizeString_(classId);
+  const targetPeriod = normalizeTeachingAssignmentPeriod_(period);
+  if (!targetClassId || !targetPeriod) return null;
+
+  const keys = index.legacyTimetable
+    ? [buildTeachingAssignmentKey_(targetClassId, '', classDayContext.effectiveWeekday, targetPeriod)]
+    : [
+        buildTeachingAssignmentKey_(targetClassId, classDayContext.term, classDayContext.effectiveWeekday, targetPeriod),
+        buildTeachingAssignmentKey_(targetClassId, 'FY', classDayContext.effectiveWeekday, targetPeriod)
+      ];
+  const teachers = [];
+  const teacherIds = [];
+  let primary = null;
+  keys.forEach(function(key) {
+    const bucket = index.byKey[key];
+    if (!bucket) return;
+    if (!primary) primary = bucket;
+    (bucket.teachers || []).forEach(function(member) {
+      if (!member.teacherId || teacherIds.indexOf(member.teacherId) !== -1) return;
+      teacherIds.push(member.teacherId);
+      teachers.push(member);
+    });
+  });
+  if (!primary) return null;
+  const main = teachers.find(function(member) { return member.roleType === 'main'; }) || teachers[0] || null;
+  return {
+    classId: targetClassId,
+    date: classDayContext.ymd,
+    term: classDayContext.term,
+    weekday: classDayContext.effectiveWeekday,
+    period: targetPeriod,
+    teacherId: main ? main.teacherId : '',
+    teacherName: main ? main.teacherName : '',
+    teacherEmail: main ? main.teacherEmail : '',
+    roles: main ? main.roles : [],
+    teacherIds: teacherIds,
+    teachers: teachers
+  };
+}
+
+function getTeacherAssignmentsForClassSession_(classId, date, period) {
+  const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 300);
+  const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
+  const index = buildTeachingAssignmentIndex_(timetableData, teamData, buildTeacherTeamMember_);
+  const assignment = getTeachingAssignmentForSessionFromIndex_(index, classId, date, period);
+  return assignment ? assignment.teachers : [];
+}
+
+function getTeacherAssignmentForClassSession_(classId, date, period) {
+  const teachers = getTeacherAssignmentsForClassSession_(classId, date, period);
+  if (!teachers.length) return null;
+  const main = teachers.find(function(member) { return member.roleType === 'main'; }) || teachers[0];
+  return Object.assign({}, main, { classId: normalizeString_(classId), date: formatDateToYmd(date), period: normalizeTeachingAssignmentPeriod_(period), teachers: teachers });
+}
+
 function getTeacherAssignmentsByClassId_(classId) {
   const targetClassId = normalizeString_(classId);
   if (!targetClassId) return [];
@@ -162,7 +382,7 @@ function getTeacherAssignmentsByClassId_(classId) {
 function getTeacherAssignmentsByClassPeriod_(classId, weekday, period) {
   const targetClassId = normalizeString_(classId);
   const targetWeekday = normalizeWeekday_(weekday);
-  const targetPeriod = normalizeString_(period);
+  const targetPeriod = normalizeTeachingAssignmentPeriod_(period);
 
   if (!targetClassId || !targetPeriod) return [];
 
@@ -181,7 +401,7 @@ function getTeacherAssignmentsByClassPeriod_(classId, weekday, period) {
   timetable
     .filter(item =>
       normalizeString_(item.classId) === targetClassId &&
-      normalizeString_(item.period) === targetPeriod &&
+      normalizeTeachingAssignmentPeriod_(item.period) === targetPeriod &&
       normalizeWeekday_(item.weekday) === targetWeekday
     )
     .forEach(function(row) {
@@ -196,7 +416,7 @@ function getTeacherAssignmentsByClassPeriod_(classId, weekday, period) {
   teamRows
     .filter(item =>
       normalizeString_(item.classId) === targetClassId &&
-      normalizeString_(item.period) === targetPeriod &&
+      normalizeTeachingAssignmentPeriod_(item.period) === targetPeriod &&
       normalizeWeekday_(item.weekday) === targetWeekday
     )
     .forEach(function(row) {
@@ -239,7 +459,7 @@ function getTeacherAssignmentByClassId_(classId) {
 function getTeacherAssignmentByClassPeriod_(classId, weekday, period) {
   const targetClassId = normalizeString_(classId);
   const targetWeekday = normalizeWeekday_(weekday);
-  const targetPeriod = normalizeString_(period);
+  const targetPeriod = normalizeTeachingAssignmentPeriod_(period);
 
   if (!targetClassId || !targetPeriod) return null;
 

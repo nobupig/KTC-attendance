@@ -62,9 +62,9 @@ function canEditAttendance(session) {
     return false;
   }
 
-  const assignment = getTeacherAssignmentByClassPeriod_(
+  const assignment = getTeacherAssignmentForClassSession_(
     session.classId,
-    classDayInfo.weekday,
+    session.date,
     session.period
   );
 
