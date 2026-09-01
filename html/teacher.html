@@ -1802,7 +1802,7 @@
     let riskRequestToken = 0;
     let saveStatusRequestToken = 0;
 
-    let teacherUnsavedSummaryRequestKey = "";
+    let teacherUnsavedSummaryRequestSeq = 0;
     let teacherUnsavedDetailsRequestKey = "";
     let teacherUnsavedDetailsLoadedKey = "";
     let teacherUnsavedDetailsOpen = false;
@@ -2488,25 +2488,27 @@ function goHome() {
       teacherUnsavedDetailsLoadedKey = "";
     }
 
-function loadTeacherUnsavedSummaryManual() {
-  const requestKey = Date.now() + "_" + Math.random();
-  teacherUnsavedSummaryRequestKey = requestKey;
+    function loadTeacherUnsavedSummaryManual(requestSeq) {
+      if (requestSeq !== teacherUnsavedSummaryRequestSeq) return;
 
-  renderTeacherUnsavedSummaryLoading();
-
-  google.script.run
-    .withSuccessHandler(function(data) {
-      if (teacherUnsavedSummaryRequestKey !== requestKey) return;
-      teacherUnsavedSummaryData = normalizeTeacherUnsavedSummaryFastData(data);
-      renderTeacherUnsavedSummary(teacherUnsavedSummaryData);
-    })
-    .withFailureHandler(function(error) {
-      console.error(error);
-      if (teacherUnsavedSummaryRequestKey !== requestKey) return;
-      renderTeacherUnsavedSummaryError();
-    })
-    .getTeacherUnsavedSummaryFast();
-}
+      google.script.run
+        .withSuccessHandler(function(data) {
+          if (requestSeq !== teacherUnsavedSummaryRequestSeq) return;
+          teacherUnsavedSummaryData = normalizeTeacherUnsavedSummaryFastData(data);
+          renderTeacherUnsavedSummary(teacherUnsavedSummaryData);
+        })
+        .withFailureHandler(function(error) {
+          console.error(error);
+          if (requestSeq !== teacherUnsavedSummaryRequestSeq) return;
+          teacherUnsavedSummaryData = {
+            ok: false,
+            status: "unavailable",
+            errorMessage: error && error.message ? String(error.message) : ""
+          };
+          renderTeacherUnsavedSummaryError();
+        })
+        .getTeacherUnsavedSummaryFast();
+    }
 
     function renderTeacherUnsavedDetailsLoading() {
       const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
@@ -2602,9 +2604,13 @@ function loadTeacherUnsavedSummaryManual() {
       });
     }
 
-    function loadTeacherUnsavedSummary() {
-      const requestKey = String(Date.now());
-      teacherUnsavedSummaryRequestKey = requestKey;
+    function loadTeacherUnsavedSummary(requestSeq) {
+      const activeRequestSeq = typeof requestSeq === "number"
+        ? requestSeq
+        : ++teacherUnsavedSummaryRequestSeq;
+
+      if (activeRequestSeq !== teacherUnsavedSummaryRequestSeq) return;
+
       teacherUnsavedDetailsLoadedKey = "";
       renderTeacherUnsavedSummaryLoading();
 
@@ -2621,10 +2627,29 @@ function loadTeacherUnsavedSummaryManual() {
 
         // 本日の授業一覧・保存状態の描画を優先してから、未保存サマリーを後読みする
         setTimeout(function() {
-          loadTeacherUnsavedSummaryManual();
+          if (activeRequestSeq !== teacherUnsavedSummaryRequestSeq) return;
+          loadTeacherUnsavedSummaryManual(activeRequestSeq);
         }, 800);
 
         return;
+    }
+
+    function scheduleInitialTeacherUnsavedSummaryLoad() {
+      const requestSeq = ++teacherUnsavedSummaryRequestSeq;
+
+      teacherUnsavedSummaryData = {
+        ok: true,
+        count: null,
+        checkedRange: null,
+        loading: true
+      };
+      renderTeacherUnsavedSummaryLoading();
+
+      // 初期表示の授業一覧を優先しつつ、表示modeにかかわらず未保存サマリーを取得する。
+      window.setTimeout(function() {
+        if (requestSeq !== teacherUnsavedSummaryRequestSeq) return;
+        loadTeacherUnsavedSummary(requestSeq);
+      }, 7000);
     }
 
     function loadTeacherUnsavedDetails(forceReload) {
@@ -6395,15 +6420,9 @@ function isExperimentSubject(cls) {
 
 teacherUnsavedSummaryData = null;
 teacherUnsavedDetailsData = null;
-renderTeacherUnsavedSummaryLoading();
+scheduleInitialTeacherUnsavedSummaryLoad();
 
       loadTodayClasses();
-
-      window.setTimeout(function() {
-        if (currentMode !== "today") return;
-        if (teacherUnsavedSummaryData) return;
-        loadTeacherUnsavedSummary();
-      }, 7000);
     }
 
     init();
