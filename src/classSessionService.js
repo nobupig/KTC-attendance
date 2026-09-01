@@ -937,3 +937,562 @@ function debugClassSessionService() {
   Logger.log('timetablePreview=' + JSON.stringify(timetablePreview, null, 2));
   Logger.log('calendarPreview=' + JSON.stringify(calendarPreview, null, 2));
 }
+
+/**
+ * DEV Operation Spreadsheet の2026年度後期移行前状態を読み取り専用で監査する。
+ * この関数および auditSecondTermMigration* helper は Spreadsheet/Properties/Cache を更新しない。
+ */
+function auditSecondTermMigrationSheetState2026() {
+  const migrationRange = {
+    start: SECOND_TERM_CLASS_SESSIONS_2026_.START_DATE,
+    end: SECOND_TERM_CLASS_SESSIONS_2026_.END_DATE
+  };
+  const ss = getOperationSpreadsheet();
+  const calendarSource = readSecondTermMigrationAuditSheet_(
+    ss,
+    CONFIG.SHEETS.CALENDAR,
+    ['date', '日付']
+  );
+  const timetableSource = readSecondTermMigrationAuditSheet_(
+    ss,
+    CONFIG.SHEETS.TIMETABLE,
+    []
+  );
+  const teamSource = readSecondTermMigrationAuditSheet_(
+    ss,
+    CONFIG.SHEETS.CLASS_TEACHER_TEAMS,
+    []
+  );
+  const classSessionsSource = readSecondTermMigrationAuditSheet_(
+    ss,
+    CONFIG.SHEETS.CLASS_SESSIONS,
+    ['date', '日付']
+  );
+
+  const calendar = auditSecondTermMigrationCalendar_(calendarSource, migrationRange);
+  const timetableAudit = auditSecondTermMigrationTimetable_(timetableSource);
+  const timetable = timetableAudit.result;
+  const classTeacherTeams = auditSecondTermMigrationClassTeacherTeams_(
+    teamSource,
+    timetableAudit.assignmentKeys
+  );
+  const classSessions = auditSecondTermMigrationClassSessions_(
+    classSessionsSource,
+    migrationRange
+  );
+  const termContractMatches = timetable.hasTermColumn === classTeacherTeams.hasTermColumn;
+  const blockingFindings = [];
+
+  [calendar, timetable, classTeacherTeams, classSessions].forEach(function(section) {
+    if (!section.exists) {
+      blockingFindings.push(section.sheetName + ' シートが見つかりません。');
+      return;
+    }
+    (section.requiredHeadersMissing || []).forEach(function(header) {
+      blockingFindings.push(section.sheetName + ' に必要な列がありません: ' + header);
+    });
+    (section.structuralErrors || []).forEach(function(error) {
+      blockingFindings.push(section.sheetName + ': ' + error);
+    });
+  });
+
+  if (!termContractMatches) {
+    blockingFindings.push('timetable と classTeacherTeams のterm列契約が一致しません。');
+  }
+  if (calendar.duplicateDateCount > 0) {
+    blockingFindings.push('calendar に日付重複があります: ' + calendar.duplicateDateCount + '件');
+  }
+  if (timetable.duplicateCount > 0) {
+    blockingFindings.push('timetable にassignment key重複があります: ' + timetable.duplicateCount + '件');
+  }
+  if (classSessions.duplicateCount > 0) {
+    blockingFindings.push('classSessions にidentity重複があります: ' + classSessions.duplicateCount + '件');
+  }
+  if (classTeacherTeams.orphanTeamRowCount > 0) {
+    blockingFindings.push('classTeacherTeams にtimetable対応なし行があります: ' + classTeacherTeams.orphanTeamRowCount + '件');
+  }
+
+  const result = {
+    generatedAt: new Date().toISOString(),
+    migrationRange: migrationRange,
+    termContractMatches: termContractMatches,
+    calendarHasTermColumn: calendar.hasTermColumn,
+    timetableHasTermColumn: timetable.hasTermColumn,
+    classTeacherTeamsHasTermColumn: classTeacherTeams.hasTermColumn,
+    safeToProceedToDataMigration: blockingFindings.length === 0,
+    blockingFindings: blockingFindings,
+    calendar: calendar,
+    timetable: timetable,
+    classTeacherTeams: classTeacherTeams,
+    classSessions: classSessions
+  };
+
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+function readSecondTermMigrationAuditSheet_(ss, sheetName, dateCandidates) {
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    return {
+      sheetName: sheetName,
+      exists: false,
+      columnCount: 0,
+      headers: [],
+      rows: [],
+      dateDisplayValues: []
+    };
+  }
+
+  const lastRow = sheet.getLastRow();
+  const columnCount = sheet.getLastColumn();
+  if (lastRow < 1 || columnCount < 1) {
+    return {
+      sheetName: sheetName,
+      exists: true,
+      columnCount: Math.max(0, columnCount),
+      headers: [],
+      rows: [],
+      dateDisplayValues: []
+    };
+  }
+
+  const values = sheet.getRange(1, 1, lastRow, columnCount).getValues();
+  const headers = values.length > 0 ? values[0] : [];
+  const rows = values.length > 1 ? values.slice(1) : [];
+  const dateColumnIndex = findColumnIndex_(headers, dateCandidates || []);
+  let dateDisplayValues = [];
+
+  if (rows.length > 0 && dateColumnIndex !== -1) {
+    dateDisplayValues = sheet
+      .getRange(2, dateColumnIndex + 1, rows.length, 1)
+      .getDisplayValues()
+      .map(function(row) { return row[0]; });
+  }
+
+  return {
+    sheetName: sheetName,
+    exists: true,
+    columnCount: columnCount,
+    headers: headers,
+    rows: rows,
+    dateDisplayValues: dateDisplayValues
+  };
+}
+
+function auditSecondTermMigrationCalendar_(source, migrationRange) {
+  const base = auditSecondTermMigrationBaseSheetResult_(source, ['date', 'weekday', 'isClassDay']);
+  const columns = {
+    date: findColumnIndex_(source.headers, ['date', '日付']),
+    weekday: findColumnIndex_(source.headers, ['weekday', '曜日']),
+    isClassDay: findColumnIndex_(source.headers, ['isClassDay', '授業日']),
+    term: findColumnIndex_(source.headers, ['term', '学期'])
+  };
+  const termCounts = auditSecondTermMigrationTermCounts_(source.rows, columns.term);
+  const rangeTermCounts = auditSecondTermMigrationEmptyTermCounts_();
+  const dateRows = {};
+  let firstDate = '';
+  let lastDate = '';
+  let invalidDateCount = 0;
+  let invalidWeekdayCount = 0;
+  let invalidIsClassDayCount = 0;
+  let isClassDayTrueCount = 0;
+  let isClassDayFalseCount = 0;
+  let blankClassDayTermCount = 0;
+  let invalidClassDayTermCount = 0;
+  let rowsInMigrationRange = 0;
+  let classDaysInMigrationRange = 0;
+
+  source.rows.forEach(function(row, index) {
+    const ymd = auditSecondTermMigrationYmd_(row[columns.date], source.dateDisplayValues[index]);
+    if (!ymd) {
+      invalidDateCount += 1;
+      return;
+    }
+    if (!firstDate || ymd < firstDate) firstDate = ymd;
+    if (!lastDate || ymd > lastDate) lastDate = ymd;
+
+    if (!normalizeWeekday_(row[columns.weekday])) invalidWeekdayCount += 1;
+    if (row[columns.isClassDay] === true) {
+      isClassDayTrueCount += 1;
+      if (columns.term !== -1) {
+        const rawTerm = normalizeString_(row[columns.term]);
+        if (!rawTerm) {
+          blankClassDayTermCount += 1;
+        } else {
+          const normalizedTerm = normalizeAcademicTerm_(rawTerm);
+          if (normalizedTerm !== 'FA' && normalizedTerm !== 'SP') {
+            invalidClassDayTermCount += 1;
+          }
+        }
+      }
+    } else if (row[columns.isClassDay] === false) {
+      isClassDayFalseCount += 1;
+    } else {
+      invalidIsClassDayCount += 1;
+    }
+
+    if (!dateRows[ymd]) dateRows[ymd] = [];
+    dateRows[ymd].push(index + 2);
+
+    if (ymd >= migrationRange.start && ymd <= migrationRange.end) {
+      rowsInMigrationRange += 1;
+      if (row[columns.isClassDay] === true) classDaysInMigrationRange += 1;
+      if (columns.term !== -1) {
+        auditSecondTermMigrationAddTermCount_(rangeTermCounts, row[columns.term]);
+      }
+    }
+  });
+
+  const duplicates = auditSecondTermMigrationDuplicateSamples_(dateRows, function(ymd, rowNumbers) {
+    return { date: ymd, count: rowNumbers.length, rowNumbers: rowNumbers };
+  });
+  const structuralErrors = [];
+  if (invalidDateCount > 0) structuralErrors.push('不正なdateがあります: ' + invalidDateCount + '件');
+  if (invalidWeekdayCount > 0) structuralErrors.push('不正なweekdayがあります: ' + invalidWeekdayCount + '件');
+  if (invalidIsClassDayCount > 0) structuralErrors.push('不正なisClassDayがあります: ' + invalidIsClassDayCount + '件');
+  if (columns.term !== -1 && invalidClassDayTermCount > 0) {
+    structuralErrors.push('授業日の非blank不正termがあります: ' + invalidClassDayTermCount + '件');
+  }
+
+  return Object.assign(base, {
+    termColumnIndex: columns.term,
+    hasTermColumn: columns.term !== -1,
+    firstDate: firstDate,
+    lastDate: lastDate,
+    termCounts: termCounts,
+    isClassDayTrueCount: isClassDayTrueCount,
+    isClassDayFalseCount: isClassDayFalseCount,
+    blankClassDayTermCount: blankClassDayTermCount,
+    invalidClassDayTermCount: invalidClassDayTermCount,
+    migrationRangeRowCount: rowsInMigrationRange,
+    migrationRangeIsClassDayTrueCount: classDaysInMigrationRange,
+    migrationRangeTermCounts: rangeTermCounts,
+    duplicateDateCount: duplicates.duplicateCount,
+    duplicateDateSamples: duplicates.samples,
+    invalidDateCount: invalidDateCount,
+    invalidWeekdayCount: invalidWeekdayCount,
+    invalidIsClassDayCount: invalidIsClassDayCount,
+    structuralErrors: structuralErrors
+  });
+}
+
+function auditSecondTermMigrationTimetable_(source) {
+  const base = auditSecondTermMigrationBaseSheetResult_(source, ['classId', 'weekday', 'period']);
+  const columns = auditSecondTermMigrationTeachingColumns_(source.headers, false);
+  const termCounts = auditSecondTermMigrationTermCounts_(source.rows, columns.term);
+  const keyRows = {};
+  let classIdBlankCount = 0;
+  let weekdayInvalidCount = 0;
+  let periodInvalidCount = 0;
+
+  source.rows.forEach(function(row, index) {
+    const classId = normalizeString_(row[columns.classId]);
+    const weekday = normalizeWeekday_(row[columns.weekday]);
+    const period = normalizeClassSessionPeriod_(row[columns.period]);
+    const term = columns.term === -1 ? '' : normalizeAcademicTerm_(row[columns.term]);
+    if (!classId) classIdBlankCount += 1;
+    if (!weekday) weekdayInvalidCount += 1;
+    if (!period) periodInvalidCount += 1;
+    if (!classId || !weekday || !period || (columns.term !== -1 && !term)) return;
+
+    const key = auditSecondTermMigrationAssignmentKey_(classId, term, weekday, period);
+    if (!keyRows[key]) keyRows[key] = [];
+    keyRows[key].push(index + 2);
+  });
+
+  const duplicates = auditSecondTermMigrationDuplicateSamples_(keyRows, function(key, rowNumbers) {
+    const parts = JSON.parse(key);
+    return {
+      classId: parts[0], term: parts[1], weekday: parts[2], period: parts[3],
+      count: rowNumbers.length, rowNumbers: rowNumbers
+    };
+  });
+  const structuralErrors = [];
+  if (classIdBlankCount > 0) structuralErrors.push('classId空欄があります: ' + classIdBlankCount + '件');
+  if (weekdayInvalidCount > 0) structuralErrors.push('不正なweekdayがあります: ' + weekdayInvalidCount + '件');
+  if (periodInvalidCount > 0) structuralErrors.push('空欄または不正なperiodがあります: ' + periodInvalidCount + '件');
+  if (columns.term !== -1 && (termCounts.blank > 0 || termCounts.invalid > 0)) {
+    structuralErrors.push('空欄または不正なtermがあります: ' + (termCounts.blank + termCounts.invalid) + '件');
+  }
+
+  return {
+    result: Object.assign(base, {
+      termColumnIndex: columns.term,
+      hasTermColumn: columns.term !== -1,
+      termCounts: termCounts,
+      classIdBlankCount: classIdBlankCount,
+      weekdayInvalidCount: weekdayInvalidCount,
+      periodInvalidCount: periodInvalidCount,
+      duplicateCount: duplicates.duplicateCount,
+      duplicateSamples: duplicates.samples,
+      firstRows: auditSecondTermMigrationPlainRows_(source.rows.slice(0, 5)),
+      structuralErrors: structuralErrors
+    }),
+    assignmentKeys: keyRows
+  };
+}
+
+function auditSecondTermMigrationClassTeacherTeams_(source, timetableAssignmentKeys) {
+  const base = auditSecondTermMigrationBaseSheetResult_(source, ['classId', 'weekday', 'period']);
+  const columns = auditSecondTermMigrationTeachingColumns_(source.headers, true);
+  const termCounts = auditSecondTermMigrationTermCounts_(source.rows, columns.term);
+  const roleTypeCounts = {};
+  const orphanSamples = [];
+  let classIdBlankCount = 0;
+  let weekdayInvalidCount = 0;
+  let periodInvalidCount = 0;
+  let teacherIdBlankCount = 0;
+  let teacherNameBlankCount = 0;
+  let teacherReferenceBlankCount = 0;
+  let orphanTeamRowCount = 0;
+
+  source.rows.forEach(function(row, index) {
+    const classId = normalizeString_(row[columns.classId]);
+    const weekday = normalizeWeekday_(row[columns.weekday]);
+    const period = normalizeClassSessionPeriod_(row[columns.period]);
+    const teacherId = columns.teacherId === -1 ? '' : normalizeString_(row[columns.teacherId]);
+    const teacherName = columns.teacherName === -1 ? '' : normalizeString_(row[columns.teacherName]);
+    const rawRoleType = columns.roleType === -1 ? '' : normalizeString_(row[columns.roleType]);
+    const roleType = rawRoleType || 'blank';
+    const term = columns.term === -1 ? '' : normalizeAcademicTerm_(row[columns.term]);
+    roleTypeCounts[roleType] = (roleTypeCounts[roleType] || 0) + 1;
+    if (!classId) classIdBlankCount += 1;
+    if (!weekday) weekdayInvalidCount += 1;
+    if (!period) periodInvalidCount += 1;
+    if (!teacherId) teacherIdBlankCount += 1;
+    if (!teacherName) teacherNameBlankCount += 1;
+    if (!teacherId && !teacherName) teacherReferenceBlankCount += 1;
+    if (!classId || !weekday || !period || (columns.term !== -1 && !term)) return;
+
+    const key = auditSecondTermMigrationAssignmentKey_(classId, term, weekday, period);
+    if (!Object.prototype.hasOwnProperty.call(timetableAssignmentKeys || {}, key)) {
+      orphanTeamRowCount += 1;
+      if (orphanSamples.length < 10) {
+        orphanSamples.push({
+          sourceRow: index + 2,
+          classId: classId,
+          term: term,
+          weekday: weekday,
+          period: period,
+          teacherId: teacherId
+        });
+      }
+    }
+  });
+
+  const structuralErrors = [];
+  if (classIdBlankCount > 0) structuralErrors.push('classId空欄があります: ' + classIdBlankCount + '件');
+  if (weekdayInvalidCount > 0) structuralErrors.push('不正なweekdayがあります: ' + weekdayInvalidCount + '件');
+  if (periodInvalidCount > 0) structuralErrors.push('空欄または不正なperiodがあります: ' + periodInvalidCount + '件');
+  if (teacherReferenceBlankCount > 0) {
+    structuralErrors.push('teacherId と teacherName がともに空欄の行があります: ' + teacherReferenceBlankCount + '件');
+  }
+  if (columns.term !== -1 && (termCounts.blank > 0 || termCounts.invalid > 0)) {
+    structuralErrors.push('空欄または不正なtermがあります: ' + (termCounts.blank + termCounts.invalid) + '件');
+  }
+
+  return Object.assign(base, {
+    termColumnIndex: columns.term,
+    hasTermColumn: columns.term !== -1,
+    termCounts: termCounts,
+    classIdBlankCount: classIdBlankCount,
+    weekdayInvalidCount: weekdayInvalidCount,
+    periodInvalidCount: periodInvalidCount,
+    teacherIdBlankCount: teacherIdBlankCount,
+    teacherNameBlankCount: teacherNameBlankCount,
+    teacherReferenceBlankCount: teacherReferenceBlankCount,
+    roleTypeCounts: sortObjectByKey_(roleTypeCounts),
+    orphanTeamRowCount: orphanTeamRowCount,
+    orphanSamples: orphanSamples,
+    firstRows: auditSecondTermMigrationPlainRows_(source.rows.slice(0, 5)),
+    structuralErrors: structuralErrors
+  });
+}
+
+function auditSecondTermMigrationClassSessions_(source, migrationRange) {
+  const base = auditSecondTermMigrationBaseSheetResult_(
+    source,
+    ['classId', 'date', 'period', 'sessionNumber']
+  );
+  const columns = {
+    classId: findColumnIndex_(source.headers, ['classId', 'ClassID']),
+    date: findColumnIndex_(source.headers, ['date', '日付']),
+    period: findColumnIndex_(source.headers, ['period', '時限']),
+    sessionNumber: findColumnIndex_(source.headers, ['sessionNumber', '回', '回数'])
+  };
+  const identityRows = {};
+  const maxSessionNumberByClassId = {};
+  let firstDate = '';
+  let lastDate = '';
+  let beforeMigrationRangeCount = 0;
+  let migrationRangeCount = 0;
+  let afterMigrationRangeCount = 0;
+  let invalidIdentityCount = 0;
+  let invalidSessionNumberCount = 0;
+
+  source.rows.forEach(function(row, index) {
+    const classId = normalizeString_(row[columns.classId]);
+    const ymd = auditSecondTermMigrationYmd_(row[columns.date], source.dateDisplayValues[index]);
+    const period = normalizeClassSessionPeriod_(row[columns.period]);
+    const sessionNumber = normalizeClassSessionNumber_(row[columns.sessionNumber]);
+    if (!classId || !ymd || !period) {
+      invalidIdentityCount += 1;
+      return;
+    }
+    if (!sessionNumber) invalidSessionNumberCount += 1;
+    if (!firstDate || ymd < firstDate) firstDate = ymd;
+    if (!lastDate || ymd > lastDate) lastDate = ymd;
+    if (ymd < migrationRange.start) {
+      beforeMigrationRangeCount += 1;
+    } else if (ymd > migrationRange.end) {
+      afterMigrationRangeCount += 1;
+    } else {
+      migrationRangeCount += 1;
+    }
+
+    const identity = auditSecondTermMigrationAssignmentKey_(classId, ymd, period, '');
+    if (!identityRows[identity]) identityRows[identity] = [];
+    identityRows[identity].push(index + 2);
+    if (sessionNumber) {
+      maxSessionNumberByClassId[classId] = Math.max(
+        maxSessionNumberByClassId[classId] || 0,
+        Number(sessionNumber)
+      );
+    }
+  });
+
+  const duplicates = auditSecondTermMigrationDuplicateSamples_(identityRows, function(key, rowNumbers) {
+    const parts = JSON.parse(key);
+    return {
+      classId: parts[0], date: parts[1], period: parts[2],
+      count: rowNumbers.length, rowNumbers: rowNumbers
+    };
+  });
+  const maxValues = Object.keys(maxSessionNumberByClassId).map(function(classId) {
+    return maxSessionNumberByClassId[classId];
+  });
+  const structuralErrors = [];
+  if (invalidIdentityCount > 0) structuralErrors.push('不正なidentityがあります: ' + invalidIdentityCount + '件');
+  if (invalidSessionNumberCount > 0) structuralErrors.push('不正なsessionNumberがあります: ' + invalidSessionNumberCount + '件');
+
+  return Object.assign(base, {
+    firstDate: firstDate,
+    lastDate: lastDate,
+    beforeMigrationRangeCount: beforeMigrationRangeCount,
+    migrationRangeCount: migrationRangeCount,
+    afterMigrationRangeCount: afterMigrationRangeCount,
+    duplicateCount: duplicates.duplicateCount,
+    duplicateSamples: duplicates.samples,
+    maxSessionNumberStats: {
+      classCount: maxValues.length,
+      minOfMaxSessionNumber: maxValues.length ? Math.min.apply(null, maxValues) : null,
+      maxOfMaxSessionNumber: maxValues.length ? Math.max.apply(null, maxValues) : null
+    },
+    invalidIdentityCount: invalidIdentityCount,
+    invalidSessionNumberCount: invalidSessionNumberCount,
+    structuralErrors: structuralErrors
+  });
+}
+
+function auditSecondTermMigrationBaseSheetResult_(source, requiredKeys) {
+  const requiredHeaderCandidates = {
+    classId: ['classId', 'ClassID'],
+    date: ['date', '日付'],
+    weekday: ['weekday', '曜日'],
+    period: ['period', '時限'],
+    isClassDay: ['isClassDay', '授業日'],
+    teacherId: ['teacherId', 'TeacherID'],
+    sessionNumber: ['sessionNumber', '回', '回数']
+  };
+  const requiredHeadersMissing = (requiredKeys || []).filter(function(key) {
+    return findColumnIndex_(source.headers, requiredHeaderCandidates[key] || [key]) === -1;
+  });
+  return {
+    sheetName: source.sheetName,
+    exists: source.exists,
+    rowCount: source.rows.length,
+    columnCount: source.columnCount,
+    headers: source.headers.map(auditSecondTermMigrationPlainValue_),
+    requiredHeadersMissing: requiredHeadersMissing
+  };
+}
+
+function auditSecondTermMigrationTeachingColumns_(headers, includeTeamColumns) {
+  return {
+    classId: findColumnIndex_(headers, ['classId', 'ClassID']),
+    weekday: findColumnIndex_(headers, ['weekday', '曜日']),
+    period: findColumnIndex_(headers, ['period', '時限']),
+    term: findColumnIndex_(headers, ['term', '学期']),
+    teacherId: includeTeamColumns ? findColumnIndex_(headers, ['teacherId', 'TeacherID']) : -1,
+    teacherName: includeTeamColumns ? findColumnIndex_(headers, ['teacherName', '担当者名', 'name']) : -1,
+    roleType: includeTeamColumns ? findColumnIndex_(headers, ['roleType', '役割', 'role']) : -1
+  };
+}
+
+function auditSecondTermMigrationEmptyTermCounts_() {
+  return { FA: 0, SP: 0, FY: 0, blank: 0, invalid: 0 };
+}
+
+function auditSecondTermMigrationTermCounts_(rows, termColumnIndex) {
+  const counts = auditSecondTermMigrationEmptyTermCounts_();
+  if (termColumnIndex === -1) return counts;
+  (rows || []).forEach(function(row) {
+    auditSecondTermMigrationAddTermCount_(counts, row[termColumnIndex]);
+  });
+  return counts;
+}
+
+function auditSecondTermMigrationAddTermCount_(counts, rawTerm) {
+  const rawText = normalizeString_(rawTerm);
+  if (!rawText) {
+    counts.blank += 1;
+    return;
+  }
+  const term = normalizeAcademicTerm_(rawText);
+  if (term) {
+    counts[term] += 1;
+  } else {
+    counts.invalid += 1;
+  }
+}
+
+function auditSecondTermMigrationAssignmentKey_(classId, term, weekday, period) {
+  return JSON.stringify([
+    normalizeString_(classId),
+    normalizeString_(term),
+    normalizeString_(weekday),
+    normalizeString_(period)
+  ]);
+}
+
+function auditSecondTermMigrationDuplicateSamples_(rowsByKey, buildSample) {
+  const duplicateKeys = Object.keys(rowsByKey || {}).filter(function(key) {
+    return rowsByKey[key].length > 1;
+  }).sort();
+  return {
+    duplicateCount: duplicateKeys.reduce(function(total, key) {
+      return total + rowsByKey[key].length - 1;
+    }, 0),
+    samples: duplicateKeys.slice(0, 10).map(function(key) {
+      return buildSample(key, rowsByKey[key]);
+    })
+  };
+}
+
+function auditSecondTermMigrationYmd_(rawValue, displayValue) {
+  return normalizeClassSessionPlanningYmd_(rawValue, displayValue || '');
+}
+
+function auditSecondTermMigrationPlainRows_(rows) {
+  return (rows || []).map(function(row) {
+    return row.map(auditSecondTermMigrationPlainValue_);
+  });
+}
+
+function auditSecondTermMigrationPlainValue_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) return value.toISOString();
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  return String(value);
+}
