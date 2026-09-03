@@ -1820,11 +1820,22 @@ const SECOND_TERM_DATA_MIGRATION_DEV_OPERATION_SPREADSHEET_ID_ =
   '1f69B-8P0HclSSrMUD9zPIwEahni9NuryqoTCD9F8kEo';
 const SECOND_TERM_DATA_MIGRATION_DEV_APPROVED_PLAN_HASH_ =
   'acfb1eeff9beb98d9bcebc2c59b58db20d100de00bdd93d1fa61bdf87344cf28';
+const SECOND_TERM_DATA_MIGRATION_PROD_OPERATION_SPREADSHEET_ID_ =
+  '1HKNlWs_zcd160b4VjosyBRuGaJTHDC546uc5bUfdjlU';
+const SECOND_TERM_DATA_MIGRATION_PROD_APPROVED_PLAN_HASH_ =
+  'acfb1eeff9beb98d9bcebc2c59b58db20d100de00bdd93d1fa61bdf87344cf28';
 
 function applySecondTermDataMigration2026Dev() {
   return applySecondTermDataMigration2026_(
     SECOND_TERM_DATA_MIGRATION_DEV_OPERATION_SPREADSHEET_ID_,
     SECOND_TERM_DATA_MIGRATION_DEV_APPROVED_PLAN_HASH_
+  );
+}
+
+function applySecondTermDataMigration2026Prod() {
+  return applySecondTermDataMigration2026_(
+    SECOND_TERM_DATA_MIGRATION_PROD_OPERATION_SPREADSHEET_ID_,
+    SECOND_TERM_DATA_MIGRATION_PROD_APPROVED_PLAN_HASH_
   );
 }
 
@@ -2141,6 +2152,28 @@ function applySecondTermDataMigration2026_(expectedSpreadsheetId, expectedPlanHa
     throw new Error('expectedSpreadsheetIdが必要です。');
   }
 
+  const expectedEnvironment =
+    expectedSpreadsheet === SECOND_TERM_DATA_MIGRATION_DEV_OPERATION_SPREADSHEET_ID_
+      ? 'DEV'
+      : expectedSpreadsheet === SECOND_TERM_DATA_MIGRATION_PROD_OPERATION_SPREADSHEET_ID_
+        ? 'PROD'
+        : '';
+
+  if (!expectedEnvironment) {
+    throw new Error('許可されていないOperation Spreadsheetです。');
+  }
+
+  const approvedPlanHash = expectedEnvironment === 'PROD'
+    ? SECOND_TERM_DATA_MIGRATION_PROD_APPROVED_PLAN_HASH_
+    : SECOND_TERM_DATA_MIGRATION_DEV_APPROVED_PLAN_HASH_;
+
+  if (expectedHash !== approvedPlanHash) {
+    throw new Error(
+      '承認済みplanHashと一致しません。 expected=' + approvedPlanHash +
+      ' actual=' + expectedHash
+    );
+  }
+
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
 
@@ -2148,17 +2181,11 @@ function applySecondTermDataMigration2026_(expectedSpreadsheetId, expectedPlanHa
     const ss = getOperationSpreadsheet();
     const operationSpreadsheetId = ss.getId();
 
-    if (operationSpreadsheetId === '1HKNlWs_zcd160b4VjosyBRuGaJTHDC546uc5bUfdjlU') {
-      throw new Error('本番 Operation Spreadsheet では実行できません。');
-    }
     if (operationSpreadsheetId !== expectedSpreadsheet) {
       throw new Error(
         'Operation Spreadsheet ID が一致しません。 expected=' + expectedSpreadsheet +
         ' actual=' + operationSpreadsheetId
       );
-    }
-    if (operationSpreadsheetId !== SECOND_TERM_DATA_MIGRATION_DEV_OPERATION_SPREADSHEET_ID_) {
-      throw new Error('DEV Operation Spreadsheet 以外では実行できません。');
     }
 
     const migrationRange = {
@@ -2293,7 +2320,7 @@ function applySecondTermDataMigration2026_(expectedSpreadsheetId, expectedPlanHa
 
       const response = {
         ok: true,
-        environment: 'DEV',
+        environment: expectedEnvironment,
         operationSpreadsheetId: operationSpreadsheetId,
         planHash: expectedHash,
         postWritePlanHash: postWritePlanHash,
