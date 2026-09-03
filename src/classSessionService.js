@@ -141,6 +141,8 @@ const SECOND_TERM_CLASS_SESSIONS_PROD_OPERATION_SPREADSHEET_ID_ =
   '1HKNlWs_zcd160b4VjosyBRuGaJTHDC546uc5bUfdjlU';
 const SECOND_TERM_CLASS_SESSIONS_DEV_APPROVED_PLAN_HASH_ =
   'f1dbeb3a683ad6fa78c6c61c1eee16c54faab06010c4cd94c876a4a56f6b71c7';
+const SECOND_TERM_CLASS_SESSIONS_PROD_APPROVED_PLAN_HASH_ =
+  'f1dbeb3a683ad6fa78c6c61c1eee16c54faab06010c4cd94c876a4a56f6b71c7';
 const SECOND_TERM_CLASS_SESSIONS_2026_EXPECTED_INSERT_COUNT_ = 11011;
 
 function previewSecondTermClassSessions2026() {
@@ -229,6 +231,13 @@ function appendSecondTermClassSessions2026Dev() {
   );
 }
 
+function appendSecondTermClassSessions2026Prod() {
+  return appendSecondTermClassSessions2026_(
+    SECOND_TERM_CLASS_SESSIONS_PROD_OPERATION_SPREADSHEET_ID_,
+    SECOND_TERM_CLASS_SESSIONS_PROD_APPROVED_PLAN_HASH_
+  );
+}
+
 function appendSecondTermClassSessions2026(expectedPlanHash) {
   return appendSecondTermClassSessions2026_(
     SECOND_TERM_CLASS_SESSIONS_DEV_OPERATION_SPREADSHEET_ID_,
@@ -246,23 +255,39 @@ function appendSecondTermClassSessions2026_(expectedSpreadsheetId, expectedPlanH
     throw new Error('previewで取得したexpectedPlanHashが必要です。');
   }
 
+  const expectedEnvironment =
+    expectedSpreadsheet === SECOND_TERM_CLASS_SESSIONS_DEV_OPERATION_SPREADSHEET_ID_
+      ? 'DEV'
+      : expectedSpreadsheet === SECOND_TERM_CLASS_SESSIONS_PROD_OPERATION_SPREADSHEET_ID_
+        ? 'PROD'
+        : '';
+
+  if (!expectedEnvironment) {
+    throw new Error('許可されていないOperation Spreadsheetです。');
+  }
+
+  const approvedPlanHash = expectedEnvironment === 'PROD'
+    ? SECOND_TERM_CLASS_SESSIONS_PROD_APPROVED_PLAN_HASH_
+    : SECOND_TERM_CLASS_SESSIONS_DEV_APPROVED_PLAN_HASH_;
+
+  if (expectedHash !== approvedPlanHash) {
+    throw new Error(
+      '承認済みclassSessions planHashと一致しません。 expected=' + approvedPlanHash +
+      ' actual=' + expectedHash
+    );
+  }
+
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
 
   try {
     const ss = getOperationSpreadsheet();
     const actualId = ss.getId();
-    if (actualId === SECOND_TERM_CLASS_SESSIONS_PROD_OPERATION_SPREADSHEET_ID_) {
-      throw new Error('本番 Operation Spreadsheet では実行できません。');
-    }
     if (actualId !== expectedSpreadsheet) {
       throw new Error(
         'Operation Spreadsheet ID が一致しません。 expected=' + expectedSpreadsheet +
         ' actual=' + actualId
       );
-    }
-    if (actualId !== SECOND_TERM_CLASS_SESSIONS_DEV_OPERATION_SPREADSHEET_ID_) {
-      throw new Error('DEV Operation Spreadsheet 以外では実行できません。');
     }
 
     const sources = readClassSessionPlanningSources_();
