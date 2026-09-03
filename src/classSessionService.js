@@ -135,6 +135,13 @@ const SECOND_TERM_CLASS_SESSIONS_2026_ = Object.freeze({
   END_DATE: '2027-02-02',
   SAMPLE_SIZE: 10
 });
+const SECOND_TERM_CLASS_SESSIONS_DEV_OPERATION_SPREADSHEET_ID_ =
+  '1f69B-8P0HclSSrMUD9zPIwEahni9NuryqoTCD9F8kEo';
+const SECOND_TERM_CLASS_SESSIONS_PROD_OPERATION_SPREADSHEET_ID_ =
+  '1HKNlWs_zcd160b4VjosyBRuGaJTHDC546uc5bUfdjlU';
+const SECOND_TERM_CLASS_SESSIONS_DEV_APPROVED_PLAN_HASH_ =
+  'f1dbeb3a683ad6fa78c6c61c1eee16c54faab06010c4cd94c876a4a56f6b71c7';
+const SECOND_TERM_CLASS_SESSIONS_2026_EXPECTED_INSERT_COUNT_ = 11011;
 
 function previewSecondTermClassSessions2026() {
   const sources = readClassSessionPlanningSources_();
@@ -149,8 +156,92 @@ function previewSecondTermClassSessions2026() {
   return preview;
 }
 
+function previewSecondTermClassSessions2026Compact() {
+  const sources = readClassSessionPlanningSources_();
+  const plan = buildRangeLimitedClassSessionPlan_(
+    SECOND_TERM_CLASS_SESSIONS_2026_.START_DATE,
+    SECOND_TERM_CLASS_SESSIONS_2026_.END_DATE,
+    sources
+  );
+  const sampleSize = SECOND_TERM_CLASS_SESSIONS_2026_.SAMPLE_SIZE;
+  const allSamples = (plan.insertRows || []).map(function(row) {
+    return {
+      classId: row[0],
+      date: row[1],
+      period: row[2],
+      sessionNumber: row[3]
+    };
+  });
+  const specialDates = ['2026-10-15', '2026-11-27', '2027-01-14'];
+  const specialDateSamples = {};
+  specialDates.forEach(function(ymd) {
+    specialDateSamples[ymd] = allSamples.filter(function(item) {
+      return item.date === ymd;
+    }).slice(0, 10);
+  });
+
+  const newSessionRangeKeys = Object.keys(plan.newSessionNumberRangeByClassId || {}).sort();
+  const compact = {
+    startDate: plan.startDate,
+    endDate: plan.endDate,
+    calendarRowsInRange: plan.calendarRowsInRange,
+    classDays: plan.classDays,
+    timetableRows: plan.timetableRows,
+    timetableRowsByTerm: plan.timetableRowsByTerm,
+    candidateCount: plan.candidateCount,
+    candidateCountByTerm: plan.candidateCountByTerm,
+    candidateDuplicateCount: plan.candidateDuplicateCount,
+    existingExactCount: plan.existingExactCount,
+    insertCount: plan.insertCount,
+    timetableDuplicateCount: plan.timetableDuplicateCount,
+    existingClassSessionDuplicateCount: plan.existingClassSessionDuplicateCount,
+    invalidCalendarCount: plan.invalidCalendarCount,
+    invalidCalendarTermCount: plan.invalidCalendarTermCount,
+    invalidTimetableCount: plan.invalidTimetableCount,
+    invalidTimetableTermCount: plan.invalidTimetableTermCount,
+    termFallbackCount: plan.termFallbackCount,
+    invalidSessionNumberCount: plan.invalidSessionNumberCount,
+    chronologicalInsertionConflictCount: plan.chronologicalInsertionConflictCount,
+    blockingErrors: (plan.blockingErrors || []).slice(),
+    warnings: (plan.warnings || []).slice(),
+    planHash: plan.planHash,
+    existingClassCount: Object.keys(plan.maxSessionNumberByClassId || {}).length,
+    newSessionClassCount: newSessionRangeKeys.length,
+    firstInsertSamples: allSamples.slice(0, sampleSize),
+    lastInsertSamples: allSamples.slice(Math.max(allSamples.length - sampleSize, 0)),
+    specialDateSamples: specialDateSamples,
+    newSessionNumberRangeSamples: newSessionRangeKeys.slice(0, 10).map(function(classId) {
+      return {
+        classId: classId,
+        range: plan.newSessionNumberRangeByClassId[classId]
+      };
+    })
+  };
+
+  Logger.log(JSON.stringify(compact, null, 2));
+  return compact;
+}
+
+function appendSecondTermClassSessions2026Dev() {
+  return appendSecondTermClassSessions2026_(
+    SECOND_TERM_CLASS_SESSIONS_DEV_OPERATION_SPREADSHEET_ID_,
+    SECOND_TERM_CLASS_SESSIONS_DEV_APPROVED_PLAN_HASH_
+  );
+}
+
 function appendSecondTermClassSessions2026(expectedPlanHash) {
+  return appendSecondTermClassSessions2026_(
+    SECOND_TERM_CLASS_SESSIONS_DEV_OPERATION_SPREADSHEET_ID_,
+    expectedPlanHash
+  );
+}
+
+function appendSecondTermClassSessions2026_(expectedSpreadsheetId, expectedPlanHash) {
+  const expectedSpreadsheet = normalizeString_(expectedSpreadsheetId);
   const expectedHash = normalizeString_(expectedPlanHash);
+  if (!expectedSpreadsheet) {
+    throw new Error('expectedSpreadsheetIdが必要です。');
+  }
   if (!expectedHash) {
     throw new Error('previewで取得したexpectedPlanHashが必要です。');
   }
@@ -159,6 +250,21 @@ function appendSecondTermClassSessions2026(expectedPlanHash) {
   lock.waitLock(30000);
 
   try {
+    const ss = getOperationSpreadsheet();
+    const actualId = ss.getId();
+    if (actualId === SECOND_TERM_CLASS_SESSIONS_PROD_OPERATION_SPREADSHEET_ID_) {
+      throw new Error('本番 Operation Spreadsheet では実行できません。');
+    }
+    if (actualId !== expectedSpreadsheet) {
+      throw new Error(
+        'Operation Spreadsheet ID が一致しません。 expected=' + expectedSpreadsheet +
+        ' actual=' + actualId
+      );
+    }
+    if (actualId !== SECOND_TERM_CLASS_SESSIONS_DEV_OPERATION_SPREADSHEET_ID_) {
+      throw new Error('DEV Operation Spreadsheet 以外では実行できません。');
+    }
+
     const sources = readClassSessionPlanningSources_();
     const plan = buildRangeLimitedClassSessionPlan_(
       SECOND_TERM_CLASS_SESSIONS_2026_.START_DATE,
@@ -166,15 +272,10 @@ function appendSecondTermClassSessions2026(expectedPlanHash) {
       sources
     );
 
-    if (plan.planHash !== expectedHash) {
-      throw new Error(
-        'preview後に元データが変更されました。再previewしてください。' +
-        ' expected=' + expectedHash + ' actual=' + plan.planHash
-      );
-    }
-    if (plan.blockingErrors.length > 0) {
-      throw new Error('classSessions追加を中止しました: ' + plan.blockingErrors.join(' / '));
-    }
+    assertSecondTermClassSessionsPlanGuards_(plan, expectedHash);
+
+    const preAudit = auditSecondTermMigrationSheetState2026();
+    assertSecondTermClassSessionsPreAuditGuards_(preAudit);
 
     if (plan.insertRows.length === 0) {
       return {
@@ -191,29 +292,78 @@ function appendSecondTermClassSessions2026(expectedPlanHash) {
 
     const sheet = sources.classSessionsSheet;
     const beforeLastRow = sheet.getLastRow();
+    const beforeMaxRows = sheet.getMaxRows();
+    const requiredLastRow = beforeLastRow + plan.insertRows.length;
+    const additionalGridRows = Math.max(0, requiredLastRow - beforeMaxRows);
+    const existingRangeFingerprint = buildSecondTermClassSessionsRangeValuesFingerprint_(
+      sheet,
+      beforeLastRow,
+      4
+    );
     const insertedDates = uniqueSortedStrings_(plan.insertRows.map(function(row) {
       return row[1];
     }));
+
+    let writeStarted = false;
+    let dataCommitted = false;
+    let rollbackResult = null;
+
     try {
+      writeStarted = true;
+
+      if (additionalGridRows > 0) {
+        sheet.insertRowsAfter(beforeMaxRows, additionalGridRows);
+      }
+
       sheet.getRange(beforeLastRow + 1, 1, plan.insertRows.length, 4)
         .setValues(plan.insertRows);
       SpreadsheetApp.flush();
 
       const refreshedSources = readClassSessionPlanningSources_();
       verifyAppendedClassSessionRows_(sources, refreshedSources, plan, beforeLastRow);
+      assertSecondTermClassSessionsRangeValuesFingerprintUnchanged_(
+        sheet,
+        beforeLastRow,
+        4,
+        existingRangeFingerprint
+      );
+
+      dataCommitted = true;
     } catch (postWriteError) {
-      try {
-        invalidateCachesAfterClassSessionAppend_(insertedDates);
-      } catch (invalidationError) {
-        postWriteError.cacheInvalidationError = String(
-          invalidationError && invalidationError.message
-            ? invalidationError.message
-            : invalidationError
-        );
+      if (writeStarted) {
+        try {
+          rollbackResult = rollbackSecondTermClassSessionsAppend_(
+            sheet,
+            beforeLastRow,
+            beforeMaxRows,
+            plan.insertRows.length,
+            additionalGridRows,
+            existingRangeFingerprint
+          );
+        } catch (rollbackError) {
+          postWriteError.rollbackError = String(
+            rollbackError && rollbackError.message
+              ? rollbackError.message
+              : rollbackError
+          );
+        }
       }
       throw postWriteError;
     }
-    const invalidation = invalidateCachesAfterClassSessionAppend_(insertedDates);
+
+    let invalidation = null;
+    let cacheInvalidationOk = true;
+    let cacheInvalidationError = '';
+    try {
+      invalidation = invalidateCachesAfterClassSessionAppend_(insertedDates);
+    } catch (invalidationError) {
+      cacheInvalidationOk = false;
+      cacheInvalidationError = String(
+        invalidationError && invalidationError.message
+          ? invalidationError.message
+          : invalidationError
+      );
+    }
 
     return {
       ok: true,
@@ -222,13 +372,180 @@ function appendSecondTermClassSessions2026(expectedPlanHash) {
       endDate: plan.endDate,
       planHash: plan.planHash,
       insertedDates: insertedDates,
-      cacheKeysInvalidated: invalidation.cacheKeys,
-      fastUnsavedCacheStaled: invalidation.fastUnsavedCacheStaled,
-      fastUnsavedCacheResult: invalidation.fastUnsavedCacheResult
+      dataCommitted: dataCommitted,
+      cacheInvalidationOk: cacheInvalidationOk,
+      cacheInvalidationError: cacheInvalidationError,
+      cacheKeysInvalidated: invalidation ? invalidation.cacheKeys : [],
+      fastUnsavedCacheStaled: invalidation ? invalidation.fastUnsavedCacheStaled : false,
+      fastUnsavedCacheResult: invalidation ? invalidation.fastUnsavedCacheResult : null,
+      gridExpansion: {
+        beforeLastRow: beforeLastRow,
+        beforeMaxRows: beforeMaxRows,
+        requiredLastRow: requiredLastRow,
+        additionalGridRows: additionalGridRows
+      },
+      rollbackResult: rollbackResult
     };
   } finally {
     lock.releaseLock();
   }
+}
+
+function assertSecondTermClassSessionsPlanGuards_(plan, expectedHash) {
+  if (normalizeString_(plan.planHash) !== expectedHash) {
+    throw new Error(
+      'preview後に元データが変更されました。再previewしてください。' +
+      ' expected=' + expectedHash + ' actual=' + plan.planHash
+    );
+  }
+
+  const checks = [
+    { name: 'blockingErrors.length', actual: (plan.blockingErrors || []).length, expected: 0 },
+    { name: 'warnings.length', actual: (plan.warnings || []).length, expected: 0 },
+    { name: 'insertRows.length', actual: (plan.insertRows || []).length, expected: SECOND_TERM_CLASS_SESSIONS_2026_EXPECTED_INSERT_COUNT_ },
+    { name: 'insertCount', actual: Number(plan.insertCount || 0), expected: SECOND_TERM_CLASS_SESSIONS_2026_EXPECTED_INSERT_COUNT_ },
+    { name: 'existingExactCount', actual: Number(plan.existingExactCount || 0), expected: 0 },
+    { name: 'candidateDuplicateCount', actual: Number(plan.candidateDuplicateCount || 0), expected: 0 },
+    { name: 'timetableDuplicateCount', actual: Number(plan.timetableDuplicateCount || 0), expected: 0 },
+    { name: 'existingClassSessionDuplicateCount', actual: Number(plan.existingClassSessionDuplicateCount || 0), expected: 0 },
+    { name: 'invalidCalendarCount', actual: Number(plan.invalidCalendarCount || 0), expected: 0 },
+    { name: 'invalidCalendarTermCount', actual: Number(plan.invalidCalendarTermCount || 0), expected: 0 },
+    { name: 'invalidTimetableCount', actual: Number(plan.invalidTimetableCount || 0), expected: 0 },
+    { name: 'invalidTimetableTermCount', actual: Number(plan.invalidTimetableTermCount || 0), expected: 0 },
+    { name: 'termFallbackCount', actual: Number(plan.termFallbackCount || 0), expected: 0 },
+    { name: 'invalidSessionNumberCount', actual: Number(plan.invalidSessionNumberCount || 0), expected: 0 },
+    { name: 'chronologicalInsertionConflictCount', actual: Number(plan.chronologicalInsertionConflictCount || 0), expected: 0 }
+  ];
+
+  const failed = checks.filter(function(check) {
+    return check.actual !== check.expected;
+  });
+  if (failed.length > 0) {
+    throw new Error(
+      'classSessions追加前ガードに失敗しました: ' +
+      failed.map(function(item) {
+        return item.name + ' expected=' + item.expected + ' actual=' + item.actual;
+      }).join(' / ')
+    );
+  }
+}
+
+function assertSecondTermClassSessionsPreAuditGuards_(audit) {
+  if (!audit || audit.safeToProceedToDataMigration !== true) {
+    throw new Error('pre-audit safeToProceedToDataMigration が true ではありません。');
+  }
+
+  const checks = [
+    { name: 'blockingFindings.length', actual: (audit.blockingFindings || []).length, expected: 0 },
+    { name: 'calendarHasTermColumn', actual: audit.calendarHasTermColumn === true ? 1 : 0, expected: 1 },
+    { name: 'timetableHasTermColumn', actual: audit.timetableHasTermColumn === true ? 1 : 0, expected: 1 },
+    { name: 'classTeacherTeamsHasTermColumn', actual: audit.classTeacherTeamsHasTermColumn === true ? 1 : 0, expected: 1 },
+    { name: 'termContractMatches', actual: audit.termContractMatches === true ? 1 : 0, expected: 1 },
+    { name: 'classSessions.rowCount', actual: Number((audit.classSessions && audit.classSessions.rowCount) || 0), expected: 10980 },
+    { name: 'classSessions.migrationRangeCount', actual: Number((audit.classSessions && audit.classSessions.migrationRangeCount) || 0), expected: 0 },
+    { name: 'classSessions.duplicateCount', actual: Number((audit.classSessions && audit.classSessions.duplicateCount) || 0), expected: 0 },
+    { name: 'classSessions.invalidIdentityCount', actual: Number((audit.classSessions && audit.classSessions.invalidIdentityCount) || 0), expected: 0 }
+  ];
+
+  const failed = checks.filter(function(check) {
+    return check.actual !== check.expected;
+  });
+  if (failed.length > 0) {
+    throw new Error(
+      'pre-audit guardに失敗しました: ' +
+      failed.map(function(item) {
+        return item.name + ' expected=' + item.expected + ' actual=' + item.actual;
+      }).join(' / ')
+    );
+  }
+}
+
+function buildSecondTermClassSessionsRangeValuesFingerprint_(sheet, rowCount, columnCount) {
+  const rows = Number(rowCount || 0);
+  const cols = Number(columnCount || 0);
+  if (rows < 1 || cols < 1) {
+    return buildSecondTermDataMigrationSha256Hex_('empty');
+  }
+
+  const values = sheet.getRange(1, 1, rows, cols).getValues();
+  const normalized = normalizeClassSessionHashRows_(values);
+  return buildSecondTermDataMigrationSha256Hex_(JSON.stringify(normalized));
+}
+
+function assertSecondTermClassSessionsRangeValuesFingerprintUnchanged_(
+  sheet,
+  rowCount,
+  columnCount,
+  expectedFingerprint
+) {
+  const current = buildSecondTermClassSessionsRangeValuesFingerprint_(sheet, rowCount, columnCount);
+  if (current !== expectedFingerprint) {
+    throw new Error('classSessions既存範囲A:Dのfingerprintが一致しません。');
+  }
+}
+
+function rollbackSecondTermClassSessionsAppend_(
+  sheet,
+  beforeLastRow,
+  beforeMaxRows,
+  insertRowCount,
+  additionalGridRows,
+  existingRangeFingerprint
+) {
+  let deletedGridRows = 0;
+  const maxRowsNow = sheet.getMaxRows();
+  const clearableRows = Math.min(
+    Number(insertRowCount || 0),
+    Math.max(0, maxRowsNow - beforeLastRow)
+  );
+  if (clearableRows > 0) {
+    sheet.getRange(beforeLastRow + 1, 1, clearableRows, 4).clearContent();
+  }
+
+  if (additionalGridRows > 0) {
+    const currentMaxRows = sheet.getMaxRows();
+    const startDeleteRow = beforeMaxRows + 1;
+    const deleteCount = Math.min(
+      additionalGridRows,
+      Math.max(0, currentMaxRows - beforeMaxRows)
+    );
+    if (deleteCount > 0 && startDeleteRow <= currentMaxRows) {
+      sheet.deleteRows(startDeleteRow, deleteCount);
+      deletedGridRows = deleteCount;
+    }
+  }
+
+  SpreadsheetApp.flush();
+
+  const afterLastRow = sheet.getLastRow();
+  const afterMaxRows = sheet.getMaxRows();
+  if (afterLastRow !== beforeLastRow) {
+    throw new Error(
+      'rollback後のlastRowが一致しません。 expected=' + beforeLastRow +
+      ' actual=' + afterLastRow
+    );
+  }
+  if (afterMaxRows !== beforeMaxRows) {
+    throw new Error(
+      'rollback後のmaxRowsが一致しません。 expected=' + beforeMaxRows +
+      ' actual=' + afterMaxRows
+    );
+  }
+
+  assertSecondTermClassSessionsRangeValuesFingerprintUnchanged_(
+    sheet,
+    beforeLastRow,
+    4,
+    existingRangeFingerprint
+  );
+
+  return {
+    ok: true,
+    afterLastRow: afterLastRow,
+    afterMaxRows: afterMaxRows,
+    clearedRows: clearableRows,
+    deletedGridRows: deletedGridRows
+  };
 }
 
 function invalidateCachesAfterClassSessionAppend_(insertedDates) {
@@ -1499,6 +1816,17 @@ function auditSecondTermMigrationPlainValue_(value) {
 
 const SECOND_TERM_DATA_MIGRATION_STAGING_SPREADSHEET_ID_ =
   '1m8Bbr_kpKUAOMkPX13nqhlCJGbU-N6lv4dso2OqT9xE';
+const SECOND_TERM_DATA_MIGRATION_DEV_OPERATION_SPREADSHEET_ID_ =
+  '1f69B-8P0HclSSrMUD9zPIwEahni9NuryqoTCD9F8kEo';
+const SECOND_TERM_DATA_MIGRATION_DEV_APPROVED_PLAN_HASH_ =
+  'acfb1eeff9beb98d9bcebc2c59b58db20d100de00bdd93d1fa61bdf87344cf28';
+
+function applySecondTermDataMigration2026Dev() {
+  return applySecondTermDataMigration2026_(
+    SECOND_TERM_DATA_MIGRATION_DEV_OPERATION_SPREADSHEET_ID_,
+    SECOND_TERM_DATA_MIGRATION_DEV_APPROVED_PLAN_HASH_
+  );
+}
 
 function previewSecondTermDataMigration2026() {
   const migrationRange = {
@@ -1526,120 +1854,24 @@ function previewSecondTermDataMigration2026() {
   };
 
   try {
-    const sources = previewSecondTermDataMigrationReadSources_(
+    const plan = buildSecondTermDataMigrationPlan2026_(
       migrationRange,
       SECOND_TERM_DATA_MIGRATION_STAGING_SPREADSHEET_ID_
     );
-
-    if (sources.devTimetableColumns.term !== -1 || sources.devTeamColumns.term !== -1) {
-      result.blockingErrors.push(
-        'DEV Operation は既にterm-awareです。今回previewはlegacyからの初回移行専用です。'
-      );
-    }
-
-    const existingTimetableAnalysis = previewSecondTermDataMigrationAnalyzeTeachingSheetByClassIdTerm_(
-      sources.dev.timetable,
-      sources.devTimetableColumns,
-      {
-        label: 'DEV timetable',
-        allowedTerms: { FA: true, FY: true },
-        unexpectedTerms: { SP: true },
-        includeRoleType: false
-      },
-      result.blockingErrors
-    );
-    const stagingTimetableAnalysis = previewSecondTermDataMigrationAnalyzeTeachingSheetByClassIdTerm_(
-      sources.staging.timetable,
-      sources.stagingTimetableColumns,
-      {
-        label: 'STAGING timetable_後期通年',
-        allowedTerms: { SP: true, FY: true },
-        unexpectedTerms: {},
-        includeRoleType: false
-      },
-      result.blockingErrors
-    );
-
-    result.existingTimetable = existingTimetableAnalysis.summary;
-    result.stagingTimetable = stagingTimetableAnalysis.summary;
-
-    const finalTimetableRows = existingTimetableAnalysis.rowsByTerm.FA
-      .concat(existingTimetableAnalysis.rowsByTerm.FY)
-      .concat(stagingTimetableAnalysis.rowsByTerm.SP);
-    const finalTimetableValidation = previewSecondTermDataMigrationValidateFinalTimetable_(
-      finalTimetableRows,
-      result.blockingErrors
-    );
-    result.finalTimetable = finalTimetableValidation.summary;
-
-    const existingTeamsAnalysis = previewSecondTermDataMigrationAnalyzeTeachingSheetByClassIdTerm_(
-      sources.dev.classTeacherTeams,
-      sources.devTeamColumns,
-      {
-        label: 'DEV classTeacherTeams',
-        allowedTerms: { FA: true, FY: true },
-        unexpectedTerms: { SP: true },
-        includeRoleType: true
-      },
-      result.blockingErrors
-    );
-    const stagingTeamsAnalysis = previewSecondTermDataMigrationAnalyzeTeachingSheetByClassIdTerm_(
-      sources.staging.classTeacherTeams,
-      sources.stagingTeamColumns,
-      {
-        label: 'STAGING classTeacherTeams',
-        allowedTerms: { SP: true, FY: true },
-        unexpectedTerms: {},
-        includeRoleType: true
-      },
-      result.blockingErrors
-    );
-
-    result.existingTeams = existingTeamsAnalysis.summary;
-    result.stagingTeams = stagingTeamsAnalysis.summary;
-
-    const finalTeamsRows = existingTeamsAnalysis.rowsByTerm.FA
-      .concat(existingTeamsAnalysis.rowsByTerm.FY)
-      .concat(stagingTeamsAnalysis.rowsByTerm.SP);
-    const finalTeamsValidation = previewSecondTermDataMigrationValidateFinalTeams_(
-      finalTeamsRows,
-      finalTimetableValidation.assignmentKeys,
-      result.blockingErrors,
-      result.warnings
-    );
-    result.finalTeams = finalTeamsValidation.summary;
-
-    const fyAlignment = previewSecondTermDataMigrationCompareFyAssignments_(
-      existingTimetableAnalysis.rowsByTerm.FY,
-      stagingTimetableAnalysis.rowsByTerm.FY
-    );
-    result.fyAlignment = fyAlignment;
-    if (fyAlignment.fyDifferencesRequireReview) {
-      result.blockingErrors.push('FY差異があります。人間確認が必要です。');
-    }
-
-    const calendarPreview = previewSecondTermDataMigrationBuildFinalCalendar_(
-      sources.dev.calendar,
-      sources.staging.calendar,
-      migrationRange,
-      result.blockingErrors
-    );
-    result.finalCalendar = calendarPreview.finalCalendar;
-    result.calendarComparison = calendarPreview.calendarComparison;
-
-    const classSessionsAudit = previewSecondTermDataMigrationAuditClassSessions_(
-      sources.dev.classSessions,
-      migrationRange,
-      result.blockingErrors
-    );
-    result.classSessions = classSessionsAudit.summary;
-
-    result.planHash = previewSecondTermDataMigrationBuildPlanHash_(
-      calendarPreview.rowsForHash,
-      finalTimetableValidation.rowsForHash,
-      finalTeamsValidation.rowsForHash,
-      migrationRange
-    );
+    result.blockingErrors = (plan.preview.blockingErrors || []).slice();
+    result.warnings = (plan.preview.warnings || []).slice();
+    result.safeToApplyMigration = plan.preview.safeToApplyMigration === true;
+    result.planHash = normalizeString_(plan.preview.planHash);
+    result.existingTimetable = plan.preview.existingTimetable || {};
+    result.stagingTimetable = plan.preview.stagingTimetable || {};
+    result.finalTimetable = plan.preview.finalTimetable || {};
+    result.existingTeams = plan.preview.existingTeams || {};
+    result.stagingTeams = plan.preview.stagingTeams || {};
+    result.finalTeams = plan.preview.finalTeams || {};
+    result.fyAlignment = plan.preview.fyAlignment || {};
+    result.finalCalendar = plan.preview.finalCalendar || {};
+    result.calendarComparison = plan.preview.calendarComparison || {};
+    result.classSessions = plan.preview.classSessions || {};
   } catch (error) {
     result.blockingErrors.push(
       'previewSecondTermDataMigration2026 実行中に例外が発生しました: ' +
@@ -1653,6 +1885,448 @@ function previewSecondTermDataMigration2026() {
 
   Logger.log(JSON.stringify(result, null, 2));
   return result;
+}
+
+function buildSecondTermDataMigrationPlan2026_(migrationRange, stagingSpreadsheetId) {
+  const preview = {
+    stagingSpreadsheetId: stagingSpreadsheetId,
+    migrationRange: migrationRange,
+    blockingErrors: [],
+    warnings: [],
+    safeToApplyMigration: false,
+    planHash: '',
+    existingTimetable: {},
+    stagingTimetable: {},
+    finalTimetable: {},
+    existingTeams: {},
+    stagingTeams: {},
+    finalTeams: {},
+    fyAlignment: {},
+    finalCalendar: {},
+    calendarComparison: {},
+    classSessions: {}
+  };
+
+  const sources = previewSecondTermDataMigrationReadSources_(
+    migrationRange,
+    stagingSpreadsheetId
+  );
+
+  if (sources.devTimetableColumns.term !== -1 || sources.devTeamColumns.term !== -1) {
+    preview.blockingErrors.push(
+      'DEV Operation は既にterm-awareです。今回previewはlegacyからの初回移行専用です。'
+    );
+  }
+
+  const existingTimetableAnalysis = previewSecondTermDataMigrationAnalyzeTeachingSheetByClassIdTerm_(
+    sources.dev.timetable,
+    sources.devTimetableColumns,
+    {
+      label: 'DEV timetable',
+      allowedTerms: { FA: true, FY: true },
+      unexpectedTerms: { SP: true },
+      includeRoleType: false
+    },
+    preview.blockingErrors
+  );
+  const stagingTimetableAnalysis = previewSecondTermDataMigrationAnalyzeTeachingSheetByClassIdTerm_(
+    sources.staging.timetable,
+    sources.stagingTimetableColumns,
+    {
+      label: 'STAGING timetable_後期通年',
+      allowedTerms: { SP: true, FY: true },
+      unexpectedTerms: {},
+      includeRoleType: false
+    },
+    preview.blockingErrors
+  );
+
+  preview.existingTimetable = existingTimetableAnalysis.summary;
+  preview.stagingTimetable = stagingTimetableAnalysis.summary;
+
+  const finalTimetableRows = existingTimetableAnalysis.rowsByTerm.FA
+    .concat(existingTimetableAnalysis.rowsByTerm.FY)
+    .concat(stagingTimetableAnalysis.rowsByTerm.SP);
+  const finalTimetableValidation = previewSecondTermDataMigrationValidateFinalTimetable_(
+    finalTimetableRows,
+    preview.blockingErrors
+  );
+  preview.finalTimetable = finalTimetableValidation.summary;
+
+  const existingTeamsAnalysis = previewSecondTermDataMigrationAnalyzeTeachingSheetByClassIdTerm_(
+    sources.dev.classTeacherTeams,
+    sources.devTeamColumns,
+    {
+      label: 'DEV classTeacherTeams',
+      allowedTerms: { FA: true, FY: true },
+      unexpectedTerms: { SP: true },
+      includeRoleType: true
+    },
+    preview.blockingErrors
+  );
+  const stagingTeamsAnalysis = previewSecondTermDataMigrationAnalyzeTeachingSheetByClassIdTerm_(
+    sources.staging.classTeacherTeams,
+    sources.stagingTeamColumns,
+    {
+      label: 'STAGING classTeacherTeams',
+      allowedTerms: { SP: true, FY: true },
+      unexpectedTerms: {},
+      includeRoleType: true
+    },
+    preview.blockingErrors
+  );
+
+  preview.existingTeams = existingTeamsAnalysis.summary;
+  preview.stagingTeams = stagingTeamsAnalysis.summary;
+
+  const finalTeamsRows = existingTeamsAnalysis.rowsByTerm.FA
+    .concat(existingTeamsAnalysis.rowsByTerm.FY)
+    .concat(stagingTeamsAnalysis.rowsByTerm.SP);
+  const finalTeamsValidation = previewSecondTermDataMigrationValidateFinalTeams_(
+    finalTeamsRows,
+    finalTimetableValidation.assignmentKeys,
+    preview.blockingErrors,
+    preview.warnings
+  );
+  preview.finalTeams = finalTeamsValidation.summary;
+
+  const fyAlignment = previewSecondTermDataMigrationCompareFyAssignments_(
+    existingTimetableAnalysis.rowsByTerm.FY,
+    stagingTimetableAnalysis.rowsByTerm.FY
+  );
+  preview.fyAlignment = fyAlignment;
+  if (fyAlignment.fyDifferencesRequireReview) {
+    preview.blockingErrors.push('FY差異があります。人間確認が必要です。');
+  }
+
+  const calendarPreview = previewSecondTermDataMigrationBuildFinalCalendar_(
+    sources.dev.calendar,
+    sources.staging.calendar,
+    migrationRange,
+    preview.blockingErrors
+  );
+  preview.finalCalendar = calendarPreview.finalCalendar;
+  preview.calendarComparison = calendarPreview.calendarComparison;
+
+  const classSessionsAudit = previewSecondTermDataMigrationAuditClassSessions_(
+    sources.dev.classSessions,
+    migrationRange,
+    preview.blockingErrors
+  );
+  preview.classSessions = classSessionsAudit.summary;
+
+  preview.planHash = previewSecondTermDataMigrationBuildPlanHash_(
+    calendarPreview.rowsForHash,
+    finalTimetableValidation.rowsForHash,
+    finalTeamsValidation.rowsForHash,
+    migrationRange
+  );
+
+  preview.blockingErrors = uniqueSortedStrings_(preview.blockingErrors);
+  preview.warnings = uniqueSortedStrings_(preview.warnings);
+  preview.safeToApplyMigration = preview.blockingErrors.length === 0;
+
+  const timetableExistingTermValues = buildSecondTermDataMigrationExistingTermValues_(
+    sources.dev.timetable,
+    sources.devTimetableColumns,
+    'DEV timetable'
+  );
+  const classTeacherTeamsExistingTermValues = buildSecondTermDataMigrationExistingTermValues_(
+    sources.dev.classTeacherTeams,
+    sources.devTeamColumns,
+    'DEV classTeacherTeams'
+  );
+  const calendarTermValues = buildSecondTermDataMigrationCalendarTermValues_(
+    calendarPreview.rowsForWrite,
+    sources.dev.calendar.rows.length
+  );
+  const timetableAppendRows = buildSecondTermDataMigrationTeachingAppendRows_(
+    stagingTimetableAnalysis.rowsByTerm.SP,
+    false
+  );
+  const classTeacherTeamsAppendRows = buildSecondTermDataMigrationTeachingAppendRows_(
+    stagingTeamsAnalysis.rowsByTerm.SP,
+    true
+  );
+
+  return {
+    preview: preview,
+    sources: sources,
+    rowsForWrite: {
+      timetableHeader: ['classId', 'weekday', 'period', 'teacherName', 'teacherId', 'term'],
+      timetableExistingTermValues: timetableExistingTermValues,
+      timetableAppendRows: timetableAppendRows,
+      classTeacherTeamsHeader: [
+        'classId', 'weekday', 'period', 'teacherName', 'teacherId', 'roleType', 'term'
+      ],
+      classTeacherTeamsExistingTermValues: classTeacherTeamsExistingTermValues,
+      classTeacherTeamsAppendRows: classTeacherTeamsAppendRows,
+      calendarHeader: ['date', 'weekday', 'isClassDay', 'term'],
+      calendarTermValues: calendarTermValues
+    }
+  };
+}
+
+function buildSecondTermDataMigrationExistingTermValues_(source, columns, label) {
+  if (!source || !source.exists) return [];
+  const classIdColumn = columns ? columns.classId : -1;
+  if (classIdColumn === -1) {
+    return [];
+  }
+
+  return (source.rows || []).map(function(row) {
+    const classId = normalizeString_(row[classIdColumn]);
+    const term = previewSecondTermDataMigrationClassIdTerm_(classId);
+    return [term === 'FA' || term === 'FY' ? term : ''];
+  });
+}
+
+function buildSecondTermDataMigrationCalendarTermValues_(rowsForWrite, expectedCount) {
+  const values = (rowsForWrite || []).map(function(row) {
+    return [normalizeString_(row[3])];
+  });
+  const required = Number(expectedCount || 0);
+  if (values.length === required) return values;
+
+  return Array.from({ length: required }, function(_, index) {
+    return values[index] ? values[index] : [''];
+  });
+}
+
+function buildSecondTermDataMigrationTeachingAppendRows_(rows, includeRoleType) {
+  return (rows || []).map(function(row) {
+    const output = [
+      normalizeString_(row.classId),
+      secondTermDataMigrationPhysicalWeekday_(row.weekday),
+      normalizeClassSessionPeriod_(row.period),
+      normalizeString_(row.teacherName),
+      normalizeString_(row.teacherId)
+    ];
+    if (includeRoleType) {
+      output.push(normalizeString_(row.roleType));
+    }
+    output.push(normalizeString_(row.term));
+    return output;
+  });
+}
+
+function secondTermDataMigrationPhysicalWeekday_(weekday) {
+  const normalized = normalizeWeekday_(weekday);
+  const map = {
+    Mon: '月',
+    Tue: '火',
+    Wed: '水',
+    Thu: '木',
+    Fri: '金'
+  };
+
+  if (!Object.prototype.hasOwnProperty.call(map, normalized)) {
+    throw new Error(
+      '物理書込み用weekdayを解決できません: ' +
+      normalizeString_(weekday)
+    );
+  }
+
+  return map[normalized];
+}
+
+function applySecondTermDataMigration2026_(expectedSpreadsheetId, expectedPlanHash) {
+  const expectedSpreadsheet = normalizeString_(expectedSpreadsheetId);
+  const expectedHash = normalizeString_(expectedPlanHash);
+
+  if (!expectedHash) {
+    throw new Error('expectedPlanHashが必要です。');
+  }
+  if (!expectedSpreadsheet) {
+    throw new Error('expectedSpreadsheetIdが必要です。');
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+
+  try {
+    const ss = getOperationSpreadsheet();
+    const operationSpreadsheetId = ss.getId();
+
+    if (operationSpreadsheetId === '1HKNlWs_zcd160b4VjosyBRuGaJTHDC546uc5bUfdjlU') {
+      throw new Error('本番 Operation Spreadsheet では実行できません。');
+    }
+    if (operationSpreadsheetId !== expectedSpreadsheet) {
+      throw new Error(
+        'Operation Spreadsheet ID が一致しません。 expected=' + expectedSpreadsheet +
+        ' actual=' + operationSpreadsheetId
+      );
+    }
+    if (operationSpreadsheetId !== SECOND_TERM_DATA_MIGRATION_DEV_OPERATION_SPREADSHEET_ID_) {
+      throw new Error('DEV Operation Spreadsheet 以外では実行できません。');
+    }
+
+    const migrationRange = {
+      start: SECOND_TERM_CLASS_SESSIONS_2026_.START_DATE,
+      end: SECOND_TERM_CLASS_SESSIONS_2026_.END_DATE
+    };
+    const plan = buildSecondTermDataMigrationPlan2026_(
+      migrationRange,
+      SECOND_TERM_DATA_MIGRATION_STAGING_SPREADSHEET_ID_
+    );
+
+    if (normalizeString_(plan.preview.planHash) !== expectedHash) {
+      throw new Error(
+        'preview planHash が一致しません。 expected=' + expectedHash +
+        ' actual=' + normalizeString_(plan.preview.planHash)
+      );
+    }
+    if ((plan.preview.blockingErrors || []).length > 0) {
+      throw new Error('blockingErrors があるため適用できません: ' + plan.preview.blockingErrors.join(' / '));
+    }
+    if ((plan.preview.warnings || []).length > 0) {
+      throw new Error('warnings があるため適用できません: ' + plan.preview.warnings.join(' / '));
+    }
+    if (plan.preview.safeToApplyMigration !== true) {
+      throw new Error('safeToApplyMigration が true ではありません。');
+    }
+
+    const classSessionsSummary = plan.preview.classSessions || {};
+    if (Number(classSessionsSummary.migrationRangeCount || 0) !== 0) {
+      throw new Error('classSessions の移行範囲に既存行があります。');
+    }
+    if (Number(classSessionsSummary.duplicateCount || 0) !== 0) {
+      throw new Error('classSessions にidentity重複があります。');
+    }
+    if (Number(classSessionsSummary.invalidIdentityCount || 0) !== 0) {
+      throw new Error('classSessions に不正identityがあります。');
+    }
+
+    if (plan.sources.devTimetableColumns.term !== -1) {
+      throw new Error('timetable は既にterm列を持っています。初回移行は実行できません。');
+    }
+    if (plan.sources.devTeamColumns.term !== -1) {
+      throw new Error('classTeacherTeams は既にterm列を持っています。初回移行は実行できません。');
+    }
+    if (plan.sources.devCalendarColumns.term !== -1) {
+      throw new Error('calendar は既にterm列を持っています。初回移行は実行できません。');
+    }
+    if (Number(plan.sources.dev.timetable.columnCount || 0) !== 5) {
+      throw new Error('timetable はlegacy 5列である必要があります。');
+    }
+    if (Number(plan.sources.dev.classTeacherTeams.columnCount || 0) !== 6) {
+      throw new Error('classTeacherTeams はlegacy 6列である必要があります。');
+    }
+    if (Number(plan.sources.dev.calendar.columnCount || 0) !== 3) {
+      throw new Error('calendar はlegacy 3列である必要があります。');
+    }
+
+    const timetableSheet = ss.getSheetByName(CONFIG.SHEETS.TIMETABLE);
+    const classTeacherTeamsSheet = ss.getSheetByName(CONFIG.SHEETS.CLASS_TEACHER_TEAMS);
+    const calendarSheet = ss.getSheetByName(CONFIG.SHEETS.CALENDAR);
+    if (!timetableSheet || !classTeacherTeamsSheet || !calendarSheet) {
+      throw new Error('対象シート(timetable/classTeacherTeams/calendar)が見つかりません。');
+    }
+
+    const inPlaceState = captureSecondTermDataMigrationInPlaceState_({
+      timetable: timetableSheet,
+      classTeacherTeams: classTeacherTeamsSheet,
+      calendar: calendarSheet
+    });
+    assertSecondTermDataMigrationFormulaContracts_(inPlaceState);
+
+    const classSessionsFingerprintBefore = buildSecondTermDataMigrationClassSessionsFingerprint_(
+      plan.sources.dev.classSessions
+    );
+
+    let startedWriting = false;
+    let cacheInvalidation = {};
+
+    try {
+      startedWriting = true;
+
+      writeSecondTermDataMigrationTimetableInPlace_(inPlaceState.timetable, plan.rowsForWrite);
+      writeSecondTermDataMigrationClassTeacherTeamsInPlace_(
+        inPlaceState.classTeacherTeams,
+        plan.rowsForWrite
+      );
+      writeSecondTermDataMigrationCalendarInPlace_(inPlaceState.calendar, plan.rowsForWrite);
+      SpreadsheetApp.flush();
+
+      assertSecondTermDataMigrationPreservedRangeFingerprintUnchanged_(inPlaceState.timetable);
+      assertSecondTermDataMigrationPreservedRangeFingerprintUnchanged_(
+        inPlaceState.classTeacherTeams
+      );
+      assertSecondTermDataMigrationPreservedRangeFingerprintUnchanged_(inPlaceState.calendar);
+
+      const postWritePlanHash = buildSecondTermDataMigrationPostWritePlanHash_(ss, migrationRange);
+      if (postWritePlanHash !== expectedHash) {
+        throw new Error(
+          'post-write planHash が一致しません。 expected=' + expectedHash +
+          ' actual=' + postWritePlanHash
+        );
+      }
+
+      const postAudit = auditSecondTermMigrationSheetState2026();
+      validateSecondTermDataMigrationPostAudit_(postAudit);
+
+      const classSessionsAfterSource = readSecondTermMigrationAuditSheet_(
+        ss,
+        CONFIG.SHEETS.CLASS_SESSIONS,
+        ['date', '日付']
+      );
+      const classSessionsFingerprintAfter = buildSecondTermDataMigrationClassSessionsFingerprint_(
+        classSessionsAfterSource
+      );
+      const classSessionsUnchanged =
+        classSessionsFingerprintBefore.fingerprint === classSessionsFingerprintAfter.fingerprint &&
+        classSessionsFingerprintBefore.rowCount === classSessionsFingerprintAfter.rowCount &&
+        classSessionsFingerprintBefore.columnCount === classSessionsFingerprintAfter.columnCount;
+      if (!classSessionsUnchanged) {
+        throw new Error('classSessions のfingerprintが書込み前後で一致しません。');
+      }
+
+      const teachingAssignmentSourceCacheKeys = getTeachingAssignmentSourceCacheKeys_();
+      removeScriptCacheKeys_(teachingAssignmentSourceCacheKeys);
+      const teachingAssignmentNotification = notifyTeachingAssignmentDataChangedUnderLock_();
+      invalidateEffectiveCalendarCache_();
+      cacheInvalidation = {
+        invalidatedSourceCacheKeys: teachingAssignmentSourceCacheKeys,
+        teachingAssignmentNotification: teachingAssignmentNotification,
+        calendarCacheInvalidationCalled: true
+      };
+
+      const response = {
+        ok: true,
+        environment: 'DEV',
+        operationSpreadsheetId: operationSpreadsheetId,
+        planHash: expectedHash,
+        postWritePlanHash: postWritePlanHash,
+        wrote: {
+          timetableRows: Number((postAudit.timetable && postAudit.timetable.rowCount) || 0),
+          classTeacherTeamsRows: Number(
+            (postAudit.classTeacherTeams && postAudit.classTeacherTeams.rowCount) || 0
+          ),
+          calendarRows: Number((postAudit.calendar && postAudit.calendar.rowCount) || 0)
+        },
+        classSessionsUnchanged: classSessionsUnchanged,
+        cacheInvalidation: cacheInvalidation,
+        postAudit: postAudit
+      };
+
+      Logger.log(JSON.stringify(response, null, 2));
+      return response;
+    } catch (writeOrVerifyError) {
+      if (startedWriting) {
+        try {
+          rollbackSecondTermDataMigrationInPlace_(inPlaceState);
+          SpreadsheetApp.flush();
+        } catch (rollbackError) {
+          writeOrVerifyError.rollbackError = String(
+            rollbackError && rollbackError.message ? rollbackError.message : rollbackError
+          );
+        }
+      }
+      throw writeOrVerifyError;
+    }
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function previewSecondTermDataMigrationReadSources_(migrationRange, stagingSpreadsheetId) {
@@ -2285,7 +2959,8 @@ function previewSecondTermDataMigrationBuildFinalCalendar_(
     return {
       finalCalendar: finalCalendar,
       calendarComparison: calendarComparison,
-      rowsForHash: []
+      rowsForHash: [],
+      rowsForWrite: []
     };
   }
 
@@ -2295,13 +2970,15 @@ function previewSecondTermDataMigrationBuildFinalCalendar_(
     return {
       finalCalendar: finalCalendar,
       calendarComparison: calendarComparison,
-      rowsForHash: []
+      rowsForHash: [],
+      rowsForWrite: []
     };
   }
 
   const dateRows = {};
   const devRangeMap = {};
   const rowsForHash = [];
+  const rowsForWrite = [];
 
   devCalendarSource.rows.forEach(function(row, index) {
     const ymd = auditSecondTermMigrationYmd_(
@@ -2338,6 +3015,12 @@ function previewSecondTermDataMigrationBuildFinalCalendar_(
 
     rowsForHash.push([
       ymd,
+      weekday,
+      isClassDay === true,
+      termInfo.term
+    ]);
+    rowsForWrite.push([
+      row[devColumns.date],
       weekday,
       isClassDay === true,
       termInfo.term
@@ -2380,7 +3063,8 @@ function previewSecondTermDataMigrationBuildFinalCalendar_(
     return {
       finalCalendar: finalCalendar,
       calendarComparison: calendarComparison,
-      rowsForHash: rowsForHash
+      rowsForHash: rowsForHash,
+      rowsForWrite: rowsForWrite
     };
   }
   if (stagingColumns.date === -1 || stagingColumns.weekday === -1 || stagingColumns.isClassDay === -1) {
@@ -2388,7 +3072,8 @@ function previewSecondTermDataMigrationBuildFinalCalendar_(
     return {
       finalCalendar: finalCalendar,
       calendarComparison: calendarComparison,
-      rowsForHash: rowsForHash
+      rowsForHash: rowsForHash,
+      rowsForWrite: rowsForWrite
     };
   }
 
@@ -2475,7 +3160,8 @@ function previewSecondTermDataMigrationBuildFinalCalendar_(
   return {
     finalCalendar: finalCalendar,
     calendarComparison: calendarComparison,
-    rowsForHash: rowsForHash
+    rowsForHash: rowsForHash,
+    rowsForWrite: rowsForWrite
   };
 }
 
@@ -2587,4 +3273,501 @@ function previewSecondTermDataMigrationCanonicalRows_(rows) {
     const bKey = JSON.stringify(b);
     return aKey < bKey ? -1 : (aKey > bKey ? 1 : 0);
   });
+}
+
+function captureSecondTermDataMigrationInPlaceState_(sheets) {
+  return {
+    timetable: captureSecondTermDataMigrationInPlaceSheetState_(
+      'timetable',
+      sheets.timetable,
+      5,
+      6
+    ),
+    classTeacherTeams: captureSecondTermDataMigrationInPlaceSheetState_(
+      'classTeacherTeams',
+      sheets.classTeacherTeams,
+      6,
+      7
+    ),
+    calendar: captureSecondTermDataMigrationInPlaceSheetState_(
+      'calendar',
+      sheets.calendar,
+      3,
+      4
+    )
+  };
+}
+
+function captureSecondTermDataMigrationInPlaceSheetState_(
+  label,
+  sheet,
+  preservedColumnCount,
+  termColumnIndex
+) {
+  const oldLastRow = sheet.getLastRow();
+  const oldLastColumn = sheet.getLastColumn();
+
+  return {
+    label: label,
+    sheet: sheet,
+    oldLastRow: oldLastRow,
+    oldLastColumn: oldLastColumn,
+    preservedColumnCount: preservedColumnCount,
+    termColumnIndex: termColumnIndex,
+    preservedFingerprint: buildSecondTermDataMigrationRangeFingerprint_(
+      sheet,
+      oldLastRow,
+      preservedColumnCount
+    )
+  };
+}
+
+function assertSecondTermDataMigrationFormulaContracts_(inPlaceState) {
+  assertSecondTermDataMigrationTeachingFormulaContract_(inPlaceState.timetable, 4, 5, 5);
+  assertSecondTermDataMigrationTeachingFormulaContract_(inPlaceState.classTeacherTeams, 4, 5, 6);
+  assertSecondTermDataMigrationCalendarFormulaContract_(inPlaceState.calendar, 3);
+}
+
+function assertSecondTermDataMigrationTeachingFormulaContract_(
+  snapshot,
+  teacherNameColumnIndex,
+  teacherIdColumnIndex,
+  dataColumnCount
+) {
+  const sheet = snapshot.sheet;
+  const lastRow = snapshot.oldLastRow;
+  if (lastRow < 1) return;
+
+  const formulas = sheet.getRange(1, 1, lastRow, dataColumnCount).getFormulas();
+  const teacherNameColumnLetter = secondTermDataMigrationColumnLetter_(teacherNameColumnIndex);
+
+  formulas.forEach(function(row, rowIndex) {
+    const rowNumber = rowIndex + 1;
+    row.forEach(function(formula, colIndex) {
+      const normalizedFormula = normalizeSecondTermDataMigrationFormulaText_(formula);
+      if (!normalizedFormula) return;
+
+      const columnNumber = colIndex + 1;
+      if (columnNumber !== teacherIdColumnIndex) {
+        throw new Error(
+          snapshot.label + ' の許可外列にformulaがあります: row=' + rowNumber +
+          ' col=' + columnNumber
+        );
+      }
+      if (rowNumber === 1) {
+        throw new Error(snapshot.label + ' header行のteacherIdにformulaは許可されません。');
+      }
+      if (!isSecondTermDataMigrationAllowedTeacherIdFormula_(
+        normalizedFormula,
+        rowNumber,
+        teacherNameColumnLetter
+      )) {
+        throw new Error(
+          snapshot.label + ' teacherId列に許可外formulaがあります: row=' + rowNumber
+        );
+      }
+    });
+  });
+}
+
+function assertSecondTermDataMigrationCalendarFormulaContract_(snapshot, dataColumnCount) {
+  const sheet = snapshot.sheet;
+  const lastRow = snapshot.oldLastRow;
+  if (lastRow < 1) return;
+
+  const formulas = sheet.getRange(1, 1, lastRow, dataColumnCount).getFormulas();
+  let formulaCount = 0;
+  formulas.forEach(function(row) {
+    row.forEach(function(formula) {
+      if (normalizeSecondTermDataMigrationFormulaText_(formula)) {
+        formulaCount += 1;
+      }
+    });
+  });
+
+  if (formulaCount > 0) {
+    throw new Error('calendar のA:Cにformulaが存在するため中止しました: ' + formulaCount + '件');
+  }
+}
+
+function normalizeSecondTermDataMigrationFormulaText_(formula) {
+  return normalizeString_(formula)
+    .replace(/\s+/g, '')
+    .replace(/;/g, ',')
+    .toUpperCase();
+}
+
+function isSecondTermDataMigrationAllowedTeacherIdFormula_(
+  normalizedFormula,
+  rowNumber,
+  teacherNameColumnLetter
+) {
+  const refPattern = '\\$?' + teacherNameColumnLetter + '\\$?' + rowNumber;
+  const sheetRefPattern = "'?TEACHERS'?!";
+  const pattern = new RegExp(
+    '^=IF\\(' + refPattern + '="","",XLOOKUP\\(' + refPattern + ',' +
+    sheetRefPattern + '\\$?B:\\$?B,' + sheetRefPattern + '\\$?A:\\$?A,""\\)\\)$'
+  );
+
+  return pattern.test(normalizedFormula);
+}
+
+function secondTermDataMigrationColumnLetter_(columnNumber) {
+  let n = Number(columnNumber || 0);
+  let letters = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+}
+
+function writeSecondTermDataMigrationTimetableInPlace_(snapshot, rowsForWrite) {
+  const sheet = snapshot.sheet;
+  const existingDataRowCount = Math.max(0, snapshot.oldLastRow - 1);
+  const termValues = (rowsForWrite && rowsForWrite.timetableExistingTermValues) || [];
+  const appendRows = (rowsForWrite && rowsForWrite.timetableAppendRows) || [];
+
+  if (termValues.length !== existingDataRowCount) {
+    throw new Error(
+      'timetable term列の既存行件数が一致しません。 expected=' + existingDataRowCount +
+      ' actual=' + termValues.length
+    );
+  }
+  termValues.forEach(function(row, index) {
+    const term = normalizeString_(row && row[0]);
+    if (term !== 'FA' && term !== 'FY') {
+      throw new Error('timetable 既存行termが不正です: row=' + (index + 2) + ' term=' + term);
+    }
+  });
+  appendRows.forEach(function(row, index) {
+    if (!row || row.length !== 6) {
+      throw new Error('timetable append行の列数が不正です: row=' + (index + 1));
+    }
+    if (normalizeString_(row[5]) !== 'SP') {
+      throw new Error('timetable append行termがSPではありません: row=' + (index + 1));
+    }
+  });
+
+  sheet.getRange(1, 6).setValue('term');
+  if (existingDataRowCount > 0) {
+    sheet.getRange(2, 6, existingDataRowCount, 1).setValues(termValues);
+  }
+  if (appendRows.length > 0) {
+    sheet.getRange(snapshot.oldLastRow + 1, 1, appendRows.length, 6).setValues(appendRows);
+  }
+}
+
+function writeSecondTermDataMigrationClassTeacherTeamsInPlace_(snapshot, rowsForWrite) {
+  const sheet = snapshot.sheet;
+  const existingDataRowCount = Math.max(0, snapshot.oldLastRow - 1);
+  const termValues = (rowsForWrite && rowsForWrite.classTeacherTeamsExistingTermValues) || [];
+  const appendRows = (rowsForWrite && rowsForWrite.classTeacherTeamsAppendRows) || [];
+
+  if (termValues.length !== existingDataRowCount) {
+    throw new Error(
+      'classTeacherTeams term列の既存行件数が一致しません。 expected=' + existingDataRowCount +
+      ' actual=' + termValues.length
+    );
+  }
+  termValues.forEach(function(row, index) {
+    const term = normalizeString_(row && row[0]);
+    if (term !== 'FA' && term !== 'FY') {
+      throw new Error('classTeacherTeams 既存行termが不正です: row=' + (index + 2) + ' term=' + term);
+    }
+  });
+  appendRows.forEach(function(row, index) {
+    if (!row || row.length !== 7) {
+      throw new Error('classTeacherTeams append行の列数が不正です: row=' + (index + 1));
+    }
+    if (normalizeString_(row[6]) !== 'SP') {
+      throw new Error('classTeacherTeams append行termがSPではありません: row=' + (index + 1));
+    }
+  });
+
+  sheet.getRange(1, 7).setValue('term');
+  if (existingDataRowCount > 0) {
+    sheet.getRange(2, 7, existingDataRowCount, 1).setValues(termValues);
+  }
+  if (appendRows.length > 0) {
+    sheet.getRange(snapshot.oldLastRow + 1, 1, appendRows.length, 7).setValues(appendRows);
+  }
+}
+
+function writeSecondTermDataMigrationCalendarInPlace_(snapshot, rowsForWrite) {
+  const sheet = snapshot.sheet;
+  const existingDataRowCount = Math.max(0, snapshot.oldLastRow - 1);
+  const termValues = (rowsForWrite && rowsForWrite.calendarTermValues) || [];
+
+  if (termValues.length !== existingDataRowCount) {
+    throw new Error(
+      'calendar term列の既存行件数が一致しません。 expected=' + existingDataRowCount +
+      ' actual=' + termValues.length
+    );
+  }
+  termValues.forEach(function(row, index) {
+    const term = normalizeString_(row && row[0]);
+    if (term !== '' && term !== 'FA' && term !== 'SP') {
+      throw new Error('calendar termが不正です: row=' + (index + 2) + ' term=' + term);
+    }
+  });
+
+  sheet.getRange(1, 4).setValue('term');
+  if (existingDataRowCount > 0) {
+    sheet.getRange(2, 4, existingDataRowCount, 1).setValues(termValues);
+  }
+}
+
+function assertSecondTermDataMigrationPreservedRangeFingerprintUnchanged_(snapshot) {
+  const afterFingerprint = buildSecondTermDataMigrationRangeFingerprint_(
+    snapshot.sheet,
+    snapshot.oldLastRow,
+    snapshot.preservedColumnCount
+  );
+  if (afterFingerprint.fingerprint !== snapshot.preservedFingerprint.fingerprint) {
+    throw new Error(
+      snapshot.label + ' の既存領域fingerprintが一致しません。既存セルが変更されています。'
+    );
+  }
+}
+
+function buildSecondTermDataMigrationRangeFingerprint_(sheet, rowCount, columnCount) {
+  const effectiveRowCount = Number(rowCount || 0);
+  const effectiveColumnCount = Number(columnCount || 0);
+  if (effectiveRowCount < 1 || effectiveColumnCount < 1) {
+    return {
+      rowCount: effectiveRowCount,
+      columnCount: effectiveColumnCount,
+      fingerprint: buildSecondTermDataMigrationSha256Hex_('empty')
+    };
+  }
+
+  const range = sheet.getRange(1, 1, effectiveRowCount, effectiveColumnCount);
+  const payload = {
+    rowCount: effectiveRowCount,
+    columnCount: effectiveColumnCount,
+    values: auditSecondTermMigrationPlainRows_(range.getValues()),
+    formulas: range.getFormulas().map(function(row) {
+      return row.map(function(formula) {
+        return normalizeString_(formula);
+      });
+    })
+  };
+
+  return {
+    rowCount: effectiveRowCount,
+    columnCount: effectiveColumnCount,
+    fingerprint: buildSecondTermDataMigrationSha256Hex_(JSON.stringify(payload))
+  };
+}
+
+function rollbackSecondTermDataMigrationInPlace_(inPlaceState) {
+  rollbackSecondTermDataMigrationTeachingSheetInPlace_(inPlaceState.timetable, 6);
+  rollbackSecondTermDataMigrationTeachingSheetInPlace_(inPlaceState.classTeacherTeams, 7);
+  rollbackSecondTermDataMigrationCalendarInPlace_(inPlaceState.calendar, 4);
+}
+
+function rollbackSecondTermDataMigrationTeachingSheetInPlace_(snapshot, termColumnIndex) {
+  const sheet = snapshot.sheet;
+  const currentLastRow = sheet.getLastRow();
+  const currentLastColumn = sheet.getLastColumn();
+
+  if (currentLastRow > snapshot.oldLastRow) {
+    const rowsToClear = currentLastRow - snapshot.oldLastRow;
+    const colsToClear = Math.max(currentLastColumn, termColumnIndex);
+    sheet.getRange(snapshot.oldLastRow + 1, 1, rowsToClear, colsToClear).clearContent();
+  }
+
+  if (snapshot.oldLastRow > 0) {
+    sheet.getRange(1, termColumnIndex, snapshot.oldLastRow, 1).clearContent();
+  }
+}
+
+function rollbackSecondTermDataMigrationCalendarInPlace_(snapshot, termColumnIndex) {
+  const sheet = snapshot.sheet;
+  const rowsToClear = Math.max(snapshot.oldLastRow, sheet.getLastRow());
+  if (rowsToClear > 0) {
+    sheet.getRange(1, termColumnIndex, rowsToClear, 1).clearContent();
+  }
+}
+
+function buildSecondTermDataMigrationPostWritePlanHash_(ss, migrationRange) {
+  const timetableSource = readSecondTermMigrationAuditSheet_(ss, CONFIG.SHEETS.TIMETABLE, []);
+  const classTeacherTeamsSource = readSecondTermMigrationAuditSheet_(
+    ss,
+    CONFIG.SHEETS.CLASS_TEACHER_TEAMS,
+    []
+  );
+  const calendarSource = readSecondTermMigrationAuditSheet_(
+    ss,
+    CONFIG.SHEETS.CALENDAR,
+    ['date', '日付']
+  );
+
+  const timetableRows = buildSecondTermDataMigrationPostWriteTimetableRows_(timetableSource);
+  const classTeacherTeamsRows = buildSecondTermDataMigrationPostWriteClassTeacherTeamsRows_(
+    classTeacherTeamsSource
+  );
+  const calendarRows = buildSecondTermDataMigrationPostWriteCalendarRows_(
+    calendarSource,
+    migrationRange
+  );
+
+  return previewSecondTermDataMigrationBuildPlanHash_(
+    calendarRows,
+    timetableRows,
+    classTeacherTeamsRows,
+    migrationRange
+  );
+}
+
+function buildSecondTermDataMigrationPostWriteTimetableRows_(source) {
+  if (!source || !source.exists) {
+    throw new Error('post-write timetable シートが見つかりません。');
+  }
+
+  const columns = previewSecondTermDataMigrationResolveTeachingColumns_(source.headers, false);
+  if (
+    columns.classId === -1 ||
+    columns.weekday === -1 ||
+    columns.period === -1 ||
+    columns.teacherName === -1 ||
+    columns.teacherId === -1 ||
+    columns.term === -1
+  ) {
+    throw new Error('post-write timetable の必須header欠落があります。');
+  }
+
+  return source.rows.map(function(row) {
+    return [
+      normalizeString_(row[columns.classId]),
+      normalizeWeekday_(row[columns.weekday]),
+      normalizeClassSessionPeriod_(row[columns.period]),
+      normalizeString_(row[columns.teacherName]),
+      normalizeString_(row[columns.teacherId]),
+      normalizeString_(row[columns.term])
+    ];
+  });
+}
+
+function buildSecondTermDataMigrationPostWriteClassTeacherTeamsRows_(source) {
+  if (!source || !source.exists) {
+    throw new Error('post-write classTeacherTeams シートが見つかりません。');
+  }
+
+  const columns = previewSecondTermDataMigrationResolveTeachingColumns_(source.headers, true);
+  if (
+    columns.classId === -1 ||
+    columns.weekday === -1 ||
+    columns.period === -1 ||
+    columns.teacherName === -1 ||
+    columns.teacherId === -1 ||
+    columns.roleType === -1 ||
+    columns.term === -1
+  ) {
+    throw new Error('post-write classTeacherTeams の必須header欠落があります。');
+  }
+
+  return source.rows.map(function(row) {
+    return [
+      normalizeString_(row[columns.classId]),
+      normalizeWeekday_(row[columns.weekday]),
+      normalizeClassSessionPeriod_(row[columns.period]),
+      normalizeString_(row[columns.teacherName]),
+      normalizeString_(row[columns.teacherId]),
+      normalizeString_(row[columns.roleType]),
+      normalizeString_(row[columns.term])
+    ];
+  });
+}
+
+function buildSecondTermDataMigrationPostWriteCalendarRows_(source, migrationRange) {
+  if (!source || !source.exists) {
+    throw new Error('post-write calendar シートが見つかりません。');
+  }
+
+  const columns = previewSecondTermDataMigrationResolveCalendarColumns_(source.headers);
+  if (columns.date === -1 || columns.weekday === -1 || columns.isClassDay === -1 || columns.term === -1) {
+    throw new Error('post-write calendar の必須header欠落があります。');
+  }
+
+  return source.rows.map(function(row, index) {
+    const ymd = auditSecondTermMigrationYmd_(row[columns.date], source.dateDisplayValues[index]);
+    if (!ymd) return null;
+
+    const termInfo = previewSecondTermDataMigrationResolveCalendarTerm_(ymd, migrationRange);
+    return [
+      ymd,
+      normalizeWeekday_(row[columns.weekday]),
+      row[columns.isClassDay] === true,
+      termInfo.term
+    ];
+  }).filter(function(row) {
+    return !!row;
+  });
+}
+
+function validateSecondTermDataMigrationPostAudit_(postAudit) {
+  if (!postAudit || postAudit.safeToProceedToDataMigration !== true) {
+    throw new Error('post-audit safeToProceedToDataMigration が true ではありません。');
+  }
+  if ((postAudit.blockingFindings || []).length > 0) {
+    throw new Error('post-audit blockingFindings があります: ' + postAudit.blockingFindings.join(' / '));
+  }
+  if (!(postAudit.timetable && postAudit.timetable.hasTermColumn === true)) {
+    throw new Error('post-audit timetable.hasTermColumn が true ではありません。');
+  }
+  if (!(postAudit.classTeacherTeams && postAudit.classTeacherTeams.hasTermColumn === true)) {
+    throw new Error('post-audit classTeacherTeams.hasTermColumn が true ではありません。');
+  }
+  if (!(postAudit.calendar && postAudit.calendar.hasTermColumn === true)) {
+    throw new Error('post-audit calendar.hasTermColumn が true ではありません。');
+  }
+  if (postAudit.termContractMatches !== true) {
+    throw new Error('post-audit termContractMatches が true ではありません。');
+  }
+  if (Number((postAudit.timetable && postAudit.timetable.duplicateCount) || 0) !== 0) {
+    throw new Error('post-audit timetable duplicateCount が0ではありません。');
+  }
+  if (
+    Number(
+      (postAudit.classTeacherTeams && postAudit.classTeacherTeams.orphanTeamRowCount) || 0
+    ) !== 0
+  ) {
+    throw new Error('post-audit classTeacherTeams orphanTeamRowCount が0ではありません。');
+  }
+  if (Number((postAudit.classSessions && postAudit.classSessions.duplicateCount) || 0) !== 0) {
+    throw new Error('post-audit classSessions duplicateCount が0ではありません。');
+  }
+}
+
+function buildSecondTermDataMigrationClassSessionsFingerprint_(source) {
+  const payload = {
+    exists: !!(source && source.exists),
+    columnCount: Number((source && source.columnCount) || 0),
+    headers: (source && source.headers ? source.headers : []).map(auditSecondTermMigrationPlainValue_),
+    rows: auditSecondTermMigrationPlainRows_(source && source.rows ? source.rows : []),
+    dateDisplayValues: (source && source.dateDisplayValues ? source.dateDisplayValues : []).map(function(v) {
+      return normalizeString_(v);
+    })
+  };
+
+  return {
+    rowCount: source && source.rows ? source.rows.length : 0,
+    columnCount: Number((source && source.columnCount) || 0),
+    fingerprint: buildSecondTermDataMigrationSha256Hex_(JSON.stringify(payload))
+  };
+}
+
+function buildSecondTermDataMigrationSha256Hex_(text) {
+  const digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(text || ''),
+    Utilities.Charset.UTF_8
+  );
+
+  return digest.map(function(byte) {
+    return ('0' + ((byte + 256) % 256).toString(16)).slice(-2);
+  }).join('');
 }
