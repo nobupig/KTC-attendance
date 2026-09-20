@@ -5,6 +5,46 @@ const HOMEROOM_SHR_CONFIG = {
   ALLOWED_STATUS_CODES: ['', 'A', 'L', 'E']
 };
 
+const HOMEROOM_SHR_SCHEDULE_2026 = Object.freeze({
+  PERIODS: Object.freeze([
+    Object.freeze({
+      start: '2026-04-07',
+      end: '2026-09-19'
+    }),
+    Object.freeze({
+      start: '2026-09-24',
+      end: '2027-02-12'
+    })
+  ]),
+
+  FORCE_INCLUDE_RANGES: Object.freeze([
+    Object.freeze({
+      start: '2026-09-14',
+      end: '2026-09-19'
+    }),
+    Object.freeze({
+      start: '2027-02-03',
+      end: '2027-02-05'
+    }),
+    Object.freeze({
+      start: '2027-02-08',
+      end: '2027-02-12'
+    })
+  ]),
+
+  FORCE_INCLUDE_DATES: Object.freeze([
+    '2026-04-07'
+  ]),
+
+  FORCE_EXCLUDE_DATES: Object.freeze([
+    '2026-07-27',
+    '2027-02-06',
+    '2027-02-07'
+  ]),
+
+  FINAL_DATE: '2027-02-12'
+});
+
 function toClientSafeLastSavedInfo_(info) {
   if (!info) return null;
 
@@ -57,18 +97,9 @@ function getHomeroomShrUnsavedSummary(grade, unit) {
 
   ensureHomeroomAccess_(targetGrade, targetUnit);
 
-  // JST基準の今日を先に確定する
-  const todayYmd = formatDateToYmd(new Date());
-  const today = new Date(todayYmd + 'T12:00:00+09:00');
-
-  const endDate = new Date(today);
-  endDate.setDate(endDate.getDate() - 1);
-
-  const schoolYearStart = getHomeroomShrSummaryStartDate_(today);
-  const startDate = new Date(schoolYearStart);
-
-  const startYmd = formatDateToYmd(startDate);
-  const endYmd = formatDateToYmd(endDate);
+  const dateContext = getHomeroomShrUnsavedDateContext_(new Date());
+  const startYmd = dateContext.startYmd;
+  const endYmd = dateContext.endYmd;
 
   const cacheKey = buildHomeroomShrUnsavedSummaryCacheKey_(targetGrade, targetUnit, endYmd);
   const cached = getScriptCacheJson_(cacheKey);
@@ -76,52 +107,15 @@ function getHomeroomShrUnsavedSummary(grade, unit) {
     return cached;
   }
 
-  const classId = buildHomeroomShrClassId_(targetGrade, targetUnit);
-  const targetPeriod = String(HOMEROOM_SHR_CONFIG.PERIOD);
+  const snapshot = buildHomeroomShrUnsavedSnapshot_(
+    targetGrade,
+    targetUnit,
+    startYmd,
+    endYmd
+  );
 
-  const classDayYmdList = getHomeroomShrClassDayYmdList_(startYmd, endYmd);
-
-  const sessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
-  const headers = Array.isArray(sessionsData && sessionsData.headers) ? sessionsData.headers : [];
-  const rows = Array.isArray(sessionsData && sessionsData.rows) ? sessionsData.rows : [];
-
-  const col = {
-    classId: headers.indexOf('classId'),
-    date: headers.indexOf('date'),
-    period: headers.indexOf('period'),
-    actionType: headers.indexOf('actionType')
-  };
-
-  ['classId', 'date', 'period'].forEach(function(key) {
-    if (col[key] === -1) {
-      throw new Error('attendanceSessions シートに ' + key + ' 列がありません');
-    }
-  });
-
-  const savedDateMap = {};
-
-  rows.forEach(function(row) {
-    const rowClassId = String(row[col.classId] || '').trim();
-    const rowDate = formatDateToYmd(row[col.date]);
-    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
-    const actionType = col.actionType !== -1
-      ? String(row[col.actionType] || '').trim()
-      : '';
-
-    if (rowClassId !== classId) return;
-    if (!rowDate || rowDate < startYmd || rowDate > endYmd) return;
-    if (rowPeriod !== targetPeriod) return;
-    if (actionType && actionType !== HOMEROOM_SHR_CONFIG.ACTION_TYPE) return;
-
-    savedDateMap[rowDate] = true;
-  });
-
-  let unsavedCount = 0;
-  classDayYmdList.forEach(function(ymd) {
-    if (!savedDateMap[ymd]) {
-      unsavedCount += 1;
-    }
-  });
+  const classDayYmdList = snapshot.classDayYmdList;
+  const unsavedCount = snapshot.unsavedYmdList.length;
 
   const result = {
     ok: true,
@@ -148,17 +142,9 @@ function getHomeroomShrUnsavedDetails(grade, unit) {
 
   ensureHomeroomAccess_(targetGrade, targetUnit);
 
-  // JST基準の今日を先に確定する
-  const todayYmd = formatDateToYmd(new Date());
-  const today = new Date(todayYmd + 'T12:00:00+09:00');
-
-  const endDate = new Date(today);
-  endDate.setDate(endDate.getDate() - 1);
-
-  const startDate = new Date(getHomeroomShrSummaryStartDate_(today));
-
-  const startYmd = formatDateToYmd(startDate);
-  const endYmd = formatDateToYmd(endDate);
+  const dateContext = getHomeroomShrUnsavedDateContext_(new Date());
+  const startYmd = dateContext.startYmd;
+  const endYmd = dateContext.endYmd;
 
   const cacheKey = buildHomeroomShrUnsavedDetailsCacheKey_(targetGrade, targetUnit, endYmd);
   const cached = getScriptCacheJson_(cacheKey);
@@ -166,14 +152,67 @@ function getHomeroomShrUnsavedDetails(grade, unit) {
     return cached;
   }
 
+  const snapshot = buildHomeroomShrUnsavedSnapshot_(
+    targetGrade,
+    targetUnit,
+    startYmd,
+    endYmd
+  );
+
+  const items = snapshot.unsavedYmdList.map(function(ymd) {
+    return {
+      date: ymd,
+      weekday: getWeekdayJaFromYmd_(ymd)
+    };
+  });
+
+  const result = {
+    ok: true,
+    classInfo: {
+      grade: targetGrade,
+      unit: targetUnit,
+      classLabel: buildHomeroomShrClassLabel_(targetGrade, targetUnit)
+    },
+    items: items,
+    checkedRange: {
+      start: startYmd,
+      end: endYmd
+    }
+  };
+
+  putScriptCacheJson_(cacheKey, result, 60);
+  return result;
+}
+
+function buildHomeroomShrUnsavedSnapshot_(grade, unit, startYmd, endYmd) {
+  const targetGrade = String(grade || '').trim();
+  const targetUnit = String(unit || '').trim();
+  const cacheKey = buildHomeroomShrUnsavedSnapshotCacheKey_(
+    targetGrade,
+    targetUnit,
+    endYmd
+  );
+
+  const cached = getScriptCacheJson_(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const classId = buildHomeroomShrClassId_(targetGrade, targetUnit);
   const targetPeriod = String(HOMEROOM_SHR_CONFIG.PERIOD);
-
   const classDayYmdList = getHomeroomShrClassDayYmdList_(startYmd, endYmd);
 
-  const sessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
-  const headers = Array.isArray(sessionsData && sessionsData.headers) ? sessionsData.headers : [];
-  const rows = Array.isArray(sessionsData && sessionsData.rows) ? sessionsData.rows : [];
+  const sessionsData = getSheetDataCached_(
+    'OPERATION',
+    CONFIG.SHEETS.ATTENDANCE_SESSIONS,
+    60
+  );
+  const headers = Array.isArray(sessionsData && sessionsData.headers)
+    ? sessionsData.headers
+    : [];
+  const rows = Array.isArray(sessionsData && sessionsData.rows)
+    ? sessionsData.rows
+    : [];
 
   const col = {
     classId: headers.indexOf('classId'),
@@ -193,8 +232,12 @@ function getHomeroomShrUnsavedDetails(grade, unit) {
   rows.forEach(function(row) {
     const rowClassId = String(row[col.classId] || '').trim();
     const rowDate = formatDateToYmd(row[col.date]);
-    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
-    const actionType = col.actionType !== -1 ? String(row[col.actionType] || '').trim() : '';
+    const rowPeriod = String(
+      row[col.period] == null ? '' : row[col.period]
+    ).trim();
+    const actionType = col.actionType !== -1
+      ? String(row[col.actionType] || '').trim()
+      : '';
 
     if (rowClassId !== classId) return;
     if (!rowDate || rowDate < startYmd || rowDate > endYmd) return;
@@ -204,33 +247,24 @@ function getHomeroomShrUnsavedDetails(grade, unit) {
     savedDateMap[rowDate] = true;
   });
 
-  const items = classDayYmdList
-    .filter(function(ymd) {
-      return !savedDateMap[ymd];
-    })
-    .map(function(ymd) {
-      return {
-        date: ymd,
-        weekday: getWeekdayJaFromYmd_(ymd)
-      };
-    });
+  const unsavedYmdList = classDayYmdList.filter(function(ymd) {
+    return !savedDateMap[ymd];
+  });
 
-  const result = {
-    ok: true,
-    classInfo: {
-      grade: targetGrade,
-      unit: targetUnit,
-      classLabel: buildHomeroomShrClassLabel_(targetGrade, targetUnit)
-    },
-    items: items,
-    checkedRange: {
-      start: startYmd,
-      end: endYmd
-    }
+  const snapshot = {
+    classDayYmdList: classDayYmdList,
+    unsavedYmdList: unsavedYmdList
   };
 
-  putScriptCacheJson_(cacheKey, result, 60);
-  return result;
+  putScriptCacheJson_(cacheKey, snapshot, 60);
+  return snapshot;
+}
+
+function buildHomeroomShrUnsavedSnapshotCacheKey_(grade, unit, endYmd) {
+  return 'homeroomShrUnsavedSnapshot__' +
+    String(grade || '').trim() + '__' +
+    String(unit || '').trim() + '__' +
+    String(endYmd || '').trim();
 }
 
 function buildHomeroomShrUnsavedDetailsCacheKey_(grade, unit, endYmd) {
@@ -257,7 +291,55 @@ function buildHomeroomShrUnsavedSummaryCacheKey_(grade, unit, endYmd) {
     String(endYmd || '').trim();
 }
 
+function getHomeroomShrUnsavedDateContext_(baseDate) {
+  const todayYmd = formatDateToYmd(baseDate || new Date());
+  if (!todayYmd) {
+    throw new Error('SHR未保存判定の基準日を取得できませんでした');
+  }
+
+  const today = new Date(todayYmd + 'T12:00:00+09:00');
+  const endDate = new Date(today);
+  endDate.setDate(endDate.getDate() - 1);
+
+  const periods = HOMEROOM_SHR_SCHEDULE_2026.PERIODS;
+  const startYmd = periods[0].start;
+  let endYmd = formatDateToYmd(endDate);
+
+  if (endYmd > HOMEROOM_SHR_SCHEDULE_2026.FINAL_DATE) {
+    endYmd = HOMEROOM_SHR_SCHEDULE_2026.FINAL_DATE;
+  }
+
+  return {
+    startYmd: startYmd,
+    endYmd: endYmd
+  };
+}
+
+function isHomeroomShrDateInConfiguredPeriod_(ymd) {
+  return HOMEROOM_SHR_SCHEDULE_2026.PERIODS.some(function(period) {
+    return ymd >= period.start && ymd <= period.end;
+  });
+}
+
+function isHomeroomShrForceIncluded_(ymd) {
+  if (HOMEROOM_SHR_SCHEDULE_2026.FORCE_INCLUDE_DATES.indexOf(ymd) !== -1) {
+    return true;
+  }
+
+  return HOMEROOM_SHR_SCHEDULE_2026.FORCE_INCLUDE_RANGES.some(function(range) {
+    return ymd >= range.start && ymd <= range.end;
+  });
+}
+
+function isHomeroomShrForceExcluded_(ymd) {
+  return HOMEROOM_SHR_SCHEDULE_2026.FORCE_EXCLUDE_DATES.indexOf(ymd) !== -1;
+}
+
 function getHomeroomShrClassDayYmdList_(startYmd, endYmd) {
+  if (!startYmd || !endYmd || startYmd > endYmd) {
+    return [];
+  }
+
   const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 300);
   const headers = Array.isArray(calendarData && calendarData.headers) ? calendarData.headers : [];
   const rows = Array.isArray(calendarData && calendarData.rows) ? calendarData.rows : [];
@@ -267,30 +349,66 @@ function getHomeroomShrClassDayYmdList_(startYmd, endYmd) {
     isClassDay: headers.indexOf('isClassDay')
   };
 
-  // calendar が未整備でも止めず、平日ベースでフォールバック
   if (col.date === -1 || col.isClassDay === -1 || !rows.length) {
-    return buildWeekdayYmdList_(startYmd, endYmd);
+    throw new Error('calendar シートに SHR未保存判定に必要な date / isClassDay データがありません');
   }
 
-  const result = [];
+  const calendarMap = {};
 
   rows.forEach(function(row) {
     const rowDate = formatDateToYmd(row[col.date]);
     if (!rowDate) return;
-    if (rowDate < startYmd || rowDate > endYmd) return;
 
     const raw = row[col.isClassDay];
-    const isClassDay = raw === true || String(raw || '').trim().toUpperCase() === 'TRUE' || String(raw || '').trim() === '1';
-
-    if (isClassDay) {
-      result.push(rowDate);
-    }
+    calendarMap[rowDate] =
+      raw === true ||
+      String(raw || '').trim().toUpperCase() === 'TRUE' ||
+      String(raw || '').trim() === '1';
   });
 
-  result.sort();
+  const startParts = String(startYmd).split('-').map(Number);
+  const endParts = String(endYmd).split('-').map(Number);
+
+  if (startParts.length !== 3 || endParts.length !== 3) {
+    throw new Error('SHR未保存判定の日付範囲が不正です');
+  }
+
+  const current = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+  const end = new Date(endParts[0], endParts[1] - 1, endParts[2]);
+  const result = [];
+
+  while (current <= end) {
+    const ymd = formatDateToYmd(current);
+
+    if (!isHomeroomShrDateInConfiguredPeriod_(ymd)) {
+      current.setDate(current.getDate() + 1);
+      continue;
+    }
+
+    if (isHomeroomShrForceExcluded_(ymd)) {
+      current.setDate(current.getDate() + 1);
+      continue;
+    }
+
+    if (isHomeroomShrForceIncluded_(ymd)) {
+      result.push(ymd);
+      current.setDate(current.getDate() + 1);
+      continue;
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(calendarMap, ymd)) {
+      throw new Error('calendar シートに SHR判定対象日の行がありません: ' + ymd);
+    }
+
+    if (calendarMap[ymd]) {
+      result.push(ymd);
+    }
+
+    current.setDate(current.getDate() + 1);
+  }
+
   return result;
 }
-
 function buildWeekdayYmdList_(startYmd, endYmd) {
   const startParts = String(startYmd || '').split('-').map(Number);
   const endParts = String(endYmd || '').split('-').map(Number);
@@ -609,15 +727,14 @@ function saveHomeroomShrAttendance(payload) {
 
      invalidateAttendanceCaches_(classId, targetDate, period);
 
-    const summaryBaseDate = new Date();
-    summaryBaseDate.setHours(0, 0, 0, 0);
-    summaryBaseDate.setDate(summaryBaseDate.getDate() - 1);
-    const summaryEndYmd = formatDateToYmd(summaryBaseDate);
+    const summaryDateContext = getHomeroomShrUnsavedDateContext_(new Date());
+    const summaryEndYmd = summaryDateContext.endYmd;
 
       removeScriptCacheKeys_([
     buildHomeroomShrDailyCacheKey_(grade, unit, targetDate),
     buildHomeroomShrUnsavedSummaryCacheKey_(grade, unit, summaryEndYmd),
-    buildHomeroomShrUnsavedDetailsCacheKey_(grade, unit, summaryEndYmd)
+    buildHomeroomShrUnsavedDetailsCacheKey_(grade, unit, summaryEndYmd),
+    buildHomeroomShrUnsavedSnapshotCacheKey_(grade, unit, summaryEndYmd)
   ]);
 
 return {
@@ -685,16 +802,14 @@ function saveHomeroomShrNoAbsence(payload) {
 
     invalidateAttendanceCaches_(classId, targetDate, period);
 
-    const summaryBaseDate = new Date();
-    summaryBaseDate.setHours(0, 0, 0, 0);
-    summaryBaseDate.setDate(summaryBaseDate.getDate() - 1);
-
-    const summaryEndYmd = formatDateToYmd(summaryBaseDate);
+    const summaryDateContext = getHomeroomShrUnsavedDateContext_(new Date());
+    const summaryEndYmd = summaryDateContext.endYmd;
 
     removeScriptCacheKeys_([
       buildHomeroomShrDailyCacheKey_(grade, unit, targetDate),
       buildHomeroomShrUnsavedSummaryCacheKey_(grade, unit, summaryEndYmd),
-      buildHomeroomShrUnsavedDetailsCacheKey_(grade, unit, summaryEndYmd)
+      buildHomeroomShrUnsavedDetailsCacheKey_(grade, unit, summaryEndYmd),
+      buildHomeroomShrUnsavedSnapshotCacheKey_(grade, unit, summaryEndYmd)
     ]);
 
     return {
