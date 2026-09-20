@@ -524,7 +524,7 @@ function getAttendanceMapDirect_(classId, date, period) {
   }
 
   if (values.length <= 1) {
-    putScriptCacheJson_(sessionCacheKey, {}, 60);
+    putScriptCacheJson_(sessionCacheKey, {}, 300);
     return {};
   }
 
@@ -548,15 +548,56 @@ function getAttendanceMapDirect_(classId, date, period) {
   const scanStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const result = {};
 
+  // This detail path only needs one class/date/period.
+  // After class/period filtering, repeated date conversion is memoized.
+  const attendanceDetailDateMemo = {};
+
+  function resolveAttendanceDetailRowYmd_(value) {
+    if (value instanceof Date) {
+      const timeValue = value.getTime();
+      const memoKey = 'D:' + String(timeValue);
+
+      if (Object.prototype.hasOwnProperty.call(attendanceDetailDateMemo, memoKey)) {
+        return attendanceDetailDateMemo[memoKey];
+      }
+
+      const formatted = formatDateToYmd(value);
+      attendanceDetailDateMemo[memoKey] = formatted;
+      return formatted;
+    }
+
+    const normalizedText =
+      typeof normalizeYmdDisplayText_ === 'function'
+        ? normalizeYmdDisplayText_(value)
+        : '';
+
+    if (normalizedText) {
+      return normalizedText;
+    }
+
+    const rawText = String(value == null ? '' : value).trim();
+    if (!rawText) return '';
+
+    const memoKey = 'S:' + rawText;
+
+    if (Object.prototype.hasOwnProperty.call(attendanceDetailDateMemo, memoKey)) {
+      return attendanceDetailDateMemo[memoKey];
+    }
+
+    const formatted = formatDateToYmd(value);
+    attendanceDetailDateMemo[memoKey] = formatted;
+    return formatted;
+  }
+
   rows.forEach(function(row) {
     const rowClassId = String(row[col.classId] || '').trim();
     if (rowClassId !== targetClassId) return;
 
-    const rowDate = formatDateToYmd(row[col.date]);
-    if (rowDate !== targetDate) return;
-
     const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
     if (rowPeriod !== targetPeriod) return;
+
+    const rowDate = resolveAttendanceDetailRowYmd_(row[col.date]);
+    if (rowDate !== targetDate) return;
 
     const studentId = String(row[col.studentId] || '').trim();
     const statusCode = String(row[col.statusCode] || '').trim();
@@ -574,12 +615,12 @@ function getAttendanceMapDirect_(classId, date, period) {
     logPerf_(
       'getAttendanceMapDirect_ scan rows',
       scanStartedAt,
-      'entries=' + Object.keys(result).length + ' key=' + sessionKey
+      'entries=' + Object.keys(result).length + ' key=' + sessionKey + ' uniqueDates=' + Object.keys(attendanceDetailDateMemo).length
     );
   }
 
   const putCacheStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  putScriptCacheJson_(sessionCacheKey, result, 60);
+  putScriptCacheJson_(sessionCacheKey, result, 300);
 
   if (typeof logPerf_ === 'function') {
     logPerf_(
@@ -691,6 +732,15 @@ function getAttendanceMapForClassIds_(classIds, date, period, studentIds) {
 }
 
 function getLatestAttendanceSessionInfoForClassIds_(classIds, date, period, allowedActionTypes) {
+  return getLatestAttendanceSessionInfoForClassIdsByDateCache_(
+    classIds,
+    date,
+    period,
+    allowedActionTypes
+  );
+}
+
+function getLatestAttendanceSessionInfoForClassIdsDirect_(classIds, date, period, allowedActionTypes) {
   const targetDate = formatDateToYmd(date);
   const targetPeriod = String(period == null ? '' : period).trim();
 
@@ -888,7 +938,8 @@ function invalidateAttendanceCaches_(classId, date, period) {
     'attendanceIndex__all',
     'attendanceSessionLatestIndex__all',
     'savedSessionMapByDate__' + targetDate,
-    'attendanceSessionLatestMapByDate__' + targetDate
+    'attendanceSessionLatestMapByDate__' + targetDate,
+    'attendanceSessionLatestMapByDate__v2__' + targetDate
   ]);
 }
 
@@ -910,8 +961,169 @@ function formatDateTimeJst_(value) {
   return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
 }
 
+function selectAttendanceSessionCacheEntryByAllowedActionTypes_(
+  entry,
+  allowedActionTypes
+) {
+  if (!entry) return null;
+
+  const allowed = normalizeAttendanceActionTypes_(allowedActionTypes);
+  if (!allowed) {
+    return entry;
+  }
+
+  const byActionType =
+    entry._byActionType && typeof entry._byActionType === 'object'
+      ? entry._byActionType
+      : {};
+
+  let latest = null;
+  let latestMs = -1;
+
+  allowed.forEach(function(actionType) {
+    const candidate = byActionType[actionType];
+    if (!candidate) return;
+
+    const candidateMs = Number(candidate._ms || 0);
+    if (!latest || candidateMs >= latestMs) {
+      latest = candidate;
+      latestMs = candidateMs;
+    }
+  });
+
+  return latest;
+}
+
+function buildAttendanceSessionInfoFromCacheEntry_(entry, fallbackSessionKey) {
+  if (!entry) return null;
+
+  return {
+    teacherEmail: String(entry.teacherEmail || '').trim().toLowerCase(),
+    savedAt: entry.savedAt || '',
+    savedAtText: String(entry.savedAtText || ''),
+    actionType: String(entry.actionType || ''),
+    targetSessionKey: String(entry.targetSessionKey || fallbackSessionKey || ''),
+    savedModeLabel: String(entry.savedModeLabel || ''),
+    group: String(entry.group || '')
+  };
+}
+
+function getLatestAttendanceSessionInfoByDateCache_(
+  classId,
+  date,
+  period,
+  allowedActionTypes
+) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const targetClassId = String(classId || '').trim();
+  const targetDate = formatDateToYmd(date);
+  const targetPeriod = String(period == null ? '' : period).trim();
+
+  if (!targetClassId || !targetDate || !targetPeriod) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getLatestAttendanceSessionInfoByDateCache_ total',
+        totalStartedAt,
+        'invalid-args'
+      );
+    }
+    return null;
+  }
+
+  const sessionKey = [targetClassId, targetDate, targetPeriod].join('__');
+  const latestMap = getAttendanceSessionLatestMapByDateCached_(targetDate) || {};
+  const entry = selectAttendanceSessionCacheEntryByAllowedActionTypes_(
+    latestMap[sessionKey] || null,
+    allowedActionTypes
+  );
+
+  const result = buildAttendanceSessionInfoFromCacheEntry_(entry, sessionKey);
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getLatestAttendanceSessionInfoByDateCache_ total',
+      totalStartedAt,
+      (result ? 'found' : 'not-found') + ' key=' + sessionKey
+    );
+  }
+
+  return result;
+}
+
+function getLatestAttendanceSessionInfoForClassIdsByDateCache_(
+  classIds,
+  date,
+  period,
+  allowedActionTypes
+) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const targetDate = formatDateToYmd(date);
+  const targetPeriod = String(period == null ? '' : period).trim();
+
+  const ids = [];
+  const seen = {};
+
+  (Array.isArray(classIds) ? classIds : [classIds]).forEach(function(classId) {
+    const id = String(classId || '').trim();
+    if (!id || seen[id]) return;
+    seen[id] = true;
+    ids.push(id);
+  });
+
+  if (!targetDate || !targetPeriod || ids.length === 0) {
+    return null;
+  }
+
+  const latestMap = getAttendanceSessionLatestMapByDateCached_(targetDate) || {};
+  let latestEntry = null;
+  let latestMs = -1;
+  let latestSessionKey = '';
+
+  ids.forEach(function(classId) {
+    const sessionKey = [classId, targetDate, targetPeriod].join('__');
+    const candidate = selectAttendanceSessionCacheEntryByAllowedActionTypes_(
+      latestMap[sessionKey] || null,
+      allowedActionTypes
+    );
+
+    if (!candidate) return;
+
+    const candidateMs = Number(candidate._ms || 0);
+    if (!latestEntry || candidateMs >= latestMs) {
+      latestEntry = candidate;
+      latestMs = candidateMs;
+      latestSessionKey = sessionKey;
+    }
+  });
+
+  const result = buildAttendanceSessionInfoFromCacheEntry_(
+    latestEntry,
+    latestSessionKey
+  );
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getLatestAttendanceSessionInfoForClassIdsByDateCache_ total',
+      totalStartedAt,
+      'classIds=' + ids.length +
+        ' result=' + (result ? 'found' : 'not-found') +
+        ' date=' + targetDate +
+        ' period=' + targetPeriod
+    );
+  }
+
+  return result;
+}
+
 function getLatestAttendanceSessionInfo_(classId, date, period, allowedActionTypes) {
-  return getLatestAttendanceSessionInfoDirect_(classId, date, period, allowedActionTypes);
+  return getLatestAttendanceSessionInfoByDateCache_(
+    classId,
+    date,
+    period,
+    allowedActionTypes
+  );
 }
 
 function getLatestAttendanceSessionInfoDirect_(classId, date, period, allowedActionTypes) {
@@ -1037,32 +1249,46 @@ function getLatestAttendanceSessionInfoDirect_(classId, date, period, allowedAct
 function getAttendanceSessionLatestMapByDateCached_(ymd) {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
-  const cacheKey = 'attendanceSessionLatestMapByDate__' + ymd;
+  const targetDate = formatDateToYmd(ymd);
+  if (!targetDate) {
+    return {};
+  }
+
+  const cacheKey = 'attendanceSessionLatestMapByDate__v2__' + targetDate;
   const cached = getScriptCacheJson_(cacheKey);
+
   if (cached) {
     if (typeof logPerf_ === 'function') {
       logPerf_(
         'getAttendanceSessionLatestMapByDateCached_ total',
         totalStartedAt,
-        'cache=hit date=' + ymd + ' keys=' + Object.keys(cached).length
+        'cache=hit date=' + targetDate + ' keys=' + Object.keys(cached).length
       );
     }
     return cached;
   }
 
   const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const attendanceSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
+
+  // attendanceSessions は現在 ScriptCache の1キー上限を大きく超えるため、
+  // 巨大な全シートJSON化・キャッシュ試行を避け、ここでは直接1回だけ読む。
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
+  if (!sheet) {
+    throw new Error('attendanceSessions シートが見つかりません');
+  }
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values.length > 0 ? values[0] : [];
+  const rows = values.length > 1 ? values.slice(1) : [];
+
   if (typeof logPerf_ === 'function') {
     logPerf_(
       'getAttendanceSessionLatestMapByDateCached_ load attendanceSessionsData',
       loadStartedAt,
-      'rows=' + attendanceSessionsData.rows.length
+      'rows=' + rows.length + ' source=direct'
     );
   }
-
-  const headersStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const headers = attendanceSessionsData.headers;
-  const rows = attendanceSessionsData.rows;
 
   const col = {
     classId: findColumnIndex_(headers, ['classId', 'ClassID']),
@@ -1072,7 +1298,8 @@ function getAttendanceSessionLatestMapByDateCached_(ymd) {
     accessedAt: findColumnIndex_(headers, ['accessedAt', 'savedAt']),
     actionType: findColumnIndex_(headers, ['actionType']),
     targetSessionKey: findColumnIndex_(headers, ['targetSessionKey']),
-    savedModeLabel: findColumnIndex_(headers, ['savedModeLabel'])
+    savedModeLabel: findColumnIndex_(headers, ['savedModeLabel']),
+    group: findColumnIndex_(headers, ['group', '班'])
   };
 
   ['classId', 'date', 'period'].forEach(function(key) {
@@ -1081,16 +1308,56 @@ function getAttendanceSessionLatestMapByDateCached_(ymd) {
     }
   });
 
-  if (typeof logPerf_ === 'function') {
-    logPerf_('getAttendanceSessionLatestMapByDateCached_ resolve headers', headersStartedAt);
-  }
-
   const buildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const latestMap = {};
 
+  // formatDateToYmd() は Utilities.formatDate() を使うため、
+  // 9,000行超で毎回呼ぶと数秒かかる。
+  // 同一日付の Date 値は同じミリ秒値になるので、変換結果をメモ化する。
+  const attendanceSessionDateMemo = {};
+
+  function resolveAttendanceSessionRowYmd_(value) {
+    if (value instanceof Date) {
+      const timeValue = value.getTime();
+      const memoKey = 'D:' + String(timeValue);
+
+      if (Object.prototype.hasOwnProperty.call(attendanceSessionDateMemo, memoKey)) {
+        return attendanceSessionDateMemo[memoKey];
+      }
+
+      const formatted = formatDateToYmd(value);
+      attendanceSessionDateMemo[memoKey] = formatted;
+      return formatted;
+    }
+
+    const normalizedText =
+      typeof normalizeYmdDisplayText_ === 'function'
+        ? normalizeYmdDisplayText_(value)
+        : '';
+
+    if (normalizedText) {
+      return normalizedText;
+    }
+
+    const rawText = String(value == null ? '' : value).trim();
+    if (!rawText) {
+      return '';
+    }
+
+    const memoKey = 'S:' + rawText;
+
+    if (Object.prototype.hasOwnProperty.call(attendanceSessionDateMemo, memoKey)) {
+      return attendanceSessionDateMemo[memoKey];
+    }
+
+    const formatted = formatDateToYmd(value);
+    attendanceSessionDateMemo[memoKey] = formatted;
+    return formatted;
+  }
+
   rows.forEach(function(row) {
-    const rowDate = formatDateToYmd(row[col.date]);
-    if (rowDate !== ymd) return;
+    const rowDate = resolveAttendanceSessionRowYmd_(row[col.date]);
+    if (rowDate !== targetDate) return;
 
     const rowClassId = String(row[col.classId] || '').trim();
     const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
@@ -1098,24 +1365,64 @@ function getAttendanceSessionLatestMapByDateCached_(ymd) {
 
     const key = [rowClassId, rowDate, rowPeriod].join('__');
 
-    const teacherEmail = col.teacherEmail !== -1
-      ? String(row[col.teacherEmail] || '').trim().toLowerCase()
-      : '';
+    const actionType =
+      col.actionType !== -1 ? String(row[col.actionType] || '').trim() : '';
 
     const accessedAtRaw = col.accessedAt !== -1 ? row[col.accessedAt] : '';
-    const accessedAt = accessedAtRaw instanceof Date ? accessedAtRaw : new Date(accessedAtRaw);
+    const accessedAt =
+      accessedAtRaw instanceof Date ? accessedAtRaw : new Date(accessedAtRaw);
     const accessedAtMs = isNaN(accessedAt.getTime()) ? 0 : accessedAt.getTime();
 
-    if (!latestMap[key] || accessedAtMs >= latestMap[key]._ms) {
-      latestMap[key] = {
-        teacherEmail: teacherEmail,
-        savedAt: accessedAtRaw,
-        savedAtText: formatDateTimeJst_(accessedAtRaw),
-        actionType: col.actionType !== -1 ? String(row[col.actionType] || '').trim() : '',
-        targetSessionKey: col.targetSessionKey !== -1 ? String(row[col.targetSessionKey] || '').trim() : '',
-        savedModeLabel: col.savedModeLabel !== -1 ? String(row[col.savedModeLabel] || '').trim() : '',
-        _ms: accessedAtMs
-      };
+    const candidate = {
+      teacherEmail:
+        col.teacherEmail !== -1
+          ? String(row[col.teacherEmail] || '').trim().toLowerCase()
+          : '',
+      savedAt: accessedAtRaw,
+      savedAtText: formatDateTimeJst_(accessedAtRaw),
+      actionType: actionType,
+      targetSessionKey:
+        col.targetSessionKey !== -1
+          ? String(row[col.targetSessionKey] || '').trim()
+          : '',
+      savedModeLabel:
+        col.savedModeLabel !== -1
+          ? String(row[col.savedModeLabel] || '').trim()
+          : '',
+      group:
+        col.group !== -1
+          ? String(row[col.group] || '').trim()
+          : '',
+      _ms: accessedAtMs
+    };
+
+    if (!latestMap[key]) {
+      latestMap[key] = Object.assign({}, candidate, {
+        _byActionType: {}
+      });
+    }
+
+    const current = latestMap[key];
+
+    if (accessedAtMs >= Number(current._ms || 0)) {
+      const existingByActionType = current._byActionType || {};
+      latestMap[key] = Object.assign({}, candidate, {
+        _byActionType: existingByActionType
+      });
+    }
+
+    if (actionType) {
+      const byActionType = latestMap[key]._byActionType || {};
+      const currentForAction = byActionType[actionType];
+      const currentForActionMs = currentForAction
+        ? Number(currentForAction._ms || 0)
+        : -1;
+
+      if (!currentForAction || accessedAtMs >= currentForActionMs) {
+        byActionType[actionType] = candidate;
+      }
+
+      latestMap[key]._byActionType = byActionType;
     }
   });
 
@@ -1123,17 +1430,19 @@ function getAttendanceSessionLatestMapByDateCached_(ymd) {
     logPerf_(
       'getAttendanceSessionLatestMapByDateCached_ build latestMap',
       buildStartedAt,
-      'date=' + ymd + ' keys=' + Object.keys(latestMap).length
+      'date=' + targetDate +
+        ' keys=' + Object.keys(latestMap).length +
+        ' uniqueDates=' + Object.keys(attendanceSessionDateMemo).length
     );
   }
 
-  putScriptCacheJson_(cacheKey, latestMap, 60);
+  putScriptCacheJson_(cacheKey, latestMap, 300);
 
   if (typeof logPerf_ === 'function') {
     logPerf_(
       'getAttendanceSessionLatestMapByDateCached_ total',
       totalStartedAt,
-      'cache=miss date=' + ymd + ' keys=' + Object.keys(latestMap).length
+      'cache=miss date=' + targetDate + ' keys=' + Object.keys(latestMap).length
     );
   }
 

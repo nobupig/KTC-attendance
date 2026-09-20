@@ -1055,9 +1055,169 @@ function getWeekdayFromYmdJst_(ymd) {
 }
 
 function getSaveStatusForTeacherSessions(sessionItems) {
-  return getSaveStatusForTeacherSessionsDirect_(sessionItems);
+  return getSaveStatusForTeacherSessionsByDateCache_(sessionItems);
 }
 
+
+/**
+ * attendanceSessions の保存状態を日付単位キャッシュから解決する。
+ *
+ * 旧 getSaveStatusForTeacherSessionsDirect_ は比較・即時ロールバック用に残す。
+ * 実験科目は従来どおり、同一 subject/date/period の関連 classId のうち
+ * 最新保存レコードを共有する。
+ */
+function getSaveStatusForTeacherSessionsByDateCache_(sessionItems) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const items = Array.isArray(sessionItems) ? sessionItems : [];
+  const result = {};
+  const targetsByDate = {};
+  let targetCount = 0;
+
+  items.forEach(function(item) {
+    const classId = normalizeString_(item.classId);
+    const date = formatDateToYmd(item.date);
+    const period = normalizeString_(item.period);
+
+    if (!classId || !date || !period) return;
+
+    const key = [classId, date, period].join('__');
+
+    if (!result[key]) {
+      result[key] = {
+        isSaved: false,
+        lastSavedInfo: null,
+        saveStatusNotLoaded: false
+      };
+      targetCount++;
+    }
+
+    if (!targetsByDate[date]) {
+      targetsByDate[date] = [];
+    }
+
+    if (!targetsByDate[date].some(function(target) { return target.key === key; })) {
+      targetsByDate[date].push({
+        key: key,
+        classId: classId,
+        date: date,
+        period: period,
+        experimentKey: buildExperimentSessionKeyForTimetable_(classId, date, period)
+      });
+    }
+  });
+
+  if (targetCount === 0) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_('getSaveStatusForTeacherSessionsByDateCache_ total', totalStartedAt, 'empty');
+    }
+    return result;
+  }
+
+  let foundCount = 0;
+
+  Object.keys(targetsByDate).forEach(function(date) {
+    const dateStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+    const targets = targetsByDate[date];
+    const latestMap = getAttendanceSessionLatestMapByDateCached_(date) || {};
+
+    const targetExperimentKeys = {};
+    targets.forEach(function(target) {
+      if (target.experimentKey) {
+        targetExperimentKeys[target.experimentKey] = true;
+      }
+    });
+
+    const experimentLatestMap = {};
+
+    if (Object.keys(targetExperimentKeys).length > 0) {
+      const marker = '__' + date + '__';
+
+      Object.keys(latestMap).forEach(function(sessionKey) {
+        const markerIndex = sessionKey.lastIndexOf(marker);
+        if (markerIndex <= 0) return;
+
+        const rowClassId = sessionKey.substring(0, markerIndex);
+        const rowPeriod = sessionKey.substring(markerIndex + marker.length);
+        if (!rowClassId || !rowPeriod) return;
+
+        const experimentKey =
+          buildExperimentSessionKeyForTimetable_(rowClassId, date, rowPeriod);
+
+        if (!experimentKey || !targetExperimentKeys[experimentKey]) return;
+
+        const candidate = latestMap[sessionKey];
+        if (!candidate) return;
+
+        const candidateMs = Number(candidate._ms || 0);
+        const current = experimentLatestMap[experimentKey];
+        const currentMs = current ? Number(current._ms || 0) : -1;
+
+        if (!current || candidateMs >= currentMs) {
+          experimentLatestMap[experimentKey] = candidate;
+        }
+      });
+    }
+
+    targets.forEach(function(target) {
+      let latest = latestMap[target.key] || null;
+
+      if (target.experimentKey && experimentLatestMap[target.experimentKey]) {
+        const experimentLatest = experimentLatestMap[target.experimentKey];
+        const exactMs = latest ? Number(latest._ms || 0) : -1;
+        const experimentMs = Number(experimentLatest._ms || 0);
+
+        if (!latest || experimentMs >= exactMs) {
+          latest = experimentLatest;
+        }
+      }
+
+      if (!latest) return;
+
+      const savedAtRaw = latest.savedAt || '';
+      const savedAtSerialized = savedAtRaw instanceof Date
+        ? savedAtRaw.toISOString()
+        : String(savedAtRaw || '');
+
+      result[target.key] = {
+        isSaved: true,
+        lastSavedInfo: {
+          teacherEmail: String(latest.teacherEmail || '').trim().toLowerCase(),
+          savedAt: savedAtSerialized,
+          savedAtText: String(latest.savedAtText || ''),
+          actionType: String(latest.actionType || ''),
+          targetSessionKey: String(latest.targetSessionKey || target.key),
+          savedModeLabel: String(latest.savedModeLabel || '')
+        },
+        saveStatusNotLoaded: false
+      };
+
+      foundCount++;
+    });
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getSaveStatusForTeacherSessionsByDateCache_ date',
+        dateStartedAt,
+        'date=' + date +
+          ' targets=' + targets.length +
+          ' cachedKeys=' + Object.keys(latestMap).length
+      );
+    }
+  });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSaveStatusForTeacherSessionsByDateCache_ total',
+      totalStartedAt,
+      'targets=' + targetCount +
+        ' found=' + foundCount +
+        ' dates=' + Object.keys(targetsByDate).length
+    );
+  }
+
+  return result;
+}
 function getSaveStatusForTeacherSessionsDirect_(sessionItems) {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
