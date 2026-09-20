@@ -340,7 +340,7 @@ function getHomeroomShrClassDayYmdList_(startYmd, endYmd) {
     return [];
   }
 
-  const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 300);
+  const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 1800);
   const headers = Array.isArray(calendarData && calendarData.headers) ? calendarData.headers : [];
   const rows = Array.isArray(calendarData && calendarData.rows) ? calendarData.rows : [];
 

@@ -297,7 +297,7 @@ function checkYesterdayAttendance() {
 function buildAttendanceCheckAssignmentContext_() {
   const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 300);
   const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
-  const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 300);
+  const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 1800);
   return {
     assignmentIndex: buildTeachingAssignmentIndex_(
       timetableData,

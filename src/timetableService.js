@@ -18,9 +18,9 @@ function getClassesForCurrentUserByDate(targetDate) {
   : formatDateToYmd(new Date());
 
   const loadSheetsStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 300);
-  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
-  const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
+  const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 1800);
+  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 1800);
+  const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 1800);
   if (typeof logPerf_ === 'function') {
     logPerf_('getClassesForCurrentUserByDate load base sheet data', loadSheetsStartedAt);
   }

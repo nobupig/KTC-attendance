@@ -419,7 +419,7 @@ function getEffectiveWeekdayForDate_(value, calendarIndex) {
 }
 
 function getEffectiveClassDayIndex_() {
-  const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 300);
+  const calendarData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CALENDAR, 1800);
   return buildEffectiveClassDayIndex_(calendarData);
 }
 
