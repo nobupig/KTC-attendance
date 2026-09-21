@@ -215,21 +215,102 @@ function getClassSessionsByDateCached_(ymd) {
     logPerf_('getClassSessionsByDateCached_ resolve headers', headerStartedAt);
   }
 
+  const rangeIndexStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const rangeIndex = getClassSessionsDateRowRangeIndexCached_(
+    sheet,
+    csCol.date + 1,
+    lastRow
+  );
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getClassSessionsByDateCached_ row-range index',
+      rangeIndexStartedAt,
+      'cache=' + (rangeIndex.cacheHit ? 'hit' : 'miss') +
+        ' usable=' + rangeIndex.usable +
+        ' dates=' + Object.keys(rangeIndex.ranges || {}).length
+    );
+  }
+
+  const targetRange = rangeIndex.usable
+    ? rangeIndex.ranges[targetYmd]
+    : null;
+
+  if (targetRange) {
+    const targetedReadStartedAt =
+      typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+    const targetedResult = readClassSessionsTargetRowRange_(
+      sheet,
+      lastCol,
+      csCol,
+      targetYmd,
+      classDayInfo.weekday,
+      lastRow,
+      targetRange
+    );
+
+    if (targetedResult) {
+      putScriptCacheJson_(cacheKey, targetedResult, 300);
+
+      if (typeof logPerf_ === 'function') {
+        logPerf_(
+          'getClassSessionsByDateCached_ targeted row-range read',
+          targetedReadStartedAt,
+          'rows=' + targetedResult.length +
+            ' startRow=' + targetRange.startRow +
+            ' rowCount=' + targetRange.rowCount
+        );
+        logPerf_(
+          'getClassSessionsByDateCached_ total',
+          totalStartedAt,
+          'cache=miss range-index=' +
+            (rangeIndex.cacheHit ? 'hit' : 'miss') +
+            ' rows=' + targetedResult.length +
+            ' ymd=' + targetYmd
+        );
+      }
+
+      return targetedResult;
+    }
+
+    // Cached range did not match the actual local boundary anymore.
+    // Drop the compact index and fall back to the previous safe full scan.
+    removeScriptCacheKeys_([
+      getClassSessionsDateRowRangeIndexCacheKey_()
+    ]);
+  } else if (rangeIndex.usable && !rangeIndex.cacheHit) {
+    // A freshly-built full date-column index proves the date is absent.
+    putScriptCacheJson_(cacheKey, [], 300);
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getClassSessionsByDateCached_ total',
+        totalStartedAt,
+        'cache=miss fresh-index-no-range rows=0 ymd=' + targetYmd
+      );
+    }
+
+    return [];
+  }
+
   const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const numRows = lastRow - 1;
 
   const values = sheet.getRange(2, 1, numRows, lastCol).getValues();
 
-  // 日付列だけは表示値で読む。これが今回の安全ポイント。
+  // Fallback is intentionally the old safe path.
   const dateDisplayValues = sheet
     .getRange(2, csCol.date + 1, numRows, 1)
     .getDisplayValues();
 
   if (typeof logPerf_ === 'function') {
     logPerf_(
-      'getClassSessionsByDateCached_ load sheet direct',
+      'getClassSessionsByDateCached_ fallback full sheet read',
       loadStartedAt,
-      'rows=' + numRows
+      'rows=' + numRows +
+        ' indexUsable=' + rangeIndex.usable +
+        ' indexCache=' + (rangeIndex.cacheHit ? 'hit' : 'miss')
     );
   }
 
@@ -252,7 +333,7 @@ function getClassSessionsByDateCached_(ymd) {
 
   if (typeof logPerf_ === 'function') {
     logPerf_(
-      'getClassSessionsByDateCached_ build result',
+      'getClassSessionsByDateCached_ build fallback result',
       buildStartedAt,
       'rows=' + result.length + ' ymd=' + targetYmd
     );
@@ -264,11 +345,209 @@ function getClassSessionsByDateCached_(ymd) {
     logPerf_(
       'getClassSessionsByDateCached_ total',
       totalStartedAt,
-      'cache=miss rows=' + result.length + ' ymd=' + targetYmd
+      'cache=miss fallback rows=' + result.length + ' ymd=' + targetYmd
     );
   }
 
   return result;
+}
+
+function getClassSessionsDateRowRangeIndexCached_(sheet, dateColumnNumber, lastRow) {
+  const cacheKey = getClassSessionsDateRowRangeIndexCacheKey_();
+  const sheetId = sheet.getSheetId();
+  const normalizedLastRow = Number(lastRow || 0);
+  const normalizedDateColumn = Number(dateColumnNumber || 0);
+
+  const cached = getScriptCacheJson_(cacheKey);
+  if (
+    cached &&
+    cached.usable === true &&
+    Number(cached.sheetId) === Number(sheetId) &&
+    Number(cached.lastRow) === normalizedLastRow &&
+    Number(cached.dateColumn) === normalizedDateColumn &&
+    cached.ranges &&
+    typeof cached.ranges === 'object'
+  ) {
+    return {
+      usable: true,
+      cacheHit: true,
+      ranges: cached.ranges
+    };
+  }
+
+  if (cached) {
+    removeScriptCacheKeys_([cacheKey]);
+  }
+
+  const numRows = normalizedLastRow - 1;
+  if (numRows <= 0 || normalizedDateColumn <= 0) {
+    return {
+      usable: true,
+      cacheHit: false,
+      ranges: {}
+    };
+  }
+
+  const dateDisplayValues = sheet
+    .getRange(2, normalizedDateColumn, numRows, 1)
+    .getDisplayValues();
+
+  const ranges = {};
+  let previousYmd = '';
+  let currentYmd = '';
+  let currentStartRow = 0;
+  let currentCount = 0;
+  let usable = true;
+
+  function closeCurrentRange_() {
+    if (!currentYmd || currentCount <= 0) return;
+
+    if (ranges[currentYmd]) {
+      usable = false;
+      return;
+    }
+
+    ranges[currentYmd] = {
+      startRow: currentStartRow,
+      rowCount: currentCount
+    };
+  }
+
+  for (let index = 0; index < dateDisplayValues.length; index++) {
+    const rowYmd = normalizeYmdDisplayText_(dateDisplayValues[index][0]);
+
+    if (!rowYmd) {
+      usable = false;
+      break;
+    }
+
+    if (previousYmd && rowYmd < previousYmd) {
+      usable = false;
+      break;
+    }
+
+    if (rowYmd !== currentYmd) {
+      closeCurrentRange_();
+      if (!usable) break;
+
+      currentYmd = rowYmd;
+      currentStartRow = index + 2;
+      currentCount = 1;
+    } else {
+      currentCount += 1;
+    }
+
+    previousYmd = rowYmd;
+  }
+
+  if (usable) {
+    closeCurrentRange_();
+  }
+
+  if (!usable) {
+    return {
+      usable: false,
+      cacheHit: false,
+      ranges: {}
+    };
+  }
+
+  putScriptCacheJson_(
+    cacheKey,
+    {
+      usable: true,
+      sheetId: sheetId,
+      lastRow: normalizedLastRow,
+      dateColumn: normalizedDateColumn,
+      ranges: ranges
+    },
+    300
+  );
+
+  return {
+    usable: true,
+    cacheHit: false,
+    ranges: ranges
+  };
+}
+
+function readClassSessionsTargetRowRange_(
+  sheet,
+  lastCol,
+  csCol,
+  targetYmd,
+  weekday,
+  lastRow,
+  targetRange
+) {
+  const startRow = Number(targetRange && targetRange.startRow);
+  const rowCount = Number(targetRange && targetRange.rowCount);
+
+  if (
+    !isFinite(startRow) ||
+    !isFinite(rowCount) ||
+    startRow < 2 ||
+    rowCount <= 0
+  ) {
+    return null;
+  }
+
+  const endRow = startRow + rowCount - 1;
+  if (endRow > Number(lastRow)) {
+    return null;
+  }
+
+  // Guard the cached range against same-row-count manual edits:
+  // every row inside the block must still be targetYmd, and adjacent rows
+  // must not also be targetYmd.
+  const guardStartRow = Math.max(2, startRow - 1);
+  const guardEndRow = Math.min(Number(lastRow), endRow + 1);
+  const guardValues = sheet
+    .getRange(
+      guardStartRow,
+      csCol.date + 1,
+      guardEndRow - guardStartRow + 1,
+      1
+    )
+    .getDisplayValues();
+
+  function ymdAtSheetRow_(sheetRow) {
+    return normalizeYmdDisplayText_(
+      guardValues[sheetRow - guardStartRow][0]
+    );
+  }
+
+  if (startRow > 2 && ymdAtSheetRow_(startRow - 1) === targetYmd) {
+    return null;
+  }
+
+  for (let rowNumber = startRow; rowNumber <= endRow; rowNumber++) {
+    if (ymdAtSheetRow_(rowNumber) !== targetYmd) {
+      return null;
+    }
+  }
+
+  if (
+    endRow < Number(lastRow) &&
+    ymdAtSheetRow_(endRow + 1) === targetYmd
+  ) {
+    return null;
+  }
+
+  const values = sheet
+    .getRange(startRow, 1, rowCount, lastCol)
+    .getValues();
+
+  return values.map(function(row) {
+    return {
+      classId: normalizeString_(row[csCol.classId]),
+      date: targetYmd,
+      period: normalizeString_(row[csCol.period]),
+      sessionNumber:
+        csCol.sessionNumber !== -1 ? row[csCol.sessionNumber] : '',
+      weekday: weekday
+    };
+  });
 }
 
 function getClassSessionsByDateIndexCached_() {

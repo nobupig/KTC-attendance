@@ -128,6 +128,10 @@ function generateClassSessions() {
   if (output.length > 0) {
     classSessionsSheet.getRange(2, 1, output.length, 4).setValues(output);
   }
+
+  removeScriptCacheKeys_([
+    getClassSessionsDateRowRangeIndexCacheKey_()
+  ]);
 }
 
 const SECOND_TERM_CLASS_SESSIONS_2026_ = Object.freeze({
@@ -576,7 +580,8 @@ function rollbackSecondTermClassSessionsAppend_(
 function invalidateCachesAfterClassSessionAppend_(insertedDates) {
   const cacheKeys = [
     getClassSessionsSheetCacheKey_(),
-    getClassSessionsByDateIndexCacheKey_()
+    getClassSessionsByDateIndexCacheKey_(),
+    getClassSessionsDateRowRangeIndexCacheKey_()
   ].concat(insertedDates.map(function(ymd) {
     return buildClassSessionsByDateCacheKey_(ymd);
   }));

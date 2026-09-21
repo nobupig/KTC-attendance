@@ -170,6 +170,12 @@ function getClassSessionsByDateIndexCacheKey_() {
   return 'classSessionsByDateIndex__v4';
 }
 
+function getClassSessionsDateRowRangeIndexCacheKey_() {
+  return 'classSessionsDateRowRangeIndex__v1';
+}
+
+
+
 function buildHomeroomSummaryCacheKey_(grade, unit, termFilter) {
   return 'homeroomSummary__' +
     String(grade || '').trim() + '__' +
