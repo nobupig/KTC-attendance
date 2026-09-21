@@ -73,10 +73,33 @@ function safeJsonStringifyForCache_(value) {
 
 function removeScriptCacheKeys_(keys) {
   const cache = CacheService.getScriptCache();
+  const validKeys = [];
+  const seen = {};
+
   (keys || []).forEach(function(key) {
-    if (!isSafeScriptCacheKey_(key)) {
-      return;
-    }
+    const normalizedKey = String(key || '');
+    if (!isSafeScriptCacheKey_(normalizedKey)) return;
+    if (seen[normalizedKey]) return;
+
+    seen[normalizedKey] = true;
+    validKeys.push(normalizedKey);
+  });
+
+  if (validKeys.length === 0) return;
+
+  try {
+    cache.removeAll(validKeys);
+    return;
+  } catch (e) {
+    Logger.log(
+      'Cache removeAll failed; falling back to per-key remove: ' +
+      e +
+      ' keys=' +
+      validKeys.length
+    );
+  }
+
+  validKeys.forEach(function(key) {
     try {
       cache.remove(key);
     } catch (e) {

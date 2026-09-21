@@ -89,14 +89,18 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
 
     rows.forEach(function(row, index) {
       const rowClassId = String(row[col.classId] || "").trim();
-      const rowDate = formatDateToYmd(row[col.date]);
       const rowPeriod = String(row[col.period] == null ? "" : row[col.period]).trim();
 
       if (
-        rowClassId === targetClassId &&
-        rowDate === targetDate &&
-        rowPeriod === targetPeriod
+        rowClassId !== targetClassId ||
+        rowPeriod !== targetPeriod
       ) {
+        return;
+      }
+
+      const rowDate = formatDateToYmd(row[col.date]);
+
+      if (rowDate === targetDate) {
         rowsToClear.push(index + 2);
       }
     });
@@ -272,8 +276,6 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
       }
     });
 
-
-
     const values = attendanceSheet.getDataRange().getValues();
     const headers = values.length > 0 ? values[0] : [];
     const rows = values.length > 1 ? values.slice(1) : [];
@@ -308,7 +310,6 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
     const existingRowNumberByStudentId = {};
     rows.forEach(function(row, index) {
       const rowClassId = String(row[col.classId] || '').trim();
-      const rowDate = formatDateToYmd(row[col.date]);
       const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
       const rowStudentId = String(row[col.studentId] || '').trim();
 
@@ -317,11 +318,16 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
         : rowClassId === targetClassId;
 
       if (
-        rowClassMatches &&
-        rowDate === targetDate &&
-        rowPeriod === targetPeriod &&
-        targetStudentIds[rowStudentId]
+        !rowClassMatches ||
+        rowPeriod !== targetPeriod ||
+        !targetStudentIds[rowStudentId]
       ) {
+        return;
+      }
+
+      const rowDate = formatDateToYmd(row[col.date]);
+
+      if (rowDate === targetDate) {
         existingRowNumberByStudentId[rowStudentId] = index + 2;
       }
     });
@@ -387,6 +393,7 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
       const startRow = Math.max(attendanceSheet.getLastRow(), 1) + 1;
       attendanceSheet.getRange(startRow, 1, appendRows.length, headers.length).setValues(appendRows);
     }
+
     appendAttendanceSessionLog_(attendanceSessionsSheet, [
   targetClassId,
   targetDate,
@@ -409,6 +416,7 @@ function saveAttendanceInternal_(payload, allowPastEdit) {
     relatedClassIds.forEach(function(classIdToClear) {
       invalidateAttendanceCaches_(classIdToClear, targetDate, targetPeriod);
     });
+
     const currentUser = getCurrentUserContext();
     const currentTeacherId = currentUser && currentUser.teacherId
       ? normalizeString_(currentUser.teacherId)

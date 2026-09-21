@@ -1491,29 +1491,29 @@ function invalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(classId, date, 
   const targetKeys = [directKey];
   if (experimentKey && experimentKey !== directKey) targetKeys.push(experimentKey);
 
-  const validation = validateTeacherUnsavedCacheSheets_();
+  const validation = validateTeacherUnsavedCacheSheetsForSave_();
   if (!validation.ok) {
     throw new Error(buildTeacherUnsavedCacheValidationError_(validation));
   }
 
   const detailSheet = validation.detail.sheet;
-  const detailRowCount = Math.max(detailSheet.getLastRow() - 1, 0);
+  const detailRowCount = Number(validation.saveDetailDataRowCount);
+  if (!isFinite(detailRowCount) || detailRowCount < 0) {
+    throw new Error('保存用Fastキャッシュのdetail行数が不正です。');
+  }
   if (detailRowCount === 0) {
     return { ok: true, matchedDetailCount: 0, invalidatedTeacherCount: 0 };
   }
 
-  const detailKeyStartColumn = TEACHER_UNSAVED_DETAIL_CACHE_HEADERS_.indexOf('displayKey') + 1;
-  const detailKeyColumnCount = 2;
-  const detailKeyRange = detailSheet.getRange(
-    2,
-    detailKeyStartColumn,
-    detailRowCount,
-    detailKeyColumnCount
-  );
+  const displayKeyColumn =
+    TEACHER_UNSAVED_DETAIL_CACHE_HEADERS_.indexOf('displayKey') + 1;
+  const saveKeyColumn =
+    TEACHER_UNSAVED_DETAIL_CACHE_HEADERS_.indexOf('saveKey') + 1;
   const matchedDetailRows = {};
 
-  targetKeys.forEach(function(targetKey) {
-    detailKeyRange
+  function collectMatchingDetailRows_(columnNumber, targetKey) {
+    detailSheet
+      .getRange(2, columnNumber, detailRowCount, 1)
       .createTextFinder(targetKey)
       .matchEntireCell(true)
       .useRegularExpression(false)
@@ -1521,7 +1521,16 @@ function invalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(classId, date, 
       .forEach(function(cell) {
         matchedDetailRows[cell.getRow()] = true;
       });
-  });
+  }
+
+  // saveKey is always classId__date__period.
+  collectMatchingDetailRows_(saveKeyColumn, directKey);
+
+  // Experiment displayKey can represent the grouped session and must also
+  // invalidate teachers attached through the grouped display key.
+  if (experimentKey && experimentKey !== directKey) {
+    collectMatchingDetailRows_(displayKeyColumn, experimentKey);
+  }
 
   const affectedSnapshotByTeacherId = {};
   Object.keys(matchedDetailRows).forEach(function(rowNumberText) {
@@ -1562,13 +1571,33 @@ function invalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(classId, date, 
     '出席保存後にFastキャッシュを無効化しました。次回rebuildを待っています。';
   const rowsToInvalidate = [];
 
+  const summarySnapshotIdIndex =
+    TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.indexOf('snapshotId');
+  const summaryCacheDateIndex =
+    TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.indexOf('cacheDate');
+  const summaryTeacherIdIndex =
+    TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.indexOf('teacherId');
+  const summaryStatusIndex =
+    TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.indexOf('status');
+
   summaryValues.forEach(function(values, index) {
-    const summary = buildTeacherUnsavedSummaryObject_(values);
-    if (
-      summary.cacheDate === todayYmd &&
-      summary.status === 'ready' &&
-      affectedSnapshotByTeacherId[summary.teacherId] === summary.snapshotId
-    ) {
+    const teacherId = normalizeString_(values[summaryTeacherIdIndex]);
+    const expectedSnapshotId = affectedSnapshotByTeacherId[teacherId];
+    if (!expectedSnapshotId) return;
+
+    const status = normalizeString_(values[summaryStatusIndex]).toLowerCase();
+    if (status !== 'ready') return;
+
+    const snapshotId = normalizeString_(values[summarySnapshotIdIndex]);
+    if (snapshotId !== expectedSnapshotId) return;
+
+    const rawCacheDate = values[summaryCacheDateIndex];
+    const cacheDate = normalizeTeacherUnsavedSourceYmd_(
+      rawCacheDate,
+      rawCacheDate
+    );
+
+    if (cacheDate === todayYmd) {
       rowsToInvalidate.push(index + 2);
     }
   });
@@ -1647,6 +1676,12 @@ function publishTeacherUnsavedCacheSnapshot_(snapshot) {
       );
     }
 
+    // Detail row count/schema metadata cached for attendance-save fast invalidation
+    // must not survive a snapshot publish that can replace cache rows.
+    removeScriptCacheKeys_([
+      getTeacherUnsavedSaveSchemaValidationCacheKey_()
+    ]);
+
     markTeacherUnsavedSummaryRowsStatus_(
       validation.summary.sheet,
       'building',
@@ -1716,14 +1751,95 @@ function markTeacherUnsavedCachePublishError_(error) {
   }
 }
 
+function getTeacherUnsavedSaveSchemaValidationCacheKey_() {
+  return 'teacherUnsavedSaveSchemaValidation__v2';
+}
+
+function validateTeacherUnsavedCacheSheetsForSave_() {
+  const cacheKey = getTeacherUnsavedSaveSchemaValidationCacheKey_();
+
+  const cached = getScriptCacheJson_(cacheKey);
+
+  if (cached && cached.ok === true) {
+
+    const operation = getOperationSpreadsheet();
+    const summarySheet = operation.getSheetByName(
+      TEACHER_UNSAVED_CACHE_SHEETS_.SUMMARY
+    );
+    const detailSheet = operation.getSheetByName(
+      TEACHER_UNSAVED_CACHE_SHEETS_.DETAIL
+    );
+
+    const cachedDetailRowCount = Number(cached.detailDataRowCount);
+    let fastPathValid =
+      !!summarySheet &&
+      !!detailSheet &&
+      Number(cached.summarySheetId) === Number(summarySheet.getSheetId()) &&
+      Number(cached.detailSheetId) === Number(detailSheet.getSheetId()) &&
+      isFinite(cachedDetailRowCount) &&
+      cachedDetailRowCount >= 0;
+
+    if (fastPathValid) {
+
+      return {
+        ok: true,
+        summary: {
+          sheet: summarySheet,
+          schemaMode: normalizeString_(cached.summarySchemaMode),
+          errors: []
+        },
+        detail: {
+          sheet: detailSheet,
+          errors: []
+        },
+        errors: [],
+        saveValidationCacheHit: true,
+        saveDetailDataRowCount: cachedDetailRowCount
+      };
+    }
+
+    removeScriptCacheKeys_([cacheKey]);
+
+  }
+
+  const validation = validateTeacherUnsavedCacheSheets_();
+
+  if (validation.ok) {
+    const summarySheet = validation.summary.sheet;
+    const detailSheet = validation.detail.sheet;
+
+    const detailDataRowCount = Math.max(detailSheet.getLastRow() - 1, 0);
+
+    validation.saveValidationCacheHit = false;
+    validation.saveDetailDataRowCount = detailDataRowCount;
+
+    putScriptCacheJson_(
+      cacheKey,
+      {
+        ok: true,
+        summarySchemaMode: validation.summary.schemaMode,
+        summarySheetId: summarySheet.getSheetId(),
+        detailSheetId: detailSheet.getSheetId(),
+        detailDataRowCount: detailDataRowCount
+      },
+      60
+    );
+  }
+
+  return validation;
+}
+
 function validateTeacherUnsavedCacheSheets_() {
   const operation = getOperationSpreadsheet();
+
   const summary = validateTeacherUnsavedSummaryCacheSheet_(operation);
+
   const detail = validateTeacherUnsavedCacheSheet_(
     operation,
     TEACHER_UNSAVED_CACHE_SHEETS_.DETAIL,
     TEACHER_UNSAVED_DETAIL_CACHE_HEADERS_
   );
+
   const errors = summary.errors.concat(detail.errors);
 
   return {
