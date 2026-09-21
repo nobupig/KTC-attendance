@@ -1411,57 +1411,84 @@
     }
 
     .teacher-unsaved-details-content {
-      display: grid;
-      gap: 10px;
+      display: block;
     }
 
-    .teacher-unsaved-detail-item {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: center;
-      gap: 14px;
-      padding: 13px 14px;
-      border-radius: 10px;
+    .teacher-unsaved-table-wrap {
+      overflow-x: auto;
       border: 1px solid #dce3ee;
+      border-radius: 10px;
       background: #fff;
     }
 
-    .teacher-unsaved-detail-timing {
-      display: flex;
+    .teacher-unsaved-table {
+      min-width: 760px;
+    }
+
+    .teacher-unsaved-table-head,
+    .teacher-unsaved-table-row {
+      display: grid;
+      grid-template-columns:
+        140px
+        64px
+        minmax(190px, 1.6fr)
+        minmax(110px, 0.9fr)
+        88px
+        120px;
       align-items: center;
-      gap: 7px;
-      margin-bottom: 5px;
+    }
+
+    .teacher-unsaved-table-head {
+      background: #f3f6fb;
+      border-bottom: 1px solid #dce3ee;
       color: #4a5870;
       font-size: 12px;
       font-weight: bold;
     }
 
-    .teacher-unsaved-detail-period {
-      display: inline-flex;
-      align-items: center;
-      min-height: 23px;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: #e9eefb;
-      color: #31456a;
+    .teacher-unsaved-table-row {
+      border-bottom: 1px solid #e6eaf0;
     }
 
-    h3.teacher-unsaved-detail-subject {
-      margin: 0;
+    .teacher-unsaved-table-row:last-child {
+      border-bottom: 0;
+    }
+
+    .teacher-unsaved-table-row:hover {
+      background: #f8fbff;
+    }
+
+    .teacher-unsaved-table-cell {
+      min-width: 0;
+      padding: 10px 12px;
+      color: #334;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .teacher-unsaved-table-date,
+    .teacher-unsaved-table-period,
+    .teacher-unsaved-table-session {
+      white-space: nowrap;
+    }
+
+    .teacher-unsaved-table-subject {
       color: #223;
-      font-size: 16px;
       font-weight: bold;
-      line-height: 1.45;
       overflow-wrap: anywhere;
     }
 
-    .teacher-unsaved-detail-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 3px 10px;
-      margin-top: 4px;
-      font-size: 12px;
+    .teacher-unsaved-table-target {
+      color: #556276;
+      overflow-wrap: anywhere;
+    }
+
+    .teacher-unsaved-table-session {
       color: #667;
+    }
+
+    .teacher-unsaved-table-action {
+      text-align: right;
     }
 
     .teacher-unsaved-open-btn {
@@ -1469,8 +1496,8 @@
       border: none;
       background: #2f6feb;
       color: #fff;
-      border-radius: 999px;
-      padding: 8px 12px;
+      border-radius: 8px;
+      padding: 8px 11px;
       font-size: 12px;
       font-weight: bold;
       cursor: pointer;
@@ -1544,6 +1571,73 @@
       }
     }
 
+    @media (max-width: 768px) {
+      .teacher-unsaved-table-wrap {
+        overflow-x: visible;
+      }
+
+      .teacher-unsaved-table {
+        min-width: 0;
+      }
+
+      .teacher-unsaved-table-head {
+        display: none;
+      }
+
+      .teacher-unsaved-table-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+          "date period"
+          "subject subject"
+          "target session"
+          "action action";
+        gap: 4px 10px;
+        padding: 12px;
+      }
+
+      .teacher-unsaved-table-cell {
+        padding: 0;
+      }
+
+      .teacher-unsaved-table-date {
+        grid-area: date;
+        font-weight: bold;
+      }
+
+      .teacher-unsaved-table-period {
+        grid-area: period;
+        color: #4a5870;
+        font-weight: bold;
+      }
+
+      .teacher-unsaved-table-subject {
+        grid-area: subject;
+        margin-top: 2px;
+        font-size: 15px;
+      }
+
+      .teacher-unsaved-table-target {
+        grid-area: target;
+        margin-top: 2px;
+      }
+
+      .teacher-unsaved-table-session {
+        grid-area: session;
+        margin-top: 2px;
+        text-align: right;
+      }
+
+      .teacher-unsaved-table-action {
+        grid-area: action;
+        margin-top: 7px;
+        text-align: left;
+      }
+
+      .teacher-unsaved-open-btn {
+        width: 100%;
+        min-height: 44px;
+      }
+    }
     @media (max-width: 360px) {
       body {
         padding: 8px;
@@ -1743,7 +1837,7 @@
       <section id="teacherUnsavedDetailsBox" class="panel teacher-unsaved-details-box teacher-unsaved-details-section" hidden aria-labelledby="teacherUnsavedDetailsHeading">
         <header class="teacher-unsaved-details-header">
           <h3 id="teacherUnsavedDetailsHeading">過去の未保存授業</h3>
-          <div class="sub-text">必要な授業を選び、過去授業の出席入力を開きます。</div>
+          <div class="sub-text">未保存授業を一覧で確認できます。欠席・遅刻・公欠がある授業は「名簿を開く」から入力してください。</div>
         </header>
         <div id="teacherUnsavedDetailsContent" class="teacher-unsaved-details-content"></div>
       </section>
@@ -2538,72 +2632,119 @@ function goHome() {
         const statusView = getTeacherUnsavedCacheStatusView(data);
         const stateClass = statusView.className === "error" ? " error" : "";
         const stateLabel = statusView.className === "error" ? "取得できません" : "確認できません";
-        detailsContent.innerHTML = '<div class="teacher-unsaved-state' + stateClass + '">' +
-          '<span class="teacher-unsaved-state-label">' + stateLabel + '</span>' +
-          escapeHtml(statusView.message) + ' 今日の授業・出席入力はそのまま利用できます。' +
+
+        detailsContent.innerHTML =
+          '<div class="teacher-unsaved-state' + stateClass + '">' +
+            '<span class="teacher-unsaved-state-label">' +
+              stateLabel +
+            '</span>' +
+            escapeHtml(statusView.message) +
+            ' 今日の授業・出席入力はそのまま利用できます。' +
           '</div>';
+
         return;
       }
 
       const items = Array.isArray(data && data.items) ? data.items : [];
 
       if (!items.length) {
-        detailsContent.innerHTML = '' +
+        detailsContent.innerHTML =
           '<div class="teacher-unsaved-state empty">' +
             '<span class="teacher-unsaved-state-label">問題なし</span>' +
             '未保存授業はありません。' +
           '</div>';
+
         return;
       }
 
-      const itemsHtml = items.map(function(item) {
+      const rowsHtml = items.map(function(item) {
         const rawDate = String(item.date || "");
         const dateText = escapeHtml(formatDateJa(item.date || ""));
         const subjectText = escapeHtml(item.subjectName || "");
         const periodText = escapeHtml(String(item.period || ""));
-        const targetText = escapeHtml(item.targetLabel || "");
-        const sessionText = item.sessionNumber ? ('第' + escapeHtml(String(item.sessionNumber)) + '回') : '';
-        let metaHtml = '';
-
-        if (targetText) {
-          metaHtml += '<span>' + targetText + '</span>';
-        }
-        if (sessionText) {
-          metaHtml += '<span>' + sessionText + '</span>';
-        }
+        const targetText = escapeHtml(item.targetLabel || "") || "—";
+        const sessionText = item.sessionNumber
+          ? "第" + escapeHtml(String(item.sessionNumber)) + "回"
+          : "—";
 
         return '' +
-          '<article class="teacher-unsaved-detail-item">' +
-            '<div class="teacher-unsaved-detail-body">' +
-              '<div class="teacher-unsaved-detail-timing">' +
-                '<time datetime="' + escapeHtml(rawDate) + '">' + dateText + '</time>' +
-                '<span class="teacher-unsaved-detail-period">' + periodText + '限</span>' +
-              '</div>' +
-              '<h3 class="teacher-unsaved-detail-subject">' + subjectText + '</h3>' +
-              (metaHtml ? '<div class="teacher-unsaved-detail-meta">' + metaHtml + '</div>' : '') +
+          '<div class="teacher-unsaved-table-row" role="row">' +
+
+            '<div class="teacher-unsaved-table-cell teacher-unsaved-table-date" role="cell">' +
+              '<time datetime="' + escapeHtml(rawDate) + '">' +
+                dateText +
+              '</time>' +
             '</div>' +
-            '<button class="teacher-unsaved-open-btn" type="button" data-date="' + escapeHtml(item.date || "") + '" data-class-id="' + escapeHtml(item.classId || "") + '" data-period="' + escapeHtml(String(item.period || "")) + '">この授業を開く</button>' +
-          '</article>';
+
+            '<div class="teacher-unsaved-table-cell teacher-unsaved-table-period" role="cell">' +
+              periodText + '限' +
+            '</div>' +
+
+            '<div class="teacher-unsaved-table-cell teacher-unsaved-table-subject" role="cell">' +
+              subjectText +
+            '</div>' +
+
+            '<div class="teacher-unsaved-table-cell teacher-unsaved-table-target" role="cell">' +
+              targetText +
+            '</div>' +
+
+            '<div class="teacher-unsaved-table-cell teacher-unsaved-table-session" role="cell">' +
+              sessionText +
+            '</div>' +
+
+            '<div class="teacher-unsaved-table-cell teacher-unsaved-table-action" role="cell">' +
+              '<button class="teacher-unsaved-open-btn" type="button"' +
+                ' data-date="' + escapeHtml(item.date || "") + '"' +
+                ' data-class-id="' + escapeHtml(item.classId || "") + '"' +
+                ' data-period="' + escapeHtml(String(item.period || "")) + '">' +
+                '名簿を開く' +
+              '</button>' +
+            '</div>' +
+
+          '</div>';
       }).join("");
+
+      const tableHtml =
+        '<div class="teacher-unsaved-table-wrap">' +
+          '<div class="teacher-unsaved-table" role="table" aria-label="過去の未保存授業">' +
+
+            '<div class="teacher-unsaved-table-head" role="row">' +
+              '<div class="teacher-unsaved-table-cell" role="columnheader">日付</div>' +
+              '<div class="teacher-unsaved-table-cell" role="columnheader">時限</div>' +
+              '<div class="teacher-unsaved-table-cell" role="columnheader">科目</div>' +
+              '<div class="teacher-unsaved-table-cell" role="columnheader">対象</div>' +
+              '<div class="teacher-unsaved-table-cell" role="columnheader">授業回</div>' +
+              '<div class="teacher-unsaved-table-cell" role="columnheader">操作</div>' +
+            '</div>' +
+
+            rowsHtml +
+
+          '</div>' +
+        '</div>';
+
       const moreNoteHtml = data.hasMore
-        ? '<div class="teacher-unsaved-list-note">現在 ' + items.length +
-          ' 件を表示しています（全 ' + escapeHtml(String(data.totalCount || "")) +
-          ' 件）。残りは今後のページング対応で表示します。</div>'
+        ? '<div class="teacher-unsaved-list-note">' +
+            '現在 ' + items.length +
+            ' 件を表示しています（全 ' +
+            escapeHtml(String(data.totalCount || "")) +
+            ' 件）。残りは今後のページング対応で表示します。' +
+          '</div>'
         : '';
 
-      detailsContent.innerHTML = itemsHtml + moreNoteHtml;
+      detailsContent.innerHTML = tableHtml + moreNoteHtml;
 
-      detailsContent.querySelectorAll(".teacher-unsaved-open-btn").forEach(function(btn) {
-        btn.addEventListener("click", function() {
-          openTeacherUnsavedSession(
-            btn.dataset.date || "",
-            btn.dataset.classId || "",
-            btn.dataset.period || ""
-          );
+      detailsContent
+        .querySelectorAll(".teacher-unsaved-open-btn")
+        .forEach(function(btn) {
+          btn.addEventListener("click", function() {
+            openTeacherUnsavedSession(
+              btn.dataset.date || "",
+              btn.dataset.classId || "",
+              btn.dataset.period || ""
+            );
+          });
         });
-      });
     }
-
     function loadTeacherUnsavedSummary(requestSeq) {
       const activeRequestSeq = typeof requestSeq === "number"
         ? requestSeq
