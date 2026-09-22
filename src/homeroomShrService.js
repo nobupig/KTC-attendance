@@ -185,6 +185,8 @@ function getHomeroomShrUnsavedDetails(grade, unit) {
 }
 
 function buildHomeroomShrUnsavedSnapshot_(grade, unit, startYmd, endYmd) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
   const targetGrade = String(grade || '').trim();
   const targetUnit = String(unit || '').trim();
   const cacheKey = buildHomeroomShrUnsavedSnapshotCacheKey_(
@@ -195,23 +197,47 @@ function buildHomeroomShrUnsavedSnapshot_(grade, unit, startYmd, endYmd) {
 
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'buildHomeroomShrUnsavedSnapshot_ total',
+        totalStartedAt,
+        'cache=hit'
+      );
+    }
     return cached;
   }
 
   const classId = buildHomeroomShrClassId_(targetGrade, targetUnit);
   const targetPeriod = String(HOMEROOM_SHR_CONFIG.PERIOD);
+
+  const classDayStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const classDayYmdList = getHomeroomShrClassDayYmdList_(startYmd, endYmd);
 
-  const sessionsData = getSheetDataCached_(
-    'OPERATION',
-    CONFIG.SHEETS.ATTENDANCE_SESSIONS,
-    60
-  );
-  const headers = Array.isArray(sessionsData && sessionsData.headers)
-    ? sessionsData.headers
-    : [];
-  const rows = Array.isArray(sessionsData && sessionsData.rows)
-    ? sessionsData.rows
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'buildHomeroomShrUnsavedSnapshot_ class days',
+      classDayStartedAt,
+      'days=' + classDayYmdList.length
+    );
+  }
+
+  /*
+   * attendanceSessions 全体は ScriptCache の1キー上限を大幅に超える。
+   * 未保存SHR判定では必要列だけを直接読み、
+   * classId / period / actionType を先に絞ってから日付を正規化する。
+   */
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
+
+  if (!sheet) {
+    throw new Error('attendanceSessions シートが見つかりません');
+  }
+
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  const headers = lastColumn > 0
+    ? sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0]
     : [];
 
   const col = {
@@ -227,25 +253,96 @@ function buildHomeroomShrUnsavedSnapshot_(grade, unit, startYmd, endYmd) {
     }
   });
 
+  const scanIndexes = [
+    col.classId,
+    col.date,
+    col.period
+  ];
+
+  if (col.actionType !== -1) {
+    scanIndexes.push(col.actionType);
+  }
+
+  const scanStartIndex = Math.min.apply(null, scanIndexes);
+  const scanEndIndex = Math.max.apply(null, scanIndexes);
+  const scanWidth = scanEndIndex - scanStartIndex + 1;
+  const dataRowCount = Math.max(lastRow - 1, 0);
+
+  const rows = dataRowCount > 0
+    ? sheet
+        .getRange(
+          2,
+          scanStartIndex + 1,
+          dataRowCount,
+          scanWidth
+        )
+        .getDisplayValues()
+    : [];
+
+  const relativeCol = {
+    classId: col.classId - scanStartIndex,
+    date: col.date - scanStartIndex,
+    period: col.period - scanStartIndex,
+    actionType: col.actionType === -1
+      ? -1
+      : col.actionType - scanStartIndex
+  };
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'buildHomeroomShrUnsavedSnapshot_ load attendanceSessions compact',
+      loadStartedAt,
+      'rows=' + rows.length + ' width=' + scanWidth
+    );
+  }
+
+  const scanStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const savedDateMap = {};
+  let classCandidateCount = 0;
+  let shrCandidateCount = 0;
 
   rows.forEach(function(row) {
-    const rowClassId = String(row[col.classId] || '').trim();
-    const rowDate = formatDateToYmd(row[col.date]);
+    const rowClassId = String(row[relativeCol.classId] || '').trim();
+    if (rowClassId !== classId) return;
+
+    classCandidateCount++;
+
     const rowPeriod = String(
-      row[col.period] == null ? '' : row[col.period]
+      row[relativeCol.period] == null
+        ? ''
+        : row[relativeCol.period]
     ).trim();
-    const actionType = col.actionType !== -1
-      ? String(row[col.actionType] || '').trim()
+
+    if (rowPeriod !== targetPeriod) return;
+
+    const actionType = relativeCol.actionType !== -1
+      ? String(row[relativeCol.actionType] || '').trim()
       : '';
 
-    if (rowClassId !== classId) return;
-    if (!rowDate || rowDate < startYmd || rowDate > endYmd) return;
-    if (rowPeriod !== targetPeriod) return;
     if (actionType && actionType !== HOMEROOM_SHR_CONFIG.ACTION_TYPE) return;
+
+    shrCandidateCount++;
+
+    const rawDate = row[relativeCol.date];
+    const rowDate =
+      typeof normalizeYmdDisplayText_ === 'function'
+        ? normalizeYmdDisplayText_(rawDate)
+        : formatDateToYmd(rawDate);
+
+    if (!rowDate || rowDate < startYmd || rowDate > endYmd) return;
 
     savedDateMap[rowDate] = true;
   });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'buildHomeroomShrUnsavedSnapshot_ scan attendanceSessions compact',
+      scanStartedAt,
+      'classCandidates=' + classCandidateCount +
+        ' shrCandidates=' + shrCandidateCount +
+        ' savedDates=' + Object.keys(savedDateMap).length
+    );
+  }
 
   const unsavedYmdList = classDayYmdList.filter(function(ymd) {
     return !savedDateMap[ymd];
@@ -257,6 +354,15 @@ function buildHomeroomShrUnsavedSnapshot_(grade, unit, startYmd, endYmd) {
   };
 
   putScriptCacheJson_(cacheKey, snapshot, 60);
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'buildHomeroomShrUnsavedSnapshot_ total',
+      totalStartedAt,
+      'cache=miss unsaved=' + unsavedYmdList.length
+    );
+  }
+
   return snapshot;
 }
 
@@ -508,6 +614,8 @@ return {
 }
 
 function getHomeroomShrDailyStatus(grade, unit, date) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
   ensureHomeroomAccess_(grade, unit);
 
   const targetGrade = String(grade || '').trim();
@@ -517,9 +625,19 @@ function getHomeroomShrDailyStatus(grade, unit, date) {
   const classId = buildHomeroomShrClassId_(targetGrade, targetUnit);
   const period = String(HOMEROOM_SHR_CONFIG.PERIOD);
 
-  const data = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 10);
-  const headers = data.headers || [];
-  const rows = data.rows || [];
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const ss = getOperationSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
+
+  if (!sheet) {
+    throw new Error('attendanceSessions シートが見つかりません');
+  }
+
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  const headers = lastColumn > 0
+    ? sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0]
+    : [];
 
   const col = {
     classId: headers.indexOf('classId'),
@@ -538,40 +656,122 @@ function getHomeroomShrDailyStatus(grade, unit, date) {
     }
   });
 
+  const scanIndexes = [
+    col.classId,
+    col.date,
+    col.period
+  ];
+
+  [
+    col.teacherEmail,
+    col.accessedAt,
+    col.actionType,
+    col.targetSessionKey,
+    col.savedModeLabel
+  ].forEach(function(index) {
+    if (index !== -1) {
+      scanIndexes.push(index);
+    }
+  });
+
+  const scanStartIndex = Math.min.apply(null, scanIndexes);
+  const scanEndIndex = Math.max.apply(null, scanIndexes);
+  const scanWidth = scanEndIndex - scanStartIndex + 1;
+  const dataRowCount = Math.max(lastRow - 1, 0);
+
+  const rows = dataRowCount > 0
+    ? sheet
+        .getRange(
+          2,
+          scanStartIndex + 1,
+          dataRowCount,
+          scanWidth
+        )
+        .getValues()
+    : [];
+
+  const relativeCol = {};
+  Object.keys(col).forEach(function(key) {
+    relativeCol[key] =
+      col[key] === -1
+        ? -1
+        : col[key] - scanStartIndex;
+  });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getHomeroomShrDailyStatus load attendanceSessions compact',
+      loadStartedAt,
+      'rows=' + rows.length + ' width=' + scanWidth
+    );
+  }
+
+  const scanStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   let latest = null;
   let latestMs = 0;
+  let classCandidateCount = 0;
+  let matchedCount = 0;
 
   rows.forEach(function(row) {
-    const rowClassId = String(row[col.classId] || '').trim();
-    const rowDate = formatDateToYmd(row[col.date]);
-    const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
-    const rowActionType = col.actionType !== -1
-      ? String(row[col.actionType] || '').trim()
+    const rowClassId = String(row[relativeCol.classId] || '').trim();
+    if (rowClassId !== classId) return;
+
+    classCandidateCount++;
+
+    const rowPeriod = String(
+      row[relativeCol.period] == null
+        ? ''
+        : row[relativeCol.period]
+    ).trim();
+
+    if (rowPeriod !== period) return;
+
+    const rowActionType = relativeCol.actionType !== -1
+      ? String(row[relativeCol.actionType] || '').trim()
       : '';
 
-    if (rowClassId !== classId) return;
-    if (rowDate !== targetDate) return;
-    if (rowPeriod !== period) return;
     if (rowActionType && rowActionType !== HOMEROOM_SHR_CONFIG.ACTION_TYPE) return;
 
-    const rawSavedAt = col.accessedAt !== -1 ? row[col.accessedAt] : '';
+    const rowDate = formatDateToYmd(row[relativeCol.date]);
+    if (rowDate !== targetDate) return;
+
+    matchedCount++;
+
+    const rawSavedAt = relativeCol.accessedAt !== -1
+      ? row[relativeCol.accessedAt]
+      : '';
     const savedAt = rawSavedAt instanceof Date ? rawSavedAt : new Date(rawSavedAt);
     const savedAtMs = isNaN(savedAt.getTime()) ? 0 : savedAt.getTime();
 
     if (!latest || savedAtMs >= latestMs) {
       latestMs = savedAtMs;
       latest = {
-        teacherEmail: col.teacherEmail !== -1 ? String(row[col.teacherEmail] || '').trim() : '',
+        teacherEmail: relativeCol.teacherEmail !== -1
+          ? String(row[relativeCol.teacherEmail] || '').trim()
+          : '',
         savedAtText: formatDateTimeJst_(rawSavedAt),
         actionType: rowActionType,
-        targetSessionKey: col.targetSessionKey !== -1 ? String(row[col.targetSessionKey] || '').trim() : '',
-        savedModeLabel: col.savedModeLabel !== -1 ? String(row[col.savedModeLabel] || '').trim() : HOMEROOM_SHR_CONFIG.MODE_LABEL,
+        targetSessionKey: relativeCol.targetSessionKey !== -1
+          ? String(row[relativeCol.targetSessionKey] || '').trim()
+          : '',
+        savedModeLabel: relativeCol.savedModeLabel !== -1
+          ? String(row[relativeCol.savedModeLabel] || '').trim()
+          : HOMEROOM_SHR_CONFIG.MODE_LABEL,
         savedByCurrentUser: false
       };
     }
   });
 
-  return {
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getHomeroomShrDailyStatus scan attendanceSessions compact',
+      scanStartedAt,
+      'classCandidates=' + classCandidateCount +
+        ' matched=' + matchedCount
+    );
+  }
+
+  const result = {
     classInfo: {
       grade: targetGrade,
       unit: targetUnit,
@@ -581,6 +781,16 @@ function getHomeroomShrDailyStatus(grade, unit, date) {
     hasSavedSession: !!latest,
     lastSavedInfo: latest ? toClientSafeLastSavedInfo_(latest) : null
   };
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getHomeroomShrDailyStatus total',
+      totalStartedAt,
+      'hasSaved=' + (!!latest)
+    );
+  }
+
+  return result;
 }
 
 function saveHomeroomShrAttendance(payload) {
