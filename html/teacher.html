@@ -105,21 +105,69 @@
       margin-bottom: 8px;
     }
 
+    /* STEP 2-B1.5 : CENTER TOAST MESSAGE UI */
     .message {
-      min-height: 24px;
-      margin: 8px 0 16px;
-      padding: 10px 12px;
-      border-radius: 8px;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      z-index: 9999;
+      width: min(520px, calc(100vw - 32px));
+      min-height: 0;
+      margin: 0;
+      padding: 14px 18px;
+      border: 1px solid transparent;
+      border-radius: 12px;
       background: #eef3ff;
       color: #1f3c88;
+      box-shadow:
+        0 16px 40px rgba(22, 35, 60, 0.20),
+        0 4px 12px rgba(22, 35, 60, 0.12);
       font-size: 14px;
-      display: none;
+      font-weight: 600;
+      line-height: 1.55;
+      text-align: center;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translate(-50%, -46%) scale(0.98);
+      transition:
+        opacity 0.16s ease,
+        transform 0.16s ease,
+        visibility 0.16s ease;
     }
 
-    .message.show { display: block; }
-    .message.success { background: #e8f7ec; color: #1d6b37; }
-    .message.error { background: #fdecec; color: #a12622; }
-    .message.warn { background: #fff4db; color: #8a5a00; }
+    .message.show {
+      opacity: 1;
+      visibility: visible;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .message.success {
+      border-color: #a9d9b7;
+      background: #e8f7ec;
+      color: #1d6b37;
+    }
+
+    .message.error {
+      border-color: #efb9b9;
+      background: #fdecec;
+      color: #a12622;
+    }
+
+    .message.warn {
+      border-color: #ecd39a;
+      background: #fff4db;
+      color: #8a5a00;
+    }
+
+    @media (max-width: 768px) {
+      .message {
+        top: 46%;
+        width: calc(100vw - 24px);
+        padding: 13px 14px;
+        font-size: 13px;
+      }
+    }
 
     .layout {
       display: grid;
@@ -2054,15 +2102,79 @@
       return [cls.classId, cls.date, cls.period].join("__");
     }
 
+    let messageHideTimer = null;
+
+    function isPersistentProgressMessage(text, type) {
+      if (type !== "warn") return false;
+
+      const value = String(text || "");
+
+      return (
+        value.indexOf("保存中") !== -1 ||
+        value.indexOf("読み込み") !== -1 ||
+        value.indexOf("確認中") !== -1 ||
+        value.indexOf("切り替えています") !== -1 ||
+        value.indexOf("解除しています") !== -1 ||
+        value.indexOf("戻っています") !== -1
+      );
+    }
+
+    function getMessageAutoHideMs(text, type) {
+      if (isPersistentProgressMessage(text, type)) {
+        return 0;
+      }
+
+      if (type === "success") {
+        return 3000;
+      }
+
+      if (type === "error") {
+        return 6000;
+      }
+
+      return 4000;
+    }
+
     function showMessage(text, type) {
       const el = document.getElementById("messageArea");
-      el.textContent = text;
+      if (!el) return;
+
+      if (messageHideTimer) {
+        window.clearTimeout(messageHideTimer);
+        messageHideTimer = null;
+      }
+
+      el.textContent = String(text || "");
       el.className = "message show";
-      if (type) el.classList.add(type);
+
+      if (type) {
+        el.classList.add(type);
+      }
+
+      el.setAttribute(
+        "role",
+        type === "error" ? "alert" : "status"
+      );
+
+      const autoHideMs = getMessageAutoHideMs(text, type);
+
+      if (autoHideMs > 0) {
+        messageHideTimer = window.setTimeout(function() {
+          clearMessage();
+        }, autoHideMs);
+      }
     }
 
     function clearMessage() {
       const el = document.getElementById("messageArea");
+
+      if (messageHideTimer) {
+        window.clearTimeout(messageHideTimer);
+        messageHideTimer = null;
+      }
+
+      if (!el) return;
+
       el.textContent = "";
       el.className = "message";
     }
