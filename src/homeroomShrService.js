@@ -794,6 +794,8 @@ function getHomeroomShrDailyStatus(grade, unit, date) {
 }
 
 function saveHomeroomShrAttendance(payload) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
 
@@ -849,11 +851,20 @@ function saveHomeroomShrAttendance(payload) {
       throw new Error('attendance シートが見つかりません');
     }
 
+    /*
+     * 旧処理は attendance 全体を読み込み、対象SHR以外も含めて
+     * 全行 clearContent() -> 全行 setValues() で再構築していた。
+     *
+     * ここでは対象クラス・日付・0限・対象学生の行だけを
+     * clear / update / append し、他の出席データには触れない。
+     */
+    const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
-
-    const values = attendanceSheet.getDataRange().getValues();
-    const headers = values.length > 0 ? values[0] : [];
-    const rows = values.length > 1 ? values.slice(1) : [];
+    const lastRow = attendanceSheet.getLastRow();
+    const lastColumn = attendanceSheet.getLastColumn();
+    const headers = lastColumn > 0
+      ? attendanceSheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0]
+      : [];
 
     const col = {
       classId: headers.indexOf('classId'),
@@ -870,97 +881,289 @@ function saveHomeroomShrAttendance(payload) {
       }
     });
 
-    const newRows = records
-      .filter(function(record) {
-        return String(record.statusCode || '').trim() !== '';
-      })
-      .map(function(record) {
-        return [
-          classId,
-          targetDate,
-          HOMEROOM_SHR_CONFIG.PERIOD,
-          String(record.studentId).trim(),
-          String(record.statusCode).trim(),
-          now
-        ];
-      });
+    const scanIndexes = [
+      col.classId,
+      col.date,
+      col.period,
+      col.studentId
+    ];
+    const scanStartIndex = Math.min.apply(null, scanIndexes);
+    const scanEndIndex = Math.max.apply(null, scanIndexes);
+    const scanWidth = scanEndIndex - scanStartIndex + 1;
+    const dataRowCount = Math.max(lastRow - 1, 0);
+
+    const rows = dataRowCount > 0
+      ? attendanceSheet
+          .getRange(
+            2,
+            scanStartIndex + 1,
+            dataRowCount,
+            scanWidth
+          )
+          .getDisplayValues()
+      : [];
+
+    const relativeCol = {
+      classId: col.classId - scanStartIndex,
+      date: col.date - scanStartIndex,
+      period: col.period - scanStartIndex,
+      studentId: col.studentId - scanStartIndex
+    };
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveHomeroomShrAttendance load attendance compact',
+        loadStartedAt,
+        'rows=' + rows.length + ' width=' + scanWidth
+      );
+    }
 
     const targetStudentIds = {};
+    const desiredByStudentId = {};
+
     records.forEach(function(record) {
       const studentId = String(record.studentId || '').trim();
-      if (studentId) {
-        targetStudentIds[studentId] = true;
+      const statusCode = String(record.statusCode || '').trim();
+
+      if (!studentId) return;
+
+      targetStudentIds[studentId] = true;
+      desiredByStudentId[studentId] = statusCode;
+    });
+
+    const scanStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+    const existingRowNumbersByStudentId = {};
+    let classCandidateCount = 0;
+    let matchedRowCount = 0;
+
+    rows.forEach(function(row, index) {
+      const rowClassId = String(row[relativeCol.classId] || '').trim();
+      if (rowClassId !== classId) return;
+
+      classCandidateCount++;
+
+      const rowPeriod = String(
+        row[relativeCol.period] == null
+          ? ''
+          : row[relativeCol.period]
+      ).trim();
+
+      if (rowPeriod !== period) return;
+
+      const rowStudentId = String(row[relativeCol.studentId] || '').trim();
+      if (!targetStudentIds[rowStudentId]) return;
+
+      const rawDate = row[relativeCol.date];
+      const rowDate =
+        typeof normalizeYmdDisplayText_ === 'function'
+          ? normalizeYmdDisplayText_(rawDate)
+          : formatDateToYmd(rawDate);
+
+      if (rowDate !== targetDate) return;
+
+      if (!existingRowNumbersByStudentId[rowStudentId]) {
+        existingRowNumbersByStudentId[rowStudentId] = [];
+      }
+
+      existingRowNumbersByStudentId[rowStudentId].push(index + 2);
+      matchedRowCount++;
+    });
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveHomeroomShrAttendance scan attendance compact',
+        scanStartedAt,
+        'classCandidates=' + classCandidateCount +
+          ' matchedRows=' + matchedRowCount
+      );
+    }
+
+    const rowsToClear = [];
+    const rowsToUpdate = [];
+    const appendRows = [];
+
+    Object.keys(targetStudentIds).forEach(function(studentId) {
+      const statusCode = desiredByStudentId[studentId] || '';
+      const existingRows = existingRowNumbersByStudentId[studentId] || [];
+
+      if (!statusCode) {
+        existingRows.forEach(function(rowNumber) {
+          rowsToClear.push(rowNumber);
+        });
+        return;
+      }
+
+      const fullRow = buildAttendanceSheetRow_(headers.length, col, {
+        classId: classId,
+        date: targetDate,
+        period: Number(period),
+        studentId: studentId,
+        statusCode: statusCode,
+        recordedAt: now
+      });
+
+      if (existingRows.length > 0) {
+        const updateRowNumber = existingRows[existingRows.length - 1];
+
+        existingRows.slice(0, -1).forEach(function(rowNumber) {
+          rowsToClear.push(rowNumber);
+        });
+
+        rowsToUpdate.push({
+          rowNumber: updateRowNumber,
+          values: fullRow
+        });
+      } else {
+        appendRows.push(fullRow);
       }
     });
 
-    const keptRows = rows.filter(function(row) {
-      const rowClassId = String(row[col.classId] || '').trim();
-      const rowDate = formatDateToYmd(row[col.date]);
-      const rowPeriod = String(row[col.period] == null ? '' : row[col.period]).trim();
-      const rowStudentId = String(row[col.studentId] || '').trim();
-
-      const isSameSession =
-        rowClassId === classId &&
-        rowDate === targetDate &&
-        rowPeriod === period;
-
-      const isTargetStudent = !!targetStudentIds[rowStudentId];
-
-      return !(isSameSession && isTargetStudent);
+    rowsToClear.sort(function(a, b) {
+      return a - b;
     });
 
-    const rebuiltRows = keptRows.concat(newRows);
+    rowsToUpdate.sort(function(a, b) {
+      return a.rowNumber - b.rowNumber;
+    });
 
-    const lastRow = attendanceSheet.getLastRow();
-    const lastColumn = attendanceSheet.getLastColumn();
+    const writeStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
-    if (lastRow > 1) {
-      attendanceSheet.getRange(2, 1, lastRow - 1, lastColumn).clearContent();
+    if (rowsToClear.length > 0) {
+      let rangeStart = rowsToClear[0];
+      let previousRow = rowsToClear[0];
+
+      for (let i = 1; i <= rowsToClear.length; i++) {
+        const currentRow = i < rowsToClear.length
+          ? rowsToClear[i]
+          : null;
+
+        if (currentRow === previousRow + 1) {
+          previousRow = currentRow;
+          continue;
+        }
+
+        attendanceSheet
+          .getRange(
+            rangeStart,
+            1,
+            previousRow - rangeStart + 1,
+            headers.length
+          )
+          .clearContent();
+
+        if (currentRow !== null) {
+          rangeStart = currentRow;
+          previousRow = currentRow;
+        }
+      }
     }
 
-    if (rebuiltRows.length > 0) {
+    if (rowsToUpdate.length > 0) {
+      const rowNumbers = rowsToUpdate.map(function(item) {
+        return item.rowNumber;
+      });
+
+      if (isSequentialRows_(rowNumbers)) {
+        attendanceSheet
+          .getRange(
+            rowNumbers[0],
+            1,
+            rowsToUpdate.length,
+            headers.length
+          )
+          .setValues(
+            rowsToUpdate.map(function(item) {
+              return item.values;
+            })
+          );
+      } else {
+        rowsToUpdate.forEach(function(item) {
+          attendanceSheet
+            .getRange(
+              item.rowNumber,
+              1,
+              1,
+              headers.length
+            )
+            .setValues([item.values]);
+        });
+      }
+    }
+
+    if (appendRows.length > 0) {
+      const appendStartRow =
+        Math.max(attendanceSheet.getLastRow(), 1) + 1;
+
       attendanceSheet
-        .getRange(2, 1, rebuiltRows.length, rebuiltRows[0].length)
-        .setValues(rebuiltRows);
+        .getRange(
+          appendStartRow,
+          1,
+          appendRows.length,
+          headers.length
+        )
+        .setValues(appendRows);
+    }
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveHomeroomShrAttendance write targeted rows',
+        writeStartedAt,
+        'cleared=' + rowsToClear.length +
+          ' updated=' + rowsToUpdate.length +
+          ' appended=' + appendRows.length
+      );
     }
 
     appendAttendanceSessionLog_(attendanceSessionsSheet, [
-  classId,
-  targetDate,
-  HOMEROOM_SHR_CONFIG.PERIOD,
-  currentUserEmail,
-  now,
-  HOMEROOM_SHR_CONFIG.ACTION_TYPE,
-  sessionKey,
-  HOMEROOM_SHR_CONFIG.MODE_LABEL
-]);
+      classId,
+      targetDate,
+      HOMEROOM_SHR_CONFIG.PERIOD,
+      currentUserEmail,
+      now,
+      HOMEROOM_SHR_CONFIG.ACTION_TYPE,
+      sessionKey,
+      HOMEROOM_SHR_CONFIG.MODE_LABEL
+    ]);
 
-     invalidateAttendanceCaches_(classId, targetDate, period);
+    invalidateAttendanceCaches_(classId, targetDate, period);
 
     const summaryDateContext = getHomeroomShrUnsavedDateContext_(new Date());
     const summaryEndYmd = summaryDateContext.endYmd;
 
-      removeScriptCacheKeys_([
-    buildHomeroomShrDailyCacheKey_(grade, unit, targetDate),
-    buildHomeroomShrUnsavedSummaryCacheKey_(grade, unit, summaryEndYmd),
-    buildHomeroomShrUnsavedDetailsCacheKey_(grade, unit, summaryEndYmd),
-    buildHomeroomShrUnsavedSnapshotCacheKey_(grade, unit, summaryEndYmd)
-  ]);
+    removeScriptCacheKeys_([
+      buildHomeroomShrDailyCacheKey_(grade, unit, targetDate),
+      buildHomeroomShrUnsavedSummaryCacheKey_(grade, unit, summaryEndYmd),
+      buildHomeroomShrUnsavedDetailsCacheKey_(grade, unit, summaryEndYmd),
+      buildHomeroomShrUnsavedSnapshotCacheKey_(grade, unit, summaryEndYmd)
+    ]);
 
-return {
-  success: true,
-  classId: classId,
-  date: targetDate,
-  savedCount: records.length,
-  lastSavedInfo: toClientSafeLastSavedInfo_({
-    teacherEmail: currentUserEmail,
-    savedAtText: formatDateTimeJst_(now),
-    actionType: HOMEROOM_SHR_CONFIG.ACTION_TYPE,
-    targetSessionKey: sessionKey,
-    savedModeLabel: HOMEROOM_SHR_CONFIG.MODE_LABEL,
-    savedByCurrentUser: true
-  })
-};
+    const result = {
+      success: true,
+      classId: classId,
+      date: targetDate,
+      savedCount: records.length,
+      lastSavedInfo: toClientSafeLastSavedInfo_({
+        teacherEmail: currentUserEmail,
+        savedAtText: formatDateTimeJst_(now),
+        actionType: HOMEROOM_SHR_CONFIG.ACTION_TYPE,
+        targetSessionKey: sessionKey,
+        savedModeLabel: HOMEROOM_SHR_CONFIG.MODE_LABEL,
+        savedByCurrentUser: true
+      })
+    };
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveHomeroomShrAttendance total',
+        totalStartedAt,
+        'records=' + records.length +
+          ' cleared=' + rowsToClear.length +
+          ' updated=' + rowsToUpdate.length +
+          ' appended=' + appendRows.length
+      );
+    }
+
+    return result;
 
   } finally {
     lock.releaseLock();
