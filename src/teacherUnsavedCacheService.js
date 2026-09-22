@@ -1463,6 +1463,277 @@ function invalidateAllTeacherUnsavedFastSnapshotsUnderLock_(message) {
   };
 }
 
+function invalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
+  sessions
+) {
+  const lock = LockService.getScriptLock();
+
+  if (!lock.hasLock()) {
+    throw new Error(
+      "Fastキャッシュ一括無効化には保存処理のScriptLockが必要です。"
+    );
+  }
+
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    return {
+      ok: true,
+      matchedDetailCount: 0,
+      invalidatedTeacherCount: 0,
+      targetKeys: []
+    };
+  }
+
+  const dateContext =
+    getTeacherUnsavedCacheDateContext_(new Date());
+
+  const todayYmd = dateContext.cacheDate;
+  const targetKeySet = {};
+
+  sessions.forEach(function(session) {
+    const classId =
+      normalizeString_(session && session.classId);
+
+    const date =
+      formatDateToYmd(session && session.date);
+
+    const period =
+      normalizeString_(
+        session && session.period
+      );
+
+    if (!classId || !date || !period) {
+      return;
+    }
+
+    if (
+      date < dateContext.startYmd ||
+      date > dateContext.endYmd
+    ) {
+      return;
+    }
+
+    targetKeySet[
+      [classId, date, period].join("__")
+    ] = true;
+  });
+
+  const targetKeys = Object.keys(targetKeySet);
+
+  if (targetKeys.length === 0) {
+    return {
+      ok: true,
+      matchedDetailCount: 0,
+      invalidatedTeacherCount: 0,
+      targetKeys: []
+    };
+  }
+
+  const validation =
+    validateTeacherUnsavedCacheSheetsForSave_();
+
+  if (!validation.ok) {
+    throw new Error(
+      buildTeacherUnsavedCacheValidationError_(validation)
+    );
+  }
+
+  const detailSheet = validation.detail.sheet;
+
+  const detailRowCount =
+    Number(validation.saveDetailDataRowCount);
+
+  if (
+    !isFinite(detailRowCount) ||
+    detailRowCount < 0
+  ) {
+    throw new Error(
+      "保存用Fastキャッシュのdetail行数が不正です。"
+    );
+  }
+
+  if (detailRowCount === 0) {
+    return {
+      ok: true,
+      matchedDetailCount: 0,
+      invalidatedTeacherCount: 0,
+      targetKeys: targetKeys
+    };
+  }
+
+  const detailValues =
+    detailSheet
+      .getRange(
+        2,
+        1,
+        detailRowCount,
+        TEACHER_UNSAVED_DETAIL_CACHE_HEADERS_.length
+      )
+      .getValues();
+
+  const affectedSnapshotByTeacherId = {};
+  let matchedDetailCount = 0;
+
+  detailValues.forEach(function(values) {
+    const detail =
+      buildTeacherUnsavedDetailObject_(values);
+
+    if (
+      detail.cacheDate !== todayYmd ||
+      !detail.teacherId ||
+      !detail.snapshotId ||
+      !targetKeySet[detail.saveKey]
+    ) {
+      return;
+    }
+
+    matchedDetailCount++;
+
+    affectedSnapshotByTeacherId[
+      detail.teacherId
+    ] = detail.snapshotId;
+  });
+
+  const affectedTeacherIds =
+    Object.keys(affectedSnapshotByTeacherId);
+
+  if (affectedTeacherIds.length === 0) {
+    return {
+      ok: true,
+      matchedDetailCount: matchedDetailCount,
+      invalidatedTeacherCount: 0,
+      targetKeys: targetKeys
+    };
+  }
+
+  const summarySheet = validation.summary.sheet;
+
+  const summaryRowCount =
+    Math.max(summarySheet.getLastRow() - 1, 0);
+
+  if (summaryRowCount === 0) {
+    return {
+      ok: true,
+      matchedDetailCount: matchedDetailCount,
+      invalidatedTeacherCount: 0,
+      targetKeys: targetKeys
+    };
+  }
+
+  const summaryValues =
+    summarySheet
+      .getRange(
+        2,
+        1,
+        summaryRowCount,
+        TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.length
+      )
+      .getValues();
+
+  const snapshotIdIndex =
+    TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_
+      .indexOf("snapshotId");
+
+  const cacheDateIndex =
+    TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_
+      .indexOf("cacheDate");
+
+  const teacherIdIndex =
+    TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_
+      .indexOf("teacherId");
+
+  const statusIndex =
+    TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_
+      .indexOf("status");
+
+  const errorIndex =
+    TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_
+      .indexOf("errorMessage");
+
+  const statusColumn = statusIndex + 1;
+
+  const statusRows =
+    summaryValues.map(function(values) {
+      return [
+        values[statusIndex],
+        values[errorIndex]
+      ];
+    });
+
+  const invalidationMessage =
+    "出席一括保存後にFastキャッシュを無効化しました。" +
+    "次回rebuildを待っています。";
+
+  let invalidatedTeacherCount = 0;
+
+  summaryValues.forEach(function(values, index) {
+    const teacherId =
+      normalizeString_(values[teacherIdIndex]);
+
+    const expectedSnapshotId =
+      affectedSnapshotByTeacherId[teacherId];
+
+    if (!expectedSnapshotId) {
+      return;
+    }
+
+    const status =
+      normalizeString_(
+        values[statusIndex]
+      ).toLowerCase();
+
+    if (status !== "ready") {
+      return;
+    }
+
+    const snapshotId =
+      normalizeString_(values[snapshotIdIndex]);
+
+    if (snapshotId !== expectedSnapshotId) {
+      return;
+    }
+
+    const rawCacheDate =
+      values[cacheDateIndex];
+
+    const cacheDate =
+      normalizeTeacherUnsavedSourceYmd_(
+        rawCacheDate,
+        rawCacheDate
+      );
+
+    if (cacheDate !== todayYmd) {
+      return;
+    }
+
+    statusRows[index] = [
+      "stale",
+      invalidationMessage
+    ];
+
+    invalidatedTeacherCount++;
+  });
+
+  if (invalidatedTeacherCount > 0) {
+    summarySheet
+      .getRange(
+        2,
+        statusColumn,
+        summaryRowCount,
+        2
+      )
+      .setValues(statusRows);
+
+    SpreadsheetApp.flush();
+  }
+
+  return {
+    ok: true,
+    matchedDetailCount: matchedDetailCount,
+    invalidatedTeacherCount:
+      invalidatedTeacherCount,
+    targetKeys: targetKeys
+  };
+}
 function invalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(classId, date, period) {
   const lock = LockService.getScriptLock();
   if (!lock.hasLock()) {

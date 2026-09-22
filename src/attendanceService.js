@@ -14,6 +14,367 @@ function savePastNoAbsenceAttendance(payload) {
   return saveNoAbsenceAttendanceInternal_(payload, true);
 }
 
+function saveTeacherUnsavedBulkNoAbsence(payload) {
+  return saveTeacherUnsavedBulkNoAbsenceInternal_(payload);
+}
+
+function saveTeacherUnsavedBulkNoAbsenceInternal_(payload) {
+  const ss = getOperationSpreadsheet();
+
+  const attendanceSessionsSheet =
+    ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
+
+  const attendanceSheet =
+    ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE);
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    if (!payload || !Array.isArray(payload.items)) {
+      throw new Error("一括保存データがありません");
+    }
+
+    const sourceItems = payload.items;
+
+    if (sourceItems.length === 0) {
+      throw new Error("一括保存する授業が選択されていません");
+    }
+
+    if (sourceItems.length > 100) {
+      throw new Error("一度に保存できる授業は100件までです");
+    }
+
+    if (!attendanceSessionsSheet) {
+      throw new Error("attendanceSessions シートが見つかりません");
+    }
+
+    if (!attendanceSheet) {
+      throw new Error("attendance シートが見つかりません");
+    }
+
+    const currentUserEmail = getCurrentUserEmail();
+    const now = new Date();
+    const todayYmd = formatDateToYmd(now);
+
+    const sessions = [];
+    const targetKeySet = {};
+    let duplicateInputCount = 0;
+
+    sourceItems.forEach(function(item, index) {
+      if (!item || typeof item !== "object") {
+        throw new Error(
+          "一括保存データの " + (index + 1) + " 件目が不正です"
+        );
+      }
+
+      const classId = String(item.classId || "").trim();
+      const date = formatDateToYmd(item.date);
+      const period = String(
+        item.period == null ? "" : item.period
+      ).trim();
+
+      if (!classId || !date || !period) {
+        throw new Error(
+          "一括保存データの " + (index + 1) +
+          " 件目に必要な授業情報がありません"
+        );
+      }
+
+      if (date >= todayYmd) {
+        throw new Error(
+          "一括登録できるのは過去の未保存授業だけです"
+        );
+      }
+
+      if (
+        typeof isExperimentGroupTargetClass_ === "function" &&
+        isExperimentGroupTargetClass_(classId)
+      ) {
+        throw new Error(
+          "工学実験は一括登録できません。名簿から個別に保存してください"
+        );
+      }
+
+      const session = {
+        classId: classId,
+        date: date,
+        period: period,
+        sessionNumber: item.sessionNumber || ""
+      };
+
+      if (!canEditAttendance(session)) {
+        throw new Error(
+          "編集権限のない授業が選択されています: " +
+          classId + " / " + date + " / " + period + "限"
+        );
+      }
+
+      const targetSessionKey =
+        [classId, date, period].join("__");
+
+      if (targetKeySet[targetSessionKey]) {
+        duplicateInputCount++;
+        return;
+      }
+
+      targetKeySet[targetSessionKey] = true;
+
+      session.targetSessionKey = targetSessionKey;
+      sessions.push(session);
+    });
+
+    if (sessions.length === 0) {
+      throw new Error("保存対象の授業がありません");
+    }
+
+    /*
+     * 一覧表示後に別操作で保存された授業を
+     * 「欠席者なし」で上書きしないための競合確認。
+     * ScriptLock中にattendanceSessionsを1回だけ読み込む。
+     */
+    const sessionValues =
+      attendanceSessionsSheet.getDataRange().getValues();
+
+    if (sessionValues.length > 0) {
+      const sessionHeaders = sessionValues[0];
+
+      const sessionCol = {
+        classId: findColumnIndex_(
+          sessionHeaders,
+          ["classId", "ClassID"]
+        ),
+        date: findColumnIndex_(
+          sessionHeaders,
+          ["date", "日付"]
+        ),
+        period: findColumnIndex_(
+          sessionHeaders,
+          ["period", "時限"]
+        )
+      };
+
+      ["classId", "date", "period"].forEach(function(key) {
+        if (sessionCol[key] === -1) {
+          throw new Error(
+            "attendanceSessions シートに " +
+            key +
+            " 列がありません"
+          );
+        }
+      });
+
+      const alreadySavedKeySet = {};
+
+      sessionValues.slice(1).forEach(function(row) {
+        const rowClassId =
+          String(row[sessionCol.classId] || "").trim();
+
+        const rowDate =
+          formatDateToYmd(row[sessionCol.date]);
+
+        const rowPeriod =
+          String(
+            row[sessionCol.period] == null
+              ? ""
+              : row[sessionCol.period]
+          ).trim();
+
+        if (!rowClassId || !rowDate || !rowPeriod) {
+          return;
+        }
+
+        const rowKey =
+          [rowClassId, rowDate, rowPeriod].join("__");
+
+        if (targetKeySet[rowKey]) {
+          alreadySavedKeySet[rowKey] = true;
+        }
+      });
+
+      const existingSavedKeyList =
+        Object.keys(alreadySavedKeySet);
+
+      if (existingSavedKeyList.length > 0) {
+        throw new Error(
+          "選択した授業のうち " +
+          existingSavedKeyList.length +
+          " 件が既に保存されています。" +
+          "未保存授業一覧を再読み込みしてから、もう一度実行してください"
+        );
+      }
+    }
+
+    /*
+     * attendanceは1回だけ読み込み、
+     * 選択セッションに属する既存例外行をまとめて消す。
+     */
+    const attendanceValues =
+      attendanceSheet.getDataRange().getValues();
+
+    const attendanceHeaders =
+      attendanceValues.length > 0
+        ? attendanceValues[0]
+        : [];
+
+    const attendanceRows =
+      attendanceValues.length > 1
+        ? attendanceValues.slice(1)
+        : [];
+
+    const attendanceCol = {
+      classId: attendanceHeaders.indexOf("classId"),
+      date: attendanceHeaders.indexOf("date"),
+      period: attendanceHeaders.indexOf("period"),
+      studentId: attendanceHeaders.indexOf("studentId"),
+      statusCode: attendanceHeaders.indexOf("statusCode"),
+      recordedAt: attendanceHeaders.indexOf("recordedAt")
+    };
+
+    Object.keys(attendanceCol).forEach(function(key) {
+      if (attendanceCol[key] === -1) {
+        throw new Error(
+          "attendance シートに " + key + " 列がありません"
+        );
+      }
+    });
+
+    const rowsToClear = [];
+
+    attendanceRows.forEach(function(row, index) {
+      const rowClassId =
+        String(row[attendanceCol.classId] || "").trim();
+
+      const rowDate =
+        formatDateToYmd(row[attendanceCol.date]);
+
+      const rowPeriod =
+        String(
+          row[attendanceCol.period] == null
+            ? ""
+            : row[attendanceCol.period]
+        ).trim();
+
+      if (!rowClassId || !rowDate || !rowPeriod) {
+        return;
+      }
+
+      const rowKey =
+        [rowClassId, rowDate, rowPeriod].join("__");
+
+      if (targetKeySet[rowKey]) {
+        rowsToClear.push(index + 2);
+      }
+    });
+
+    clearAttendanceRowsByNumberGroups_(
+      attendanceSheet,
+      rowsToClear,
+      attendanceHeaders.length
+    );
+
+    const actionType = "past-edit";
+    const savedModeLabel = "過去修正（欠席者なし）";
+
+    const logRows = sessions.map(function(session) {
+      return [
+        session.classId,
+        session.date,
+        Number(session.period),
+        currentUserEmail,
+        now,
+        actionType,
+        session.targetSessionKey,
+        savedModeLabel
+      ];
+    });
+
+    appendAttendanceSessionLogs_(
+      attendanceSessionsSheet,
+      logRows
+    );
+
+    const fastInvalidation =
+      tryInvalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
+        sessions,
+        actionType
+      );
+
+    invalidateAttendanceCachesBulk_(sessions);
+
+    /*
+     * legacy / ScriptCache系の未保存キャッシュも
+     * 一括処理後に1回だけ無効化する。
+     */
+    const currentUser = getCurrentUserContext();
+
+    const currentTeacherId =
+      currentUser && currentUser.teacherId
+        ? normalizeString_(currentUser.teacherId)
+        : "";
+
+    const summaryBaseDate = new Date();
+    summaryBaseDate.setHours(0, 0, 0, 0);
+    summaryBaseDate.setDate(summaryBaseDate.getDate() - 1);
+
+    const summaryEndYmd =
+      formatDateToYmd(summaryBaseDate);
+
+    const summaryStartYmd =
+      formatDateToYmd(
+        getTeacherUnsavedStartDate_(summaryBaseDate)
+      );
+
+    const teacherUnsavedCacheKeys = [
+      "savedSessionKeySetByRange__" +
+        summaryStartYmd + "__" + summaryEndYmd,
+
+      "savedSessionKeySetByRange__v2__" +
+        summaryStartYmd + "__" + summaryEndYmd,
+
+      "savedSessionKeySetByRange__v4__" +
+        summaryStartYmd + "__" + summaryEndYmd
+    ];
+
+    if (currentTeacherId) {
+      teacherUnsavedCacheKeys.push(
+        buildTeacherUnsavedSummaryCacheKey_(
+          currentTeacherId,
+          summaryEndYmd
+        ),
+        buildTeacherUnsavedDetailsCacheKey_(
+          currentTeacherId,
+          summaryEndYmd
+        )
+      );
+    }
+
+    removeScriptCacheKeys_(teacherUnsavedCacheKeys);
+
+    return {
+      success: true,
+      mode: "past-edit",
+      noAbsence: true,
+      requestedCount: sourceItems.length,
+      savedCount: sessions.length,
+      duplicateInputCount: duplicateInputCount,
+      clearedCount: rowsToClear.length,
+      fastInvalidation: fastInvalidation,
+      items: sessions.map(function(session) {
+        return {
+          classId: session.classId,
+          date: session.date,
+          period: session.period,
+          sessionNumber: session.sessionNumber,
+          targetSessionKey: session.targetSessionKey
+        };
+      })
+    };
+
+  } finally {
+    lock.releaseLock();
+  }
+}
 function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
   const ss = getOperationSpreadsheet();
   const attendanceSessionsSheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
@@ -872,6 +1233,188 @@ function buildAttendanceSheetRow_(headerCount, col, record) {
   return row;
 }
 
+function clearAttendanceRowsByNumberGroups_(
+  sheet,
+  rowNumbers,
+  columnCount
+) {
+  if (
+    !sheet ||
+    !Array.isArray(rowNumbers) ||
+    rowNumbers.length === 0
+  ) {
+    return;
+  }
+
+  const sorted = rowNumbers
+    .slice()
+    .sort(function(a, b) { return a - b; });
+
+  let startRow = sorted[0];
+  let previousRow = sorted[0];
+
+  function clearCurrentGroup_() {
+    const rowCount = previousRow - startRow + 1;
+
+    sheet
+      .getRange(
+        startRow,
+        1,
+        rowCount,
+        columnCount
+      )
+      .clearContent();
+  }
+
+  for (let i = 1; i < sorted.length; i++) {
+    const rowNumber = sorted[i];
+
+    if (rowNumber === previousRow + 1) {
+      previousRow = rowNumber;
+      continue;
+    }
+
+    clearCurrentGroup_();
+
+    startRow = rowNumber;
+    previousRow = rowNumber;
+  }
+
+  clearCurrentGroup_();
+}
+
+function appendAttendanceSessionLogs_(sheet, baseRows) {
+  if (
+    !sheet ||
+    !Array.isArray(baseRows) ||
+    baseRows.length === 0
+  ) {
+    return;
+  }
+
+  const headerCount = sheet.getLastColumn();
+
+  if (headerCount <= 0) {
+    throw new Error(
+      "attendanceSessions シートのヘッダーがありません"
+    );
+  }
+
+  const targetColumnCount =
+    headerCount <= 5 ? 5 : headerCount;
+
+  const rows = baseRows.map(function(baseRow) {
+    const row = baseRow.slice();
+
+    while (row.length < targetColumnCount) {
+      row.push("");
+    }
+
+    return row.slice(0, targetColumnCount);
+  });
+
+  sheet
+    .getRange(
+      sheet.getLastRow() + 1,
+      1,
+      rows.length,
+      targetColumnCount
+    )
+    .setValues(rows);
+}
+
+function invalidateAttendanceCachesBulk_(sessions) {
+  const cacheKeySet = {};
+
+  cacheKeySet[getAttendanceSheetCacheKey_()] = true;
+  cacheKeySet[getAttendanceSessionsSheetCacheKey_()] = true;
+  cacheKeySet["attendanceIndex__all"] = true;
+  cacheKeySet["attendanceSessionLatestIndex__all"] = true;
+
+  (sessions || []).forEach(function(session) {
+    const classId =
+      String(session.classId || "").trim();
+
+    const date =
+      formatDateToYmd(session.date);
+
+    const period =
+      String(
+        session.period == null ? "" : session.period
+      ).trim();
+
+    if (!classId || !date || !period) {
+      return;
+    }
+
+    cacheKeySet[
+      buildAttendanceSessionCacheKey_(
+        classId,
+        date,
+        period
+      )
+    ] = true;
+
+    cacheKeySet[
+      "savedSessionMapByDate__" + date
+    ] = true;
+
+    cacheKeySet[
+      "attendanceSessionLatestMapByDate__" + date
+    ] = true;
+
+    cacheKeySet[
+      "attendanceSessionLatestMapByDate__v2__" + date
+    ] = true;
+  });
+
+  removeScriptCacheKeys_(
+    Object.keys(cacheKeySet)
+  );
+}
+
+function tryInvalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
+  sessions,
+  actionType
+) {
+  try {
+    return invalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
+      sessions
+    );
+  } catch (error) {
+    Logger.log(JSON.stringify({
+      ok: false,
+      event:
+        "teacher-unsaved-fast-bulk-cache-invalidation-failed",
+      warning: true,
+      attendanceSaveSucceeded: true,
+      actionType: actionType || "",
+      sessionCount:
+        Array.isArray(sessions) ? sessions.length : 0,
+      errorName:
+        error && error.name
+          ? String(error.name)
+          : "",
+      errorMessage:
+        error && error.message
+          ? String(error.message)
+          : String(error),
+      errorStack:
+        error && error.stack
+          ? String(error.stack)
+          : ""
+    }));
+
+    return {
+      ok: false,
+      warning: true,
+      errorMessage:
+        error && error.message
+          ? String(error.message)
+          : String(error)
+    };
+  }
+}
 function appendAttendanceSessionLog_(sheet, baseRow) {
   const headerCount = sheet.getLastColumn();
 
