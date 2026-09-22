@@ -1638,6 +1638,145 @@
         min-height: 44px;
       }
     }
+    /* STEP 2-B1 : BULK NO-ABSENCE UI */
+    .teacher-unsaved-bulk-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      width: 100%;
+      max-width: 1120px;
+      margin-bottom: 10px;
+      padding: 10px 12px;
+      border: 1px solid #d8e0ec;
+      border-radius: 10px;
+      background: #f8fbff;
+    }
+
+    .teacher-unsaved-bulk-info {
+      min-width: 0;
+      color: #47566d;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .teacher-unsaved-bulk-count {
+      color: #223;
+      font-size: 14px;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+
+    .teacher-unsaved-bulk-note {
+      margin-left: 8px;
+      color: #6b7688;
+    }
+
+    .teacher-unsaved-bulk-btn {
+      appearance: none;
+      flex: 0 0 auto;
+      border: none;
+      border-radius: 8px;
+      background: #2f6feb;
+      color: #fff;
+      padding: 9px 13px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .teacher-unsaved-bulk-btn:hover:not(:disabled) {
+      background: #245fc7;
+    }
+
+    .teacher-unsaved-bulk-btn:disabled {
+      background: #b6bfcd;
+      color: #f7f8fa;
+      cursor: not-allowed;
+    }
+
+    .teacher-unsaved-table-wrap {
+      width: 100%;
+      max-width: 1120px;
+    }
+
+    .teacher-unsaved-table {
+      min-width: 900px;
+    }
+
+    .teacher-unsaved-table-head,
+    .teacher-unsaved-table-row {
+      grid-template-columns:
+        64px
+        150px
+        64px
+        minmax(220px, 1fr)
+        150px
+        84px
+        116px;
+    }
+
+    .teacher-unsaved-table-select {
+      text-align: center;
+    }
+
+    .teacher-unsaved-select-checkbox {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      vertical-align: middle;
+      cursor: pointer;
+    }
+
+    .teacher-unsaved-select-unavailable {
+      display: inline-block;
+      color: #8791a2;
+      font-size: 11px;
+      line-height: 1.25;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 768px) {
+      .teacher-unsaved-bulk-bar {
+        align-items: stretch;
+        flex-direction: column;
+        max-width: none;
+      }
+
+      .teacher-unsaved-bulk-note {
+        display: block;
+        margin: 3px 0 0;
+      }
+
+      .teacher-unsaved-bulk-btn {
+        width: 100%;
+        min-height: 44px;
+      }
+
+      .teacher-unsaved-table-wrap {
+        max-width: none;
+      }
+
+      .teacher-unsaved-table {
+        min-width: 0;
+      }
+
+      .teacher-unsaved-table-row {
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        grid-template-areas:
+          "select date period"
+          "select subject subject"
+          "select target session"
+          "action action action";
+      }
+
+      .teacher-unsaved-table-select {
+        grid-area: select;
+        align-self: start;
+        text-align: left;
+      }
+    }
     @media (max-width: 360px) {
       body {
         padding: 8px;
@@ -1903,6 +2042,7 @@
     let pendingUnsavedTeacherSession = null;
     let teacherUnsavedSummaryData = null;
     let teacherUnsavedDetailsData = null;
+    let teacherUnsavedSelectedRows = {};
 
     function debugLog(label, value) {
       try {
@@ -2624,9 +2764,115 @@ function goHome() {
         '</div>';
     }
 
+    function getTeacherUnsavedSelectionKey(item) {
+      if (!item) return "";
+
+      const saveKey = String(item.saveKey || "").trim();
+      if (saveKey) return saveKey;
+
+      return [
+        String(item.classId || "").trim(),
+        String(item.date || "").trim(),
+        String(item.period || "").trim()
+      ].join("__");
+    }
+
+    function resetTeacherUnsavedSelection() {
+      teacherUnsavedSelectedRows = {};
+    }
+
+    function updateTeacherUnsavedBulkUi() {
+      const countEl = document.getElementById("teacherUnsavedSelectedCount");
+      const button = document.getElementById("teacherUnsavedBulkNoAbsenceBtn");
+      const count = Object.keys(teacherUnsavedSelectedRows).length;
+
+      if (countEl) {
+        countEl.textContent = String(count);
+      }
+
+      if (button) {
+        button.disabled = count === 0;
+        button.textContent = count > 0
+          ? "選択した" + count + "件を「欠席者なし」で登録"
+          : "選択した授業を「欠席者なし」で登録";
+      }
+    }
+
+    function bindTeacherUnsavedBulkUi(items) {
+      const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
+      if (!detailsContent) return;
+
+      detailsContent
+        .querySelectorAll(".teacher-unsaved-select-checkbox")
+        .forEach(function(checkbox) {
+          checkbox.addEventListener("change", function() {
+            const itemIndex = Number(checkbox.dataset.itemIndex);
+
+            if (
+              !Number.isInteger(itemIndex) ||
+              itemIndex < 0 ||
+              itemIndex >= items.length
+            ) {
+              checkbox.checked = false;
+              return;
+            }
+
+            const item = items[itemIndex];
+
+            if (!item || item.isExperiment === true) {
+              checkbox.checked = false;
+              return;
+            }
+
+            const selectionKey = getTeacherUnsavedSelectionKey(item);
+
+            if (!selectionKey) {
+              checkbox.checked = false;
+              return;
+            }
+
+            if (checkbox.checked) {
+              teacherUnsavedSelectedRows[selectionKey] = {
+                classId: String(item.classId || ""),
+                date: String(item.date || ""),
+                period: String(item.period || ""),
+                sessionNumber: item.sessionNumber || "",
+                subjectName: String(item.subjectName || ""),
+                targetLabel: String(item.targetLabel || ""),
+                saveKey: selectionKey
+              };
+            } else {
+              delete teacherUnsavedSelectedRows[selectionKey];
+            }
+
+            updateTeacherUnsavedBulkUi();
+          });
+        });
+
+      const bulkButton =
+        document.getElementById("teacherUnsavedBulkNoAbsenceBtn");
+
+      if (bulkButton) {
+        bulkButton.addEventListener("click", function() {
+          const count = Object.keys(teacherUnsavedSelectedRows).length;
+
+          if (count === 0) return;
+
+          showMessage(
+            "一括登録UIの確認段階です。まだ保存処理は実行していません。",
+            "warn"
+          );
+        });
+      }
+
+      updateTeacherUnsavedBulkUi();
+    }
+
     function renderTeacherUnsavedDetails(data) {
       const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
       if (!detailsContent) return;
+
+      resetTeacherUnsavedSelection();
 
       if (!data || data.ok !== true || data.status !== "ready") {
         const statusView = getTeacherUnsavedCacheStatusView(data);
@@ -2657,7 +2903,24 @@ function goHome() {
         return;
       }
 
-      const rowsHtml = items.map(function(item) {
+      const bulkBarHtml =
+        '<div class="teacher-unsaved-bulk-bar">' +
+          '<div class="teacher-unsaved-bulk-info">' +
+            '<span class="teacher-unsaved-bulk-count">' +
+              '<span id="teacherUnsavedSelectedCount">0</span>件選択' +
+            '</span>' +
+            '<span class="teacher-unsaved-bulk-note">' +
+              '欠席・遅刻・公欠がある授業は選択せず「名簿を開く」から入力してください。' +
+            '</span>' +
+          '</div>' +
+          '<button id="teacherUnsavedBulkNoAbsenceBtn"' +
+            ' class="teacher-unsaved-bulk-btn"' +
+            ' type="button" disabled>' +
+            '選択した授業を「欠席者なし」で登録' +
+          '</button>' +
+        '</div>';
+
+      const rowsHtml = items.map(function(item, index) {
         const rawDate = String(item.date || "");
         const dateText = escapeHtml(formatDateJa(item.date || ""));
         const subjectText = escapeHtml(item.subjectName || "");
@@ -2667,8 +2930,30 @@ function goHome() {
           ? "第" + escapeHtml(String(item.sessionNumber)) + "回"
           : "—";
 
+        const selectHtml = item.isExperiment === true
+          ? '<span class="teacher-unsaved-select-unavailable"' +
+              ' title="工学実験は名簿から個別に入力してください。">' +
+              '個別入力' +
+            '</span>'
+          : '<input class="teacher-unsaved-select-checkbox"' +
+              ' type="checkbox"' +
+              ' data-item-index="' + String(index) + '"' +
+              ' aria-label="' +
+                escapeHtml(
+                  formatDateJa(item.date || "") +
+                  " " +
+                  String(item.subjectName || "") +
+                  " を欠席者なしの一括登録対象にする"
+                ) +
+              '"' +
+              ' title="欠席者なしとして一括登録する授業に追加">';
+
         return '' +
           '<div class="teacher-unsaved-table-row" role="row">' +
+
+            '<div class="teacher-unsaved-table-cell teacher-unsaved-table-select" role="cell">' +
+              selectHtml +
+            '</div>' +
 
             '<div class="teacher-unsaved-table-cell teacher-unsaved-table-date" role="cell">' +
               '<time datetime="' + escapeHtml(rawDate) + '">' +
@@ -2709,6 +2994,7 @@ function goHome() {
           '<div class="teacher-unsaved-table" role="table" aria-label="過去の未保存授業">' +
 
             '<div class="teacher-unsaved-table-head" role="row">' +
+              '<div class="teacher-unsaved-table-cell teacher-unsaved-table-select" role="columnheader">選択</div>' +
               '<div class="teacher-unsaved-table-cell" role="columnheader">日付</div>' +
               '<div class="teacher-unsaved-table-cell" role="columnheader">時限</div>' +
               '<div class="teacher-unsaved-table-cell" role="columnheader">科目</div>' +
@@ -2731,7 +3017,12 @@ function goHome() {
           '</div>'
         : '';
 
-      detailsContent.innerHTML = tableHtml + moreNoteHtml;
+      detailsContent.innerHTML =
+        bulkBarHtml +
+        tableHtml +
+        moreNoteHtml;
+
+      bindTeacherUnsavedBulkUi(items);
 
       detailsContent
         .querySelectorAll(".teacher-unsaved-open-btn")
