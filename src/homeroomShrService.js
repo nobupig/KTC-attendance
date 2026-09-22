@@ -1170,6 +1170,417 @@ function saveHomeroomShrAttendance(payload) {
   }
 }
 
+function saveHomeroomShrUnsavedBulkNoAbsence(payload) {
+  const totalStartedAt =
+    typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    if (!payload || !Array.isArray(payload.dates)) {
+      throw new Error('一括保存データがありません');
+    }
+
+    const grade = String(payload.grade || '').trim();
+    const unit = String(payload.unit || '').trim();
+
+    ensureHomeroomAccess_(grade, unit);
+
+    const sourceDates = payload.dates;
+
+    if (sourceDates.length === 0) {
+      throw new Error('一括保存するSHR日が選択されていません');
+    }
+
+    if (sourceDates.length > 100) {
+      throw new Error('一度に保存できるSHRは100件までです');
+    }
+
+    const dateContext =
+      getHomeroomShrUnsavedDateContext_(new Date());
+
+    const startYmd = dateContext.startYmd;
+    const endYmd = dateContext.endYmd;
+
+    const classDayYmdList =
+      getHomeroomShrClassDayYmdList_(startYmd, endYmd);
+
+    const classDaySet = {};
+    classDayYmdList.forEach(function(ymd) {
+      classDaySet[ymd] = true;
+    });
+
+    const targetDates = [];
+    const targetDateSet = {};
+
+    sourceDates.forEach(function(value, index) {
+      const ymd = formatDateToYmd(value);
+
+      if (!ymd) {
+        throw new Error(
+          '一括保存データの ' +
+          (index + 1) +
+          ' 件目の日付が不正です'
+        );
+      }
+
+      if (
+        ymd < startYmd ||
+        ymd > endYmd ||
+        !classDaySet[ymd]
+      ) {
+        throw new Error(
+          'SHR一括保存の対象外の日付が含まれています: ' +
+          ymd
+        );
+      }
+
+      if (targetDateSet[ymd]) {
+        return;
+      }
+
+      targetDateSet[ymd] = true;
+      targetDates.push(ymd);
+    });
+
+    if (targetDates.length === 0) {
+      throw new Error('保存対象のSHRがありません');
+    }
+
+    const classId =
+      buildHomeroomShrClassId_(grade, unit);
+
+    const period =
+      String(HOMEROOM_SHR_CONFIG.PERIOD);
+
+    const currentUserEmail =
+      getCurrentUserEmail();
+
+    const now = new Date();
+
+    const ss = getOperationSpreadsheet();
+
+    const attendanceSessionsSheet =
+      ss.getSheetByName(
+        CONFIG.SHEETS.ATTENDANCE_SESSIONS
+      );
+
+    if (!attendanceSessionsSheet) {
+      throw new Error(
+        'attendanceSessions シートが見つかりません'
+      );
+    }
+
+    /*
+     * 一覧表示後に別操作で保存されたSHRを
+     * 「欠席者なし」で上書きしないため、
+     * ScriptLock中にattendanceSessionsを1回だけ確認する。
+     */
+    const readStartedAt =
+      typeof perfNow_ === 'function'
+        ? perfNow_()
+        : Date.now();
+
+    const lastRow =
+      attendanceSessionsSheet.getLastRow();
+
+    const lastColumn =
+      attendanceSessionsSheet.getLastColumn();
+
+    const headers =
+      lastColumn > 0
+        ? attendanceSessionsSheet
+            .getRange(1, 1, 1, lastColumn)
+            .getDisplayValues()[0]
+        : [];
+
+    const col = {
+      classId: headers.indexOf('classId'),
+      date: headers.indexOf('date'),
+      period: headers.indexOf('period'),
+      actionType: headers.indexOf('actionType')
+    };
+
+    ['classId', 'date', 'period'].forEach(
+      function(key) {
+        if (col[key] === -1) {
+          throw new Error(
+            'attendanceSessions シートに ' +
+            key +
+            ' 列がありません'
+          );
+        }
+      }
+    );
+
+    const scanIndexes = [
+      col.classId,
+      col.date,
+      col.period
+    ];
+
+    if (col.actionType !== -1) {
+      scanIndexes.push(col.actionType);
+    }
+
+    const scanStartIndex =
+      Math.min.apply(null, scanIndexes);
+
+    const scanEndIndex =
+      Math.max.apply(null, scanIndexes);
+
+    const scanWidth =
+      scanEndIndex - scanStartIndex + 1;
+
+    const dataRowCount =
+      Math.max(lastRow - 1, 0);
+
+    const rows =
+      dataRowCount > 0
+        ? attendanceSessionsSheet
+            .getRange(
+              2,
+              scanStartIndex + 1,
+              dataRowCount,
+              scanWidth
+            )
+            .getDisplayValues()
+        : [];
+
+    const relativeCol = {
+      classId:
+        col.classId - scanStartIndex,
+      date:
+        col.date - scanStartIndex,
+      period:
+        col.period - scanStartIndex,
+      actionType:
+        col.actionType === -1
+          ? -1
+          : col.actionType - scanStartIndex
+    };
+
+    const alreadySavedDateSet = {};
+
+    rows.forEach(function(row) {
+      const rowClassId =
+        String(
+          row[relativeCol.classId] || ''
+        ).trim();
+
+      if (rowClassId !== classId) return;
+
+      const rowPeriod =
+        String(
+          row[relativeCol.period] == null
+            ? ''
+            : row[relativeCol.period]
+        ).trim();
+
+      if (rowPeriod !== period) return;
+
+      const actionType =
+        relativeCol.actionType !== -1
+          ? String(
+              row[relativeCol.actionType] || ''
+            ).trim()
+          : '';
+
+      if (
+        actionType &&
+        actionType !==
+          HOMEROOM_SHR_CONFIG.ACTION_TYPE
+      ) {
+        return;
+      }
+
+      const rowDate =
+        typeof normalizeYmdDisplayText_ ===
+        'function'
+          ? normalizeYmdDisplayText_(
+              row[relativeCol.date]
+            )
+          : formatDateToYmd(
+              row[relativeCol.date]
+            );
+
+      if (
+        rowDate &&
+        targetDateSet[rowDate]
+      ) {
+        alreadySavedDateSet[rowDate] = true;
+      }
+    });
+
+    const alreadySavedDates =
+      Object.keys(alreadySavedDateSet)
+        .sort();
+
+    if (alreadySavedDates.length > 0) {
+      throw new Error(
+        '選択したSHRの一部は既に保存されています。' +
+        '一覧を更新してから再度選択してください: ' +
+        alreadySavedDates.join(', ')
+      );
+    }
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveHomeroomShrUnsavedBulkNoAbsence read concurrency',
+        readStartedAt,
+        'rows=' +
+          rows.length +
+          ' selected=' +
+          targetDates.length
+      );
+    }
+
+    const writeStartedAt =
+      typeof perfNow_ === 'function'
+        ? perfNow_()
+        : Date.now();
+
+    const targetColumnCount =
+      attendanceSessionsSheet.getLastColumn();
+
+    const modeLabel =
+      HOMEROOM_SHR_CONFIG.MODE_LABEL +
+      '（欠席者なし）';
+
+    const sessionRows =
+      targetDates.map(function(ymd) {
+        const sessionKey =
+          [classId, ymd, period].join('__');
+
+        const row = [
+          classId,
+          ymd,
+          HOMEROOM_SHR_CONFIG.PERIOD,
+          currentUserEmail,
+          now,
+          HOMEROOM_SHR_CONFIG.ACTION_TYPE,
+          sessionKey,
+          modeLabel
+        ];
+
+        if (targetColumnCount <= 5) {
+          return row.slice(0, 5);
+        }
+
+        while (
+          row.length < targetColumnCount
+        ) {
+          row.push('');
+        }
+
+        return row.slice(
+          0,
+          targetColumnCount
+        );
+      });
+
+    const appendStartRow =
+      Math.max(
+        attendanceSessionsSheet.getLastRow(),
+        1
+      ) + 1;
+
+    attendanceSessionsSheet
+      .getRange(
+        appendStartRow,
+        1,
+        sessionRows.length,
+        targetColumnCount
+      )
+      .setValues(sessionRows);
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveHomeroomShrUnsavedBulkNoAbsence write sessions',
+        writeStartedAt,
+        'saved=' + targetDates.length
+      );
+    }
+
+    const sessions =
+      targetDates.map(function(ymd) {
+        return {
+          classId: classId,
+          date: ymd,
+          period: period
+        };
+      });
+
+    if (
+      typeof invalidateAttendanceCachesBulk_ ===
+      'function'
+    ) {
+      invalidateAttendanceCachesBulk_(sessions);
+    } else {
+      sessions.forEach(function(session) {
+        invalidateAttendanceCaches_(
+          session.classId,
+          session.date,
+          session.period
+        );
+      });
+    }
+
+    const cacheKeys = [
+      buildHomeroomShrUnsavedSummaryCacheKey_(
+        grade,
+        unit,
+        endYmd
+      ),
+      buildHomeroomShrUnsavedDetailsCacheKey_(
+        grade,
+        unit,
+        endYmd
+      ),
+      buildHomeroomShrUnsavedSnapshotCacheKey_(
+        grade,
+        unit,
+        endYmd
+      )
+    ];
+
+    targetDates.forEach(function(ymd) {
+      cacheKeys.push(
+        buildHomeroomShrDailyCacheKey_(
+          grade,
+          unit,
+          ymd
+        )
+      );
+    });
+
+    removeScriptCacheKeys_(cacheKeys);
+
+    const result = {
+      success: true,
+      classId: classId,
+      savedCount: targetDates.length,
+      savedDates: targetDates.slice(),
+      savedAtText: formatDateTimeJst_(now),
+      savedModeLabel: modeLabel
+    };
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveHomeroomShrUnsavedBulkNoAbsence total',
+        totalStartedAt,
+        'saved=' + targetDates.length
+      );
+    }
+
+    return result;
+
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function saveHomeroomShrNoAbsence(payload) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
