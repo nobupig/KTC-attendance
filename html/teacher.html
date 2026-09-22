@@ -2091,6 +2091,7 @@
     let teacherUnsavedSummaryData = null;
     let teacherUnsavedDetailsData = null;
     let teacherUnsavedSelectedRows = {};
+    let isTeacherUnsavedBulkSaving = false;
 
     function debugLog(label, value) {
       try {
@@ -2111,6 +2112,7 @@
 
       return (
         value.indexOf("保存中") !== -1 ||
+        value.indexOf("登録中") !== -1 ||
         value.indexOf("読み込み") !== -1 ||
         value.indexOf("確認中") !== -1 ||
         value.indexOf("切り替えています") !== -1 ||
@@ -2894,22 +2896,233 @@ function goHome() {
     }
 
     function updateTeacherUnsavedBulkUi() {
-      const countEl = document.getElementById("teacherUnsavedSelectedCount");
-      const button = document.getElementById("teacherUnsavedBulkNoAbsenceBtn");
-      const count = Object.keys(teacherUnsavedSelectedRows).length;
+      const countEl =
+        document.getElementById(
+          "teacherUnsavedSelectedCount"
+        );
+
+      const button =
+        document.getElementById(
+          "teacherUnsavedBulkNoAbsenceBtn"
+        );
+
+      const count =
+        Object.keys(
+          teacherUnsavedSelectedRows
+        ).length;
 
       if (countEl) {
         countEl.textContent = String(count);
       }
 
       if (button) {
-        button.disabled = count === 0;
-        button.textContent = count > 0
-          ? "選択した" + count + "件を「欠席者なし」で登録"
-          : "選択した授業を「欠席者なし」で登録";
+        button.disabled =
+          isTeacherUnsavedBulkSaving ||
+          count === 0;
+
+        if (isTeacherUnsavedBulkSaving) {
+          button.textContent =
+            "一括登録中...";
+        } else {
+          button.textContent =
+            count > 0
+              ? "選択した" +
+                count +
+                "件を「欠席者なし」で登録"
+              : "選択した授業を「欠席者なし」で登録";
+        }
       }
     }
 
+    function setTeacherUnsavedBulkSavingState(
+      nextSaving
+    ) {
+      isTeacherUnsavedBulkSaving =
+        !!nextSaving;
+
+      const detailsContent =
+        document.getElementById(
+          "teacherUnsavedDetailsContent"
+        );
+
+      if (detailsContent) {
+        detailsContent
+          .querySelectorAll(
+            ".teacher-unsaved-select-checkbox"
+          )
+          .forEach(function(checkbox) {
+            checkbox.disabled =
+              isTeacherUnsavedBulkSaving;
+          });
+
+        detailsContent
+          .querySelectorAll(
+            ".teacher-unsaved-open-btn"
+          )
+          .forEach(function(button) {
+            button.disabled =
+              isTeacherUnsavedBulkSaving;
+          });
+      }
+
+      updateTeacherUnsavedBulkUi();
+    }
+
+    function getTeacherUnsavedSelectedItems() {
+      return Object.keys(
+        teacherUnsavedSelectedRows
+      )
+        .map(function(key) {
+          return teacherUnsavedSelectedRows[key];
+        })
+        .filter(function(item) {
+          return !!item;
+        });
+    }
+
+    function handleTeacherUnsavedBulkNoAbsenceSave() {
+      if (isTeacherUnsavedBulkSaving) {
+        return;
+      }
+
+      const selectedItems =
+        getTeacherUnsavedSelectedItems();
+
+      const count =
+        selectedItems.length;
+
+      if (count === 0) {
+        return;
+      }
+
+      const ok = window.confirm(
+        "選択した" +
+        count +
+        "件の授業を「欠席者なし（全員出席）」として登録します。\n\n" +
+        "欠席・遅刻・公欠がある授業が含まれていないことを確認してください。\n\n" +
+        "登録後も「名簿を開く」から修正できます。\n\n" +
+        "よろしいですか？"
+      );
+
+      if (!ok) {
+        return;
+      }
+
+      const payload = {
+        items: selectedItems.map(function(item) {
+          return {
+            classId:
+              String(item.classId || ""),
+            date:
+              String(item.date || ""),
+            period:
+              String(item.period || ""),
+            sessionNumber:
+              item.sessionNumber || ""
+          };
+        })
+      };
+
+      setTeacherUnsavedBulkSavingState(true);
+
+      showMessage(
+        count +
+          "件を「欠席者なし」で一括登録中です...",
+        "warn"
+      );
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          setTeacherUnsavedBulkSavingState(false);
+
+          if (
+            !result ||
+            result.success !== true
+          ) {
+            showMessage(
+              "一括登録結果を確認できませんでした。",
+              "error"
+            );
+            return;
+          }
+
+          const savedItems =
+            Array.isArray(result.items)
+              ? result.items
+              : [];
+
+          const savedCount =
+            Number(result.savedCount || 0);
+
+          if (
+            savedCount <= 0 ||
+            savedItems.length <= 0
+          ) {
+            showMessage(
+              "保存対象を登録できませんでした。",
+              "error"
+            );
+            return;
+          }
+
+          savedItems.forEach(function(item) {
+            const key =
+              String(
+                item.targetSessionKey ||
+                [
+                  item.classId,
+                  item.date,
+                  item.period
+                ].join("__")
+              );
+
+            if (key) {
+              savedSessionKeys[key] = true;
+              attendanceMapCache[key] = {};
+            }
+          });
+
+          const patchedCount =
+            patchTeacherUnsavedLocalAfterBulkSave(
+              savedItems
+            );
+
+          renderClassList();
+
+          showMessage(
+            savedCount +
+              "件を「欠席者なし（全員出席）」で登録しました。",
+            "success"
+          );
+
+          console.log(
+            "saveTeacherUnsavedBulkNoAbsence result",
+            {
+              result: result,
+              patchedCount: patchedCount
+            }
+          );
+        })
+        .withFailureHandler(function(error) {
+          setTeacherUnsavedBulkSavingState(false);
+
+          const message =
+            error && error.message
+              ? String(error.message)
+              : "";
+
+          showMessage(
+            "一括登録に失敗しました。" +
+              (message ? " " + message : ""),
+            "error"
+          );
+
+          console.error(error);
+        })
+        .saveTeacherUnsavedBulkNoAbsence(
+          payload
+        );
+    }
     function bindTeacherUnsavedBulkUi(items) {
       const detailsContent = document.getElementById("teacherUnsavedDetailsContent");
       if (!detailsContent) return;
@@ -2962,19 +3175,15 @@ function goHome() {
         });
 
       const bulkButton =
-        document.getElementById("teacherUnsavedBulkNoAbsenceBtn");
+        document.getElementById(
+          "teacherUnsavedBulkNoAbsenceBtn"
+        );
 
       if (bulkButton) {
-        bulkButton.addEventListener("click", function() {
-          const count = Object.keys(teacherUnsavedSelectedRows).length;
-
-          if (count === 0) return;
-
-          showMessage(
-            "一括登録UIの確認段階です。まだ保存処理は実行していません。",
-            "warn"
-          );
-        });
+        bulkButton.addEventListener(
+          "click",
+          handleTeacherUnsavedBulkNoAbsenceSave
+        );
       }
 
       updateTeacherUnsavedBulkUi();
@@ -3006,6 +3215,24 @@ function goHome() {
       const items = Array.isArray(data && data.items) ? data.items : [];
 
       if (!items.length) {
+        const remainingCount =
+          data && typeof data.totalCount === "number"
+            ? Math.max(0, data.totalCount)
+            : 0;
+
+        if (remainingCount > 0) {
+          detailsContent.innerHTML =
+            '<div class="teacher-unsaved-state loading">' +
+              '<span class="teacher-unsaved-state-label">未保存授業が残っています</span>' +
+              '現在表示していた授業の登録が完了しました。' +
+              '未保存授業は残り ' +
+              escapeHtml(String(remainingCount)) +
+              ' 件あります。未保存情報の更新後に再度確認してください。' +
+            '</div>';
+
+          return;
+        }
+
         detailsContent.innerHTML =
           '<div class="teacher-unsaved-state empty">' +
             '<span class="teacher-unsaved-state-label">問題なし</span>' +
@@ -3250,6 +3477,119 @@ function isTeacherUnsavedTargetDate(dateStr) {
   return ymd >= startYmd && ymd < todayYmd;
 }
 
+function patchTeacherUnsavedLocalAfterBulkSave(
+  savedItems
+) {
+  const sourceItems =
+    Array.isArray(savedItems)
+      ? savedItems
+      : [];
+
+  const savedKeySet = {};
+
+  sourceItems.forEach(function(item) {
+    if (!item) return;
+
+    const key =
+      String(
+        item.targetSessionKey ||
+        [
+          item.classId,
+          item.date,
+          item.period
+        ].join("__")
+      ).trim();
+
+    if (key) {
+      savedKeySet[key] = true;
+    }
+  });
+
+  const savedKeys =
+    Object.keys(savedKeySet);
+
+  const savedCount =
+    savedKeys.length;
+
+  if (savedCount === 0) {
+    return 0;
+  }
+
+  if (
+    teacherUnsavedDetailsData &&
+    Array.isArray(
+      teacherUnsavedDetailsData.items
+    )
+  ) {
+    teacherUnsavedDetailsData.items =
+      teacherUnsavedDetailsData.items.filter(
+        function(item) {
+          return !savedKeySet[
+            getTeacherUnsavedSelectionKey(item)
+          ];
+        }
+      );
+
+    if (
+      typeof teacherUnsavedDetailsData.totalCount ===
+      "number"
+    ) {
+      teacherUnsavedDetailsData.totalCount =
+        Math.max(
+          0,
+          teacherUnsavedDetailsData.totalCount -
+            savedCount
+        );
+
+      teacherUnsavedDetailsData.hasMore =
+        teacherUnsavedDetailsData.items.length <
+        teacherUnsavedDetailsData.totalCount;
+    }
+  }
+
+  if (
+    teacherUnsavedSummaryData &&
+    typeof teacherUnsavedSummaryData.count ===
+      "number"
+  ) {
+    [
+      "count",
+      "unsavedCount",
+      "detailCount"
+    ].forEach(function(key) {
+      if (
+        typeof teacherUnsavedSummaryData[key] ===
+        "number"
+      ) {
+        teacherUnsavedSummaryData[key] =
+          Math.max(
+            0,
+            teacherUnsavedSummaryData[key] -
+              savedCount
+          );
+      }
+    });
+  }
+
+  resetTeacherUnsavedSelection();
+
+  if (
+    teacherUnsavedDetailsOpen &&
+    teacherUnsavedDetailsData
+  ) {
+    renderTeacherUnsavedDetails(
+      teacherUnsavedDetailsData
+    );
+  }
+
+  if (teacherUnsavedSummaryData) {
+    renderTeacherUnsavedSummary(
+      teacherUnsavedSummaryData
+    );
+  }
+
+  return savedCount;
+}
 function patchTeacherUnsavedLocalAfterSave(classId, dateStr, period, forceDecrement) {
   const targetClassId = String(classId || "");
   const targetDate = String(dateStr || "");
