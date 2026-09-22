@@ -2092,6 +2092,7 @@
     let teacherUnsavedDetailsData = null;
     let teacherUnsavedSelectedRows = {};
     let isTeacherUnsavedBulkSaving = false;
+    let isTeacherUnsavedDetailsLoadingMore = false;
 
     function debugLog(label, value) {
       try {
@@ -3347,14 +3348,48 @@ function goHome() {
           '</div>' +
         '</div>';
 
-      const moreNoteHtml = data.hasMore
-        ? '<div class="teacher-unsaved-list-note">' +
-            '現在 ' + items.length +
-            ' 件を表示しています（全 ' +
-            escapeHtml(String(data.totalCount || "")) +
-            ' 件）。残りは今後のページング対応で表示します。' +
-          '</div>'
-        : '';
+      const totalCount =
+        typeof data.totalCount === "number"
+          ? data.totalCount
+          : items.length;
+
+      const remainingCount =
+        Math.max(
+          0,
+          totalCount - items.length
+        );
+
+      const nextCount =
+        Math.min(
+          TEACHER_UNSAVED_DETAILS_LIMIT,
+          remainingCount
+        );
+
+      const moreNoteHtml =
+        data.hasMore && remainingCount > 0
+          ? '<div class="teacher-unsaved-list-note">' +
+              '現在 ' +
+              escapeHtml(String(items.length)) +
+              ' / ' +
+              escapeHtml(String(totalCount)) +
+              ' 件を表示しています。 ' +
+              '<button id="teacherUnsavedLoadMoreBtn"' +
+                ' type="button"' +
+                ' class="teacher-unsaved-open-btn"' +
+                (isTeacherUnsavedDetailsLoadingMore
+                  ? ' disabled'
+                  : '') +
+                '>' +
+                (
+                  isTeacherUnsavedDetailsLoadingMore
+                    ? '読み込み中...'
+                    : 'さらに' +
+                      escapeHtml(String(nextCount)) +
+                      '件読み込む'
+                ) +
+              '</button>' +
+            '</div>'
+          : '';
 
       detailsContent.innerHTML =
         bulkBarHtml +
@@ -3362,6 +3397,18 @@ function goHome() {
         moreNoteHtml;
 
       bindTeacherUnsavedBulkUi(items);
+
+      const loadMoreButton =
+        document.getElementById(
+          "teacherUnsavedLoadMoreBtn"
+        );
+
+      if (loadMoreButton) {
+        loadMoreButton.addEventListener(
+          "click",
+          loadTeacherUnsavedDetailsMore
+        );
+      }
 
       detailsContent
         .querySelectorAll(".teacher-unsaved-open-btn")
@@ -3453,6 +3500,144 @@ function goHome() {
         .getTeacherUnsavedDetailsFast({
           limit: TEACHER_UNSAVED_DETAILS_LIMIT,
           offset: 0
+        });
+    }
+
+    function loadTeacherUnsavedDetailsMore() {
+      if (
+        isTeacherUnsavedDetailsLoadingMore ||
+        isTeacherUnsavedBulkSaving
+      ) {
+        return;
+      }
+
+      const current =
+        teacherUnsavedDetailsData;
+
+      if (
+        !current ||
+        current.ok !== true ||
+        current.status !== "ready" ||
+        current.hasMore !== true
+      ) {
+        return;
+      }
+
+      const currentItems =
+        Array.isArray(current.items)
+          ? current.items
+          : [];
+
+      const nextOffset =
+        currentItems.length;
+
+      const expectedSnapshotId =
+        String(current.snapshotId || "");
+
+      const requestKey =
+        "more__" +
+        nextOffset +
+        "__" +
+        String(Date.now());
+
+      teacherUnsavedDetailsRequestKey =
+        requestKey;
+
+      isTeacherUnsavedDetailsLoadingMore =
+        true;
+
+      renderTeacherUnsavedDetails(current);
+
+      google.script.run
+        .withSuccessHandler(function(page) {
+          if (
+            teacherUnsavedDetailsRequestKey !==
+            requestKey
+          ) {
+            return;
+          }
+
+          isTeacherUnsavedDetailsLoadingMore =
+            false;
+
+          if (
+            !page ||
+            page.ok !== true ||
+            page.status !== "ready"
+          ) {
+            renderTeacherUnsavedDetails(current);
+
+            showMessage(
+              "追加の未保存授業を読み込めませんでした。",
+              "error"
+            );
+
+            return;
+          }
+
+          if (
+            expectedSnapshotId &&
+            String(page.snapshotId || "") !==
+              expectedSnapshotId
+          ) {
+            renderTeacherUnsavedDetails(current);
+
+            showMessage(
+              "未保存情報が更新されたため、一覧を再確認してください。",
+              "warn"
+            );
+
+            return;
+          }
+
+          const pageItems =
+            Array.isArray(page.items)
+              ? page.items
+              : [];
+
+          current.items =
+            currentItems.concat(pageItems);
+
+          if (
+            typeof page.totalCount ===
+            "number"
+          ) {
+            current.totalCount =
+              page.totalCount;
+          }
+
+          current.hasMore =
+            page.hasMore === true;
+
+          renderTeacherUnsavedDetails(current);
+        })
+
+        .withFailureHandler(function(error) {
+          console.error(error);
+
+          if (
+            teacherUnsavedDetailsRequestKey !==
+            requestKey
+          ) {
+            return;
+          }
+
+          isTeacherUnsavedDetailsLoadingMore =
+            false;
+
+          renderTeacherUnsavedDetails(current);
+
+          showMessage(
+            "追加の未保存授業を読み込めませんでした。",
+            "error"
+          );
+        })
+
+        .getTeacherUnsavedDetailsFast({
+          limit:
+            TEACHER_UNSAVED_DETAILS_LIMIT,
+          offset:
+            nextOffset
         });
     }
 
