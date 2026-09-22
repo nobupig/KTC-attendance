@@ -4,3 +4,4 @@ src/config.*.local.js
 .vscode/**
 .gitignore
 .clasp.json
+test/**
