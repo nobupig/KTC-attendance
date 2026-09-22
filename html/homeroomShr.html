@@ -80,20 +80,69 @@
       }
     }
 
+    /* CENTER TOAST MESSAGE UI - aligned with teacher screen */
     .message {
-      display: none;
-      margin-bottom: 16px;
-      padding: 12px 14px;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      z-index: 9999;
+      width: min(520px, calc(100vw - 32px));
+      min-height: 0;
+      margin: 0;
+      padding: 14px 18px;
+      border: 1px solid transparent;
       border-radius: 12px;
-      font-size: 14px;
-      line-height: 1.7;
       background: #eef3ff;
       color: #1f3c88;
+      box-shadow:
+        0 16px 40px rgba(22, 35, 60, 0.20),
+        0 4px 12px rgba(22, 35, 60, 0.12);
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.55;
+      text-align: center;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translate(-50%, -46%) scale(0.98);
+      transition:
+        opacity 0.16s ease,
+        transform 0.16s ease,
+        visibility 0.16s ease;
     }
 
-    .message.show { display: block; }
-    .message.error { background: var(--danger-soft); color: var(--danger); }
-    .message.success { background: var(--ok-soft); color: var(--ok); }
+    .message.show {
+      opacity: 1;
+      visibility: visible;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .message.success {
+      border-color: #a9d9b7;
+      background: #e8f7ec;
+      color: #1d6b37;
+    }
+
+    .message.error {
+      border-color: #efb9b9;
+      background: #fdecec;
+      color: #a12622;
+    }
+
+    .message.warn {
+      border-color: #ecd39a;
+      background: #fff4db;
+      color: #8a5a00;
+    }
+
+    @media (max-width: 768px) {
+      .message {
+        top: 46%;
+        width: calc(100vw - 24px);
+        padding: 13px 14px;
+        font-size: 13px;
+      }
+    }
 
         .unsaved-summary-box {
       margin-bottom: 16px;
@@ -547,6 +596,66 @@
       opacity: 0.92;
     }
 
+    .unsaved-open-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .unsaved-detail-main {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .unsaved-select-checkbox {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      flex: 0 0 auto;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+
+    .unsaved-select-checkbox:disabled {
+      cursor: not-allowed;
+    }
+
+    .unsaved-bulk-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    .unsaved-bulk-count {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .unsaved-bulk-btn {
+      appearance: none;
+      border: none;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .unsaved-bulk-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
     .unsaved-empty-note {
       font-size: 13px;
       color: var(--sub);
@@ -568,8 +677,18 @@
         align-items: stretch;
       }
 
+      .unsaved-bulk-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .unsaved-bulk-btn,
       .unsaved-open-btn {
-        align-self: flex-start;
+        width: 100%;
+      }
+
+      .unsaved-open-btn {
+        align-self: stretch;
       }
     }
 
@@ -684,6 +803,10 @@
     let currentShrHasSavedSession = false;
     let currentShrLastSavedInfo = null;
     let isShrStatusLoading = false;
+    let unsavedShrSummaryData = null;
+    let unsavedShrDetailsData = null;
+    let unsavedShrSelectedDates = {};
+    let isUnsavedShrBulkSaving = false;
 
     function escapeHtml(str) {
       if (str == null) return "";
@@ -701,19 +824,157 @@
         .replace(/'/g, "\\'");
     }
 
+    let messageHideTimer = null;
+
+    function isPersistentProgressMessage(text, type) {
+      if (type !== "warn") return false;
+
+      const value = String(text || "");
+
+      return (
+        value.indexOf("保存中") !== -1 ||
+        value.indexOf("登録中") !== -1 ||
+        value.indexOf("読み込み") !== -1 ||
+        value.indexOf("確認中") !== -1 ||
+        value.indexOf("切り替えています") !== -1 ||
+        value.indexOf("解除しています") !== -1 ||
+        value.indexOf("戻っています") !== -1
+      );
+    }
+
+    function getMessageAutoHideMs(text, type) {
+      if (isPersistentProgressMessage(text, type)) {
+        return 0;
+      }
+
+      if (type === "success") {
+        return 3000;
+      }
+
+      if (type === "error") {
+        return 6000;
+      }
+
+      return 4000;
+    }
+
     function showMessage(text, type) {
       const el = document.getElementById("messageArea");
-      el.textContent = text || "";
+      if (!el) return;
+
+      if (messageHideTimer) {
+        window.clearTimeout(messageHideTimer);
+        messageHideTimer = null;
+      }
+
+      el.textContent = String(text || "");
       el.className = "message show";
-      if (type) el.classList.add(type);
+
+      if (type) {
+        el.classList.add(type);
+      }
+
+      el.setAttribute(
+        "role",
+        type === "error" ? "alert" : "status"
+      );
+
+      const autoHideMs = getMessageAutoHideMs(text, type);
+
+      if (autoHideMs > 0) {
+        messageHideTimer = window.setTimeout(function() {
+          clearMessage();
+        }, autoHideMs);
+      }
     }
 
     function clearMessage() {
       const el = document.getElementById("messageArea");
+
+      if (messageHideTimer) {
+        window.clearTimeout(messageHideTimer);
+        messageHideTimer = null;
+      }
+
+      if (!el) return;
+
       el.textContent = "";
       el.className = "message";
     }
 
+    function getSelectedUnsavedShrDates() {
+      return Object.keys(unsavedShrSelectedDates)
+        .filter(function(dateStr) {
+          return !!unsavedShrSelectedDates[dateStr];
+        })
+        .sort();
+    }
+
+    function resetUnsavedShrBulkSelection() {
+      unsavedShrSelectedDates = {};
+      updateUnsavedShrBulkControls();
+    }
+
+    function updateUnsavedShrBulkControls() {
+      const selectedDates = getSelectedUnsavedShrDates();
+      const countEl = document.getElementById("unsavedShrSelectedCount");
+      const saveBtn = document.getElementById("unsavedShrBulkSaveBtn");
+
+      if (countEl) {
+        countEl.textContent = selectedDates.length + "件選択";
+      }
+
+      if (saveBtn) {
+        saveBtn.textContent = isUnsavedShrBulkSaving
+          ? "登録中..."
+          : "選択したSHRを欠席者なしで登録";
+
+        saveBtn.disabled =
+          selectedDates.length === 0 ||
+          isUnsavedShrBulkSaving ||
+          isLoading ||
+          isSaving;
+      }
+    }
+
+    function setUnsavedShrBulkSaving(flag) {
+      isUnsavedShrBulkSaving = !!flag;
+
+      const disabled =
+        isUnsavedShrBulkSaving ||
+        isLoading ||
+        isSaving;
+
+      document.getElementById("reloadBtn").disabled = disabled;
+      document.getElementById("saveBtnTop").disabled = disabled;
+      document.getElementById("saveBtnBottom").disabled = disabled;
+      document.getElementById("dateInput").disabled = disabled;
+
+      updateUnsavedShrBulkControls();
+
+      if (unsavedShrDetailsData) {
+        renderUnsavedShrDetails(unsavedShrDetailsData);
+      }
+
+      if (flag) {
+        showMessage("一括登録中...", "warn");
+      }
+    }
+
+    function toggleUnsavedShrDateSelection(dateStr, checked) {
+      if (isUnsavedShrBulkSaving) return;
+
+      const key = String(dateStr || "").trim();
+      if (!key) return;
+
+      if (checked) {
+        unsavedShrSelectedDates[key] = true;
+      } else {
+        delete unsavedShrSelectedDates[key];
+      }
+
+      updateUnsavedShrBulkControls();
+    }
     function setBusy(flag) {
       isLoading = flag;
       document.getElementById("reloadBtn").disabled = flag || isSaving;
@@ -729,6 +990,10 @@
       document.getElementById("saveBtnBottom").disabled = flag || isLoading;
       document.getElementById("dateInput").disabled = flag || isLoading;
       document.getElementById("saveState").textContent = flag ? "保存中..." : "";
+
+      if (flag) {
+        showMessage("保存中...", "warn");
+      }
     }
 
     function renderHomeroomLastSavedInfo(info) {
@@ -796,25 +1061,52 @@
       const detailsContent = document.getElementById("unsavedShrDetailsContent");
       if (!detailsContent) return;
 
+      unsavedShrDetailsData = data || null;
+
       const items = Array.isArray(data && data.items) ? data.items : [];
 
       if (!items.length) {
         detailsContent.innerHTML = '<div class="unsaved-empty-note">未保存日はありません。</div>';
+        resetUnsavedShrBulkSelection();
         return;
       }
 
-      detailsContent.innerHTML = items.map(function(item) {
-        const safeDate = escapeHtml(item.date || "");
+      const disabledAttr = isUnsavedShrBulkSaving ? ' disabled' : '';
+
+      const rowsHtml = items.map(function(item) {
+        const dateValue = String(item.date || "").trim();
+        const safeDate = escapeHtml(dateValue);
         const safeWeekday = escapeHtml(item.weekday || "");
+        const checked = unsavedShrSelectedDates[dateValue] ? ' checked' : '';
+
         return '' +
           '<div class="unsaved-detail-item">' +
-            '<div>' +
-              '<div class="unsaved-detail-date">' + safeDate + '（' + safeWeekday + '）</div>' +
-              '<div class="unsaved-detail-sub">この日のSHR記録を開けます</div>' +
+            '<div class="unsaved-detail-main">' +
+              '<input class="unsaved-select-checkbox" type="checkbox"' +
+                checked +
+                disabledAttr +
+                ' aria-label="' + safeDate + 'を一括登録対象にする"' +
+                ' onchange="toggleUnsavedShrDateSelection(\'' + escapeJs(dateValue) + '\', this.checked)">' +
+              '<div>' +
+                '<div class="unsaved-detail-date">' + safeDate + '（' + safeWeekday + '）</div>' +
+                '<div class="unsaved-detail-sub">欠席者なしならチェックして一括登録できます</div>' +
+              '</div>' +
             '</div>' +
-            '<button class="unsaved-open-btn" type="button" onclick="openUnsavedShrDate(\'' + escapeJs(item.date || "") + '\')">この日を開く</button>' +
+            '<button class="unsaved-open-btn" type="button"' +
+              disabledAttr +
+              ' onclick="openUnsavedShrDate(\'' + escapeJs(dateValue) + '\')">この日を開く</button>' +
           '</div>';
       }).join("");
+
+      detailsContent.innerHTML = '' +
+        '<div class="unsaved-bulk-toolbar">' +
+          '<div id="unsavedShrSelectedCount" class="unsaved-bulk-count">0件選択</div>' +
+          '<button id="unsavedShrBulkSaveBtn" class="unsaved-bulk-btn" type="button"' +
+            ' onclick="saveSelectedUnsavedShrNoAbsence()">選択したSHRを欠席者なしで登録</button>' +
+        '</div>' +
+        rowsHtml;
+
+      updateUnsavedShrBulkControls();
     }
 
     function loadUnsavedShrSummary() {
@@ -824,16 +1116,23 @@
       unsavedSummaryRequestKey = requestKey;
       unsavedShrDetailsRequestKey = requestKey;
       unsavedShrDetailsLoadedKey = "";
+      unsavedShrSummaryData = null;
+      unsavedShrDetailsData = null;
+      resetUnsavedShrBulkSelection();
       renderUnsavedShrSummaryLoading();
 
       google.script.run
         .withSuccessHandler(function(data) {
           if (unsavedSummaryRequestKey !== requestKey) return;
-          renderUnsavedShrSummary(data || null);
+          unsavedShrSummaryData = data || null;
+          renderUnsavedShrSummary(unsavedShrSummaryData);
         })
         .withFailureHandler(function(error) {
           console.error(error);
           if (unsavedSummaryRequestKey !== requestKey) return;
+          unsavedShrSummaryData = null;
+          unsavedShrDetailsData = null;
+          resetUnsavedShrBulkSelection();
           renderUnsavedShrSummaryError();
         })
         .getHomeroomShrUnsavedSummary(selectedGrade, selectedUnit);
@@ -856,11 +1155,14 @@
         .withSuccessHandler(function(data) {
           if (unsavedShrDetailsRequestKey !== requestKey) return;
           unsavedShrDetailsLoadedKey = currentLoadedKey;
-          renderUnsavedShrDetails(data || null);
+          unsavedShrDetailsData = data || null;
+          renderUnsavedShrDetails(unsavedShrDetailsData);
         })
         .withFailureHandler(function(error) {
           console.error(error);
           if (unsavedShrDetailsRequestKey !== requestKey) return;
+          unsavedShrDetailsData = null;
+          resetUnsavedShrBulkSelection();
           renderUnsavedShrDetailsError();
         })
         .getHomeroomShrUnsavedDetails(selectedGrade, selectedUnit);
@@ -870,7 +1172,7 @@
       const detailsBox = document.getElementById("unsavedShrDetailsBox");
       const toggleBtn = document.getElementById("unsavedShrToggleBtn");
 
-      if (!detailsBox || !toggleBtn || toggleBtn.hidden) return;
+      if (!detailsBox || !toggleBtn || toggleBtn.hidden || isUnsavedShrBulkSaving) return;
 
       if (unsavedShrDetailsOpen) {
         closeUnsavedShrDetails();
@@ -882,12 +1184,134 @@
     }
 
     function openUnsavedShrDate(dateStr) {
-      if (!dateStr) return;
+      if (!dateStr || isUnsavedShrBulkSaving) return;
       document.getElementById("dateInput").value = dateStr;
       currentDate = dateStr;
       loadDailyData();
     }
 
+    function saveSelectedUnsavedShrNoAbsence() {
+      if (
+        isLoading ||
+        isSaving ||
+        isUnsavedShrBulkSaving ||
+        !selectedGrade ||
+        !selectedUnit
+      ) {
+        return;
+      }
+
+      const selectedDates = getSelectedUnsavedShrDates();
+
+      if (!selectedDates.length) {
+        showMessage("一括登録するSHRを選択してください。", "error");
+        return;
+      }
+
+      const confirmed = window.confirm(
+        "選択した " +
+        selectedDates.length +
+        " 件のSHRを「欠席者なし」として一括登録します。\n\n" +
+        "欠席・遅刻・早退がない日だけ選択してください。\n\n" +
+        "よろしいですか？"
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      clearMessage();
+      setUnsavedShrBulkSaving(true);
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          const savedDates =
+            result && Array.isArray(result.savedDates)
+              ? result.savedDates.map(function(value) {
+                  return String(value || "").trim();
+                }).filter(Boolean)
+              : [];
+
+          setUnsavedShrBulkSaving(false);
+
+          if (!savedDates.length) {
+            showMessage(
+              "一括登録は完了しましたが、保存結果を確認できませんでした。未保存一覧を再読み込みしてください。",
+              "error"
+            );
+            loadUnsavedShrSummary();
+            return;
+          }
+
+          const savedDateSet = {};
+          savedDates.forEach(function(dateStr) {
+            savedDateSet[dateStr] = true;
+            delete unsavedShrSelectedDates[dateStr];
+          });
+
+          if (
+            unsavedShrDetailsData &&
+            Array.isArray(unsavedShrDetailsData.items)
+          ) {
+            unsavedShrDetailsData.items =
+              unsavedShrDetailsData.items.filter(function(item) {
+                return !savedDateSet[String(item.date || "").trim()];
+              });
+          }
+
+          if (
+            unsavedShrSummaryData &&
+            typeof unsavedShrSummaryData.count === "number"
+          ) {
+            unsavedShrSummaryData.count = Math.max(
+              0,
+              unsavedShrSummaryData.count - savedDates.length
+            );
+          }
+
+          renderUnsavedShrSummary(unsavedShrSummaryData);
+
+          if (unsavedShrDetailsOpen && unsavedShrDetailsData) {
+            renderUnsavedShrDetails(unsavedShrDetailsData);
+          }
+
+          if (savedDateSet[String(currentDate || "").trim()]) {
+            currentShrHasSavedSession = true;
+            currentShrLastSavedInfo = {
+              teacherEmail: "",
+              savedAtText: result && result.savedAtText ? result.savedAtText : "",
+              actionType: "homeroom-shr",
+              targetSessionKey: "",
+              savedModeLabel:
+                result && result.savedModeLabel
+                  ? result.savedModeLabel
+                  : "担任SHR（欠席者なし）",
+              savedByCurrentUser: true
+            };
+            renderShrActionSelection(currentShrLastSavedInfo);
+          }
+
+          showMessage(
+            savedDates.length + "件のSHRを欠席者なしとして一括登録しました。",
+            "success"
+          );
+        })
+        .withFailureHandler(function(error) {
+          console.error(error);
+          setUnsavedShrBulkSaving(false);
+          showMessage(
+            "SHR一括登録に失敗しました。 " +
+              (error && error.message ? error.message : ""),
+            "error"
+          );
+          loadUnsavedShrSummary();
+        })
+        .saveHomeroomShrUnsavedBulkNoAbsence({
+          grade: selectedGrade,
+          unit: selectedUnit,
+          dates: selectedDates
+        });
+    }
      function renderUnsavedShrSummaryLoading() {
   const box = document.getElementById("unsavedShrSummaryBox");
   const title = document.getElementById("unsavedShrSummaryTitle");
@@ -933,6 +1357,8 @@ function renderUnsavedShrSummary(data) {
 
   if (!box || !title || !sub || !toggleBtn || !detailsContent) return;
 
+  unsavedShrSummaryData = data || null;
+
   const classLabel = data && data.classInfo && data.classInfo.classLabel
     ? data.classInfo.classLabel
     : "担任クラス";
@@ -955,6 +1381,8 @@ function renderUnsavedShrSummary(data) {
   sub.textContent = "対象期間: " + rangeText;
   toggleBtn.hidden = true;
   detailsContent.innerHTML = "";
+  unsavedShrDetailsData = null;
+  resetUnsavedShrBulkSelection();
   closeUnsavedShrDetails();
   unsavedShrDetailsLoadedKey = "";
 }
@@ -975,7 +1403,7 @@ function renderUnsavedShrSummary(data) {
     }
 
     function selectHomeroomClass(grade, unit) {
-  if (isLoading || isSaving) return;
+  if (isLoading || isSaving || isUnsavedShrBulkSaving) return;
   selectedGrade = String(grade || "");
   selectedUnit = String(unit || "");
   currentShrHasSavedSession = false;
@@ -1214,7 +1642,7 @@ function renderSummaryCounts() {
     }
 
     function saveAttendance() {
-      if (isLoading || isSaving) return;
+      if (isLoading || isSaving || isUnsavedShrBulkSaving) return;
       if (!selectedGrade || !selectedUnit) return;
 
       const dateValue = document.getElementById("dateInput").value;
@@ -1235,8 +1663,8 @@ function renderSummaryCounts() {
         })
       };
 
-      setSaving(true);
       clearMessage();
+      setSaving(true);
 
       google.script.run
 .withSuccessHandler(function(result) {
@@ -1259,7 +1687,7 @@ function renderSummaryCounts() {
     }
 
 function saveShrNoAbsence() {
-  if (isLoading || isSaving) return;
+  if (isLoading || isSaving || isUnsavedShrBulkSaving) return;
 
   const dateValue = document.getElementById("dateInput").value;
   if (!selectedGrade || !selectedUnit || !dateValue) {
@@ -1271,8 +1699,8 @@ function saveShrNoAbsence() {
     return;
   }
 
-  setSaving(true);
   clearMessage();
+  setSaving(true);
 
   google.script.run
     .withSuccessHandler(function(result) {
@@ -1299,7 +1727,7 @@ function saveShrNoAbsence() {
 }
 
 function goShrHome() {
-  showMessage("トップへ戻っています...", false);
+  showMessage("トップへ戻っています...", "warn");
 
   google.script.run
     .withSuccessHandler(function(baseUrl) {
