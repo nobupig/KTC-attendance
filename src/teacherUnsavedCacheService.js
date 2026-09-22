@@ -1466,6 +1466,7 @@ function invalidateAllTeacherUnsavedFastSnapshotsUnderLock_(message) {
 function invalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
   sessions
 ) {
+
   const lock = LockService.getScriptLock();
 
   if (!lock.hasLock()) {
@@ -1474,7 +1475,10 @@ function invalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
     );
   }
 
-  if (!Array.isArray(sessions) || sessions.length === 0) {
+  if (
+    !Array.isArray(sessions) ||
+    sessions.length === 0
+  ) {
     return {
       ok: true,
       matchedDetailCount: 0,
@@ -1484,24 +1488,36 @@ function invalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
   }
 
   const dateContext =
-    getTeacherUnsavedCacheDateContext_(new Date());
+    getTeacherUnsavedCacheDateContext_(
+      new Date()
+    );
 
-  const todayYmd = dateContext.cacheDate;
+  const todayYmd =
+    dateContext.cacheDate;
+
   const targetKeySet = {};
 
   sessions.forEach(function(session) {
     const classId =
-      normalizeString_(session && session.classId);
+      normalizeString_(
+        session && session.classId
+      );
 
     const date =
-      formatDateToYmd(session && session.date);
+      formatDateToYmd(
+        session && session.date
+      );
 
     const period =
       normalizeString_(
         session && session.period
       );
 
-    if (!classId || !date || !period) {
+    if (
+      !classId ||
+      !date ||
+      !period
+    ) {
       return;
     }
 
@@ -1513,11 +1529,16 @@ function invalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
     }
 
     targetKeySet[
-      [classId, date, period].join("__")
+      [
+        classId,
+        date,
+        period
+      ].join("__")
     ] = true;
   });
 
-  const targetKeys = Object.keys(targetKeySet);
+  const targetKeys =
+    Object.keys(targetKeySet);
 
   if (targetKeys.length === 0) {
     return {
@@ -1531,16 +1552,22 @@ function invalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
   const validation =
     validateTeacherUnsavedCacheSheetsForSave_();
 
+
   if (!validation.ok) {
     throw new Error(
-      buildTeacherUnsavedCacheValidationError_(validation)
+      buildTeacherUnsavedCacheValidationError_(
+        validation
+      )
     );
   }
 
-  const detailSheet = validation.detail.sheet;
+  const detailSheet =
+    validation.detail.sheet;
 
   const detailRowCount =
-    Number(validation.saveDetailDataRowCount);
+    Number(
+      validation.saveDetailDataRowCount
+    );
 
   if (
     !isFinite(detailRowCount) ||
@@ -1560,74 +1587,137 @@ function invalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
     };
   }
 
-  const detailValues =
+  const saveKeyColumn =
+    TEACHER_UNSAVED_DETAIL_CACHE_HEADERS_
+      .indexOf("saveKey") + 1;
+
+  if (saveKeyColumn <= 0) {
+    throw new Error(
+      "FastキャッシュdetailにsaveKey列がありません。"
+    );
+  }
+
+  /*
+   * 16列全読込をやめて、
+   * まず saveKey 1列だけで対象行を決める。
+   */
+  const saveKeyValues =
+    detailSheet
+      .getRange(
+        2,
+        saveKeyColumn,
+        detailRowCount,
+        1
+      )
+      .getDisplayValues();
+
+
+  const matchedDetailIndexes = [];
+
+  saveKeyValues.forEach(
+    function(row, index) {
+      const saveKey =
+        String(row[0] || "").trim();
+
+      if (targetKeySet[saveKey]) {
+        matchedDetailIndexes.push(index);
+      }
+    }
+  );
+
+
+  if (
+    matchedDetailIndexes.length === 0
+  ) {
+    return {
+      ok: true,
+      matchedDetailCount: 0,
+      invalidatedTeacherCount: 0,
+      targetKeys: targetKeys
+    };
+  }
+
+  /*
+   * 対象教員の特定に必要なのは
+   * snapshotId/cacheDate/teacherId の3列だけ。
+   */
+  const detailIdentityValues =
     detailSheet
       .getRange(
         2,
         1,
         detailRowCount,
-        TEACHER_UNSAVED_DETAIL_CACHE_HEADERS_.length
+        3
       )
-      .getValues();
+      .getDisplayValues();
+
 
   const affectedSnapshotByTeacherId = {};
-  let matchedDetailCount = 0;
 
-  detailValues.forEach(function(values) {
-    const detail =
-      buildTeacherUnsavedDetailObject_(values);
+  matchedDetailIndexes.forEach(
+    function(index) {
+      const values =
+        detailIdentityValues[index];
 
-    if (
-      detail.cacheDate !== todayYmd ||
-      !detail.teacherId ||
-      !detail.snapshotId ||
-      !targetKeySet[detail.saveKey]
-    ) {
-      return;
+      const snapshotId =
+        normalizeString_(values[0]);
+
+      const cacheDate =
+        normalizeTeacherUnsavedSourceYmd_(
+          values[1],
+          values[1]
+        );
+
+      const teacherId =
+        normalizeString_(values[2]);
+
+      if (
+        cacheDate !== todayYmd ||
+        !teacherId ||
+        !snapshotId
+      ) {
+        return;
+      }
+
+      affectedSnapshotByTeacherId[
+        teacherId
+      ] = snapshotId;
     }
-
-    matchedDetailCount++;
-
-    affectedSnapshotByTeacherId[
-      detail.teacherId
-    ] = detail.snapshotId;
-  });
+  );
 
   const affectedTeacherIds =
-    Object.keys(affectedSnapshotByTeacherId);
+    Object.keys(
+      affectedSnapshotByTeacherId
+    );
 
   if (affectedTeacherIds.length === 0) {
     return {
       ok: true,
-      matchedDetailCount: matchedDetailCount,
+      matchedDetailCount:
+        matchedDetailIndexes.length,
       invalidatedTeacherCount: 0,
       targetKeys: targetKeys
     };
   }
 
-  const summarySheet = validation.summary.sheet;
+  const summarySheet =
+    validation.summary.sheet;
 
   const summaryRowCount =
-    Math.max(summarySheet.getLastRow() - 1, 0);
+    Math.max(
+      summarySheet.getLastRow() - 1,
+      0
+    );
 
   if (summaryRowCount === 0) {
     return {
       ok: true,
-      matchedDetailCount: matchedDetailCount,
+      matchedDetailCount:
+        matchedDetailIndexes.length,
       invalidatedTeacherCount: 0,
       targetKeys: targetKeys
     };
   }
-
-  const summaryValues =
-    summarySheet
-      .getRange(
-        2,
-        1,
-        summaryRowCount,
-        TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_.length
-      )
-      .getValues();
 
   const snapshotIdIndex =
     TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_
@@ -1649,15 +1739,33 @@ function invalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
     TEACHER_UNSAVED_SUMMARY_CACHE_HEADERS_
       .indexOf("errorMessage");
 
-  const statusColumn = statusIndex + 1;
+  const statusColumn =
+    statusIndex + 1;
 
-  const statusRows =
-    summaryValues.map(function(values) {
-      return [
-        values[statusIndex],
-        values[errorIndex]
-      ];
-    });
+  /*
+   * summaryは数十行規模なので
+   * identity 3列 + status 1列だけ読む。
+   */
+  const summaryIdentityValues =
+    summarySheet
+      .getRange(
+        2,
+        1,
+        summaryRowCount,
+        3
+      )
+      .getDisplayValues();
+
+  const summaryStatusValues =
+    summarySheet
+      .getRange(
+        2,
+        statusColumn,
+        summaryRowCount,
+        1
+      )
+      .getDisplayValues();
+
 
   const invalidationMessage =
     "出席一括保存後にFastキャッシュを無効化しました。" +
@@ -1665,70 +1773,81 @@ function invalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
 
   let invalidatedTeacherCount = 0;
 
-  summaryValues.forEach(function(values, index) {
-    const teacherId =
-      normalizeString_(values[teacherIdIndex]);
+  summaryIdentityValues.forEach(
+    function(values, index) {
+      const teacherId =
+        normalizeString_(
+          values[teacherIdIndex]
+        );
 
-    const expectedSnapshotId =
-      affectedSnapshotByTeacherId[teacherId];
+      const expectedSnapshotId =
+        affectedSnapshotByTeacherId[
+          teacherId
+        ];
 
-    if (!expectedSnapshotId) {
-      return;
+      if (!expectedSnapshotId) {
+        return;
+      }
+
+      const status =
+        normalizeString_(
+          summaryStatusValues[index][0]
+        ).toLowerCase();
+
+      if (status !== "ready") {
+        return;
+      }
+
+      const snapshotId =
+        normalizeString_(
+          values[snapshotIdIndex]
+        );
+
+      if (
+        snapshotId !==
+        expectedSnapshotId
+      ) {
+        return;
+      }
+
+      const rawCacheDate =
+        values[cacheDateIndex];
+
+      const cacheDate =
+        normalizeTeacherUnsavedSourceYmd_(
+          rawCacheDate,
+          rawCacheDate
+        );
+
+      if (cacheDate !== todayYmd) {
+        return;
+      }
+
+      summarySheet
+        .getRange(
+          index + 2,
+          statusColumn,
+          1,
+          2
+        )
+        .setValues([[
+          "stale",
+          invalidationMessage
+        ]]);
+
+      invalidatedTeacherCount++;
     }
-
-    const status =
-      normalizeString_(
-        values[statusIndex]
-      ).toLowerCase();
-
-    if (status !== "ready") {
-      return;
-    }
-
-    const snapshotId =
-      normalizeString_(values[snapshotIdIndex]);
-
-    if (snapshotId !== expectedSnapshotId) {
-      return;
-    }
-
-    const rawCacheDate =
-      values[cacheDateIndex];
-
-    const cacheDate =
-      normalizeTeacherUnsavedSourceYmd_(
-        rawCacheDate,
-        rawCacheDate
-      );
-
-    if (cacheDate !== todayYmd) {
-      return;
-    }
-
-    statusRows[index] = [
-      "stale",
-      invalidationMessage
-    ];
-
-    invalidatedTeacherCount++;
-  });
+  );
 
   if (invalidatedTeacherCount > 0) {
-    summarySheet
-      .getRange(
-        2,
-        statusColumn,
-        summaryRowCount,
-        2
-      )
-      .setValues(statusRows);
-
     SpreadsheetApp.flush();
   }
 
+
   return {
     ok: true,
-    matchedDetailCount: matchedDetailCount,
+    matchedDetailCount:
+      matchedDetailIndexes.length,
     invalidatedTeacherCount:
       invalidatedTeacherCount,
     targetKeys: targetKeys

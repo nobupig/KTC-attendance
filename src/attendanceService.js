@@ -19,6 +19,7 @@ function saveTeacherUnsavedBulkNoAbsence(payload) {
 }
 
 function saveTeacherUnsavedBulkNoAbsenceInternal_(payload) {
+
   const ss = getOperationSpreadsheet();
 
   const attendanceSessionsSheet =
@@ -26,6 +27,7 @@ function saveTeacherUnsavedBulkNoAbsenceInternal_(payload) {
 
   const attendanceSheet =
     ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE);
+
 
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -128,150 +130,334 @@ function saveTeacherUnsavedBulkNoAbsenceInternal_(payload) {
       throw new Error("保存対象の授業がありません");
     }
 
+
     /*
      * 一覧表示後に別操作で保存された授業を
      * 「欠席者なし」で上書きしないための競合確認。
      * ScriptLock中にattendanceSessionsを1回だけ読み込む。
      */
-    const sessionValues =
-      attendanceSessionsSheet.getDataRange().getValues();
+    const sessionLastRow =
+      attendanceSessionsSheet.getLastRow();
 
-    if (sessionValues.length > 0) {
-      const sessionHeaders = sessionValues[0];
+    const sessionLastColumn =
+      attendanceSessionsSheet.getLastColumn();
 
-      const sessionCol = {
-        classId: findColumnIndex_(
-          sessionHeaders,
-          ["classId", "ClassID"]
+    const sessionHeaders =
+      sessionLastColumn > 0
+        ? attendanceSessionsSheet
+            .getRange(1, 1, 1, sessionLastColumn)
+            .getDisplayValues()[0]
+        : [];
+
+    const sessionCol = {
+      classId: findColumnIndex_(
+        sessionHeaders,
+        ["classId", "ClassID"]
+      ),
+      date: findColumnIndex_(
+        sessionHeaders,
+        ["date", "日付"]
+      ),
+      period: findColumnIndex_(
+        sessionHeaders,
+        ["period", "時限"]
+      ),
+      targetSessionKey: findColumnIndex_(
+        sessionHeaders,
+        ["targetSessionKey"]
+      )
+    };
+
+    ["classId", "date", "period"].forEach(function(key) {
+      if (sessionCol[key] === -1) {
+        throw new Error(
+          "attendanceSessions シートに " +
+          key +
+          " 列がありません"
+        );
+      }
+    });
+
+    const sessionScanIndexes = [
+      sessionCol.classId,
+      sessionCol.date,
+      sessionCol.period
+    ];
+
+    if (sessionCol.targetSessionKey !== -1) {
+      sessionScanIndexes.push(
+        sessionCol.targetSessionKey
+      );
+    }
+
+    const sessionScanStartIndex =
+      Math.min.apply(null, sessionScanIndexes);
+
+    const sessionScanEndIndex =
+      Math.max.apply(null, sessionScanIndexes);
+
+    const sessionScanWidth =
+      sessionScanEndIndex -
+      sessionScanStartIndex +
+      1;
+
+    const sessionDataRowCount =
+      Math.max(sessionLastRow - 1, 0);
+
+    const sessionScanValues =
+      sessionDataRowCount > 0
+        ? attendanceSessionsSheet
+            .getRange(
+              2,
+              sessionScanStartIndex + 1,
+              sessionDataRowCount,
+              sessionScanWidth
+            )
+            .getDisplayValues()
+        : [];
+
+
+    const relativeSessionCol = {
+      classId:
+        sessionCol.classId -
+        sessionScanStartIndex,
+      date:
+        sessionCol.date -
+        sessionScanStartIndex,
+      period:
+        sessionCol.period -
+        sessionScanStartIndex,
+      targetSessionKey:
+        sessionCol.targetSessionKey === -1
+          ? -1
+          : sessionCol.targetSessionKey -
+            sessionScanStartIndex
+    };
+
+    const alreadySavedKeySet = {};
+
+    sessionScanValues.forEach(function(row) {
+      /*
+       * 新しい行は targetSessionKey を直接比較する。
+       * 旧データ等で targetSessionKey が空欄の場合だけ
+       * classId/date/period からfallback keyを生成する。
+       */
+      if (
+        relativeSessionCol.targetSessionKey !== -1
+      ) {
+        const storedKey = String(
+          row[
+            relativeSessionCol.targetSessionKey
+          ] || ""
+        ).trim();
+
+        if (storedKey) {
+          if (targetKeySet[storedKey]) {
+            alreadySavedKeySet[storedKey] = true;
+          }
+          return;
+        }
+      }
+
+      const rowClassId = String(
+        row[relativeSessionCol.classId] || ""
+      ).trim();
+
+      const rowDate =
+        normalizeYmdDisplayText_(
+          row[relativeSessionCol.date]
+        );
+
+      const rowPeriod = String(
+        row[relativeSessionCol.period] || ""
+      ).trim();
+
+      if (
+        !rowClassId ||
+        !rowDate ||
+        !rowPeriod
+      ) {
+        return;
+      }
+
+      const fallbackKey =
+        [
+          rowClassId,
+          rowDate,
+          rowPeriod
+        ].join("__");
+
+      if (targetKeySet[fallbackKey]) {
+        alreadySavedKeySet[fallbackKey] = true;
+      }
+    });
+
+    const existingSavedKeyList =
+      Object.keys(alreadySavedKeySet);
+
+    if (existingSavedKeyList.length > 0) {
+      throw new Error(
+        "選択した授業のうち " +
+        existingSavedKeyList.length +
+        " 件が既に保存されています。" +
+        "未保存授業一覧を再読み込みしてから、もう一度実行してください"
+      );
+    }
+
+
+    /*
+     * attendanceは1回だけ読み込み、
+     * 選択セッションに属する既存例外行をまとめて消す。
+     */
+    const attendanceLastRow =
+      attendanceSheet.getLastRow();
+
+    const attendanceLastColumn =
+      attendanceSheet.getLastColumn();
+
+    const attendanceHeaders =
+      attendanceLastColumn > 0
+        ? attendanceSheet
+            .getRange(
+              1,
+              1,
+              1,
+              attendanceLastColumn
+            )
+            .getDisplayValues()[0]
+        : [];
+
+    const attendanceCol = {
+      classId:
+        attendanceHeaders.indexOf(
+          "classId"
         ),
-        date: findColumnIndex_(
-          sessionHeaders,
-          ["date", "日付"]
+      date:
+        attendanceHeaders.indexOf(
+          "date"
         ),
-        period: findColumnIndex_(
-          sessionHeaders,
-          ["period", "時限"]
+      period:
+        attendanceHeaders.indexOf(
+          "period"
         )
-      };
+    };
 
-      ["classId", "date", "period"].forEach(function(key) {
-        if (sessionCol[key] === -1) {
+    Object.keys(attendanceCol)
+      .forEach(function(key) {
+        if (attendanceCol[key] === -1) {
           throw new Error(
-            "attendanceSessions シートに " +
+            "attendance シートに " +
             key +
             " 列がありません"
           );
         }
       });
 
-      const alreadySavedKeySet = {};
+    const attendanceScanIndexes = [
+      attendanceCol.classId,
+      attendanceCol.date,
+      attendanceCol.period
+    ];
 
-      sessionValues.slice(1).forEach(function(row) {
-        const rowClassId =
-          String(row[sessionCol.classId] || "").trim();
+    const attendanceScanStartIndex =
+      Math.min.apply(
+        null,
+        attendanceScanIndexes
+      );
+
+    const attendanceScanEndIndex =
+      Math.max.apply(
+        null,
+        attendanceScanIndexes
+      );
+
+    const attendanceScanWidth =
+      attendanceScanEndIndex -
+      attendanceScanStartIndex +
+      1;
+
+    const attendanceDataRowCount =
+      Math.max(
+        attendanceLastRow - 1,
+        0
+      );
+
+    const attendanceScanValues =
+      attendanceDataRowCount > 0
+        ? attendanceSheet
+            .getRange(
+              2,
+              attendanceScanStartIndex + 1,
+              attendanceDataRowCount,
+              attendanceScanWidth
+            )
+            .getDisplayValues()
+        : [];
+
+
+    const relativeAttendanceCol = {
+      classId:
+        attendanceCol.classId -
+        attendanceScanStartIndex,
+      date:
+        attendanceCol.date -
+        attendanceScanStartIndex,
+      period:
+        attendanceCol.period -
+        attendanceScanStartIndex
+    };
+
+    const rowsToClear = [];
+
+    attendanceScanValues.forEach(
+      function(row, index) {
+        const rowClassId = String(
+          row[
+            relativeAttendanceCol.classId
+          ] || ""
+        ).trim();
 
         const rowDate =
-          formatDateToYmd(row[sessionCol.date]);
+          normalizeYmdDisplayText_(
+            row[
+              relativeAttendanceCol.date
+            ]
+          );
 
-        const rowPeriod =
-          String(
-            row[sessionCol.period] == null
-              ? ""
-              : row[sessionCol.period]
-          ).trim();
+        const rowPeriod = String(
+          row[
+            relativeAttendanceCol.period
+          ] || ""
+        ).trim();
 
-        if (!rowClassId || !rowDate || !rowPeriod) {
+        if (
+          !rowClassId ||
+          !rowDate ||
+          !rowPeriod
+        ) {
           return;
         }
 
         const rowKey =
-          [rowClassId, rowDate, rowPeriod].join("__");
+          [
+            rowClassId,
+            rowDate,
+            rowPeriod
+          ].join("__");
 
         if (targetKeySet[rowKey]) {
-          alreadySavedKeySet[rowKey] = true;
+          rowsToClear.push(index + 2);
         }
-      });
-
-      const existingSavedKeyList =
-        Object.keys(alreadySavedKeySet);
-
-      if (existingSavedKeyList.length > 0) {
-        throw new Error(
-          "選択した授業のうち " +
-          existingSavedKeyList.length +
-          " 件が既に保存されています。" +
-          "未保存授業一覧を再読み込みしてから、もう一度実行してください"
-        );
       }
-    }
+    );
 
-    /*
-     * attendanceは1回だけ読み込み、
-     * 選択セッションに属する既存例外行をまとめて消す。
-     */
-    const attendanceValues =
-      attendanceSheet.getDataRange().getValues();
-
-    const attendanceHeaders =
-      attendanceValues.length > 0
-        ? attendanceValues[0]
-        : [];
-
-    const attendanceRows =
-      attendanceValues.length > 1
-        ? attendanceValues.slice(1)
-        : [];
-
-    const attendanceCol = {
-      classId: attendanceHeaders.indexOf("classId"),
-      date: attendanceHeaders.indexOf("date"),
-      period: attendanceHeaders.indexOf("period"),
-      studentId: attendanceHeaders.indexOf("studentId"),
-      statusCode: attendanceHeaders.indexOf("statusCode"),
-      recordedAt: attendanceHeaders.indexOf("recordedAt")
-    };
-
-    Object.keys(attendanceCol).forEach(function(key) {
-      if (attendanceCol[key] === -1) {
-        throw new Error(
-          "attendance シートに " + key + " 列がありません"
-        );
-      }
-    });
-
-    const rowsToClear = [];
-
-    attendanceRows.forEach(function(row, index) {
-      const rowClassId =
-        String(row[attendanceCol.classId] || "").trim();
-
-      const rowDate =
-        formatDateToYmd(row[attendanceCol.date]);
-
-      const rowPeriod =
-        String(
-          row[attendanceCol.period] == null
-            ? ""
-            : row[attendanceCol.period]
-        ).trim();
-
-      if (!rowClassId || !rowDate || !rowPeriod) {
-        return;
-      }
-
-      const rowKey =
-        [rowClassId, rowDate, rowPeriod].join("__");
-
-      if (targetKeySet[rowKey]) {
-        rowsToClear.push(index + 2);
-      }
-    });
 
     clearAttendanceRowsByNumberGroups_(
       attendanceSheet,
       rowsToClear,
       attendanceHeaders.length
     );
+
 
     const actionType = "past-edit";
     const savedModeLabel = "過去修正（欠席者なし）";
@@ -294,13 +480,16 @@ function saveTeacherUnsavedBulkNoAbsenceInternal_(payload) {
       logRows
     );
 
+
     const fastInvalidation =
       tryInvalidateTeacherUnsavedFastSnapshotsAfterBulkSaveUnderLock_(
         sessions,
         actionType
       );
 
+
     invalidateAttendanceCachesBulk_(sessions);
+
 
     /*
      * legacy / ScriptCache系の未保存キャッシュも
@@ -350,6 +539,8 @@ function saveTeacherUnsavedBulkNoAbsenceInternal_(payload) {
     }
 
     removeScriptCacheKeys_(teacherUnsavedCacheKeys);
+
+
 
     return {
       success: true,
