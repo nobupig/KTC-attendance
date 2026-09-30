@@ -108,8 +108,22 @@ function removeScriptCacheKeys_(keys) {
   });
 }
 
+function buildSheetDataCacheKey_(spreadsheetType, sheetName) {
+  const baseKey = 'sheetData__' + spreadsheetType + '__' + sheetName;
+
+  // students は status 判定仕様の変更時に旧キャッシュを確実に捨てる。
+  if (
+    spreadsheetType === 'MASTER' &&
+    sheetName === CONFIG.SHEETS.STUDENTS
+  ) {
+    return baseKey + '__statusV2';
+  }
+
+  return baseKey;
+}
+
 function getSheetDataCached_(spreadsheetType, sheetName, ttlSeconds) {
-  const cacheKey = 'sheetData__' + spreadsheetType + '__' + sheetName;
+  const cacheKey = buildSheetDataCacheKey_(spreadsheetType, sheetName);
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
     return cached;
@@ -212,7 +226,9 @@ function clearCoreCachesForTest() {
 
   const keys = [
     'sheetData__MASTER__' + CONFIG.SHEETS.CLASSES,
+    // students の旧キーと statusV2 キーを両方掃除する。
     'sheetData__MASTER__' + CONFIG.SHEETS.STUDENTS,
+    buildSheetDataCacheKey_('MASTER', CONFIG.SHEETS.STUDENTS),
     'sheetData__MASTER__' + CONFIG.SHEETS.SUBJECTS,
     'sheetData__OPERATION__' + CONFIG.SHEETS.TIMETABLE,
     'sheetData__OPERATION__' + CONFIG.SHEETS.CLASS_TEACHER_TEAMS,

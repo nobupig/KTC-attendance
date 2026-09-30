@@ -1813,7 +1813,7 @@ function getStudentsByHomeroomClass_(grade, unit) {
   const targetGrade = String(grade || '').trim();
   const targetUnit = String(unit || '').trim();
 
-  const cacheKey = 'studentsByHomeroomClass__' + targetGrade + '__' + targetUnit;
+  const cacheKey = 'studentsByHomeroomClass__statusV2__' + targetGrade + '__' + targetUnit;
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
     return cached;
@@ -1844,7 +1844,7 @@ function getStudentsByHomeroomClass_(grade, unit) {
 
       if (rowGrade !== targetGrade) return false;
       if (targetUnits.indexOf(rowUnit) === -1) return false;
-      if (rowStatus && rowStatus !== 'active') return false;
+      if (!isActiveStudentStatus_(rowStatus)) return false;
       return true;
     })
     .map(function(row) {
