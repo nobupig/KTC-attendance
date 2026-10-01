@@ -683,6 +683,8 @@
     let unsavedShrDetailsOpen = false;
     let currentShrHasSavedSession = false;
     let currentShrLastSavedInfo = null;
+    let currentShrIsExcludedDate = false;
+    let currentShrExclusionReason = "";
     let isShrStatusLoading = false;
 
     function escapeHtml(str) {
@@ -980,6 +982,8 @@ function renderUnsavedShrSummary(data) {
   selectedUnit = String(unit || "");
   currentShrHasSavedSession = false;
   currentShrLastSavedInfo = null;
+  currentShrIsExcludedDate = false;
+  currentShrExclusionReason = "";
 
   renderClassChips();
   loadUnsavedShrSummary();
@@ -993,6 +997,21 @@ function renderShrActionSelection(lastSavedInfo) {
 
   document.getElementById("tableTitle").textContent =
     selectedGrade + "年 " + selectedUnit + "組 のSHR出席";
+
+  if (currentShrIsExcludedDate) {
+    document.getElementById("tableSub").textContent =
+      currentDate + " はSHR記録対象外です。";
+
+    document.getElementById("saveState").textContent = "SHR対象外";
+    renderHomeroomLastSavedInfo(null);
+
+    document.getElementById("tableContainer").innerHTML =
+      '<div class="empty-box">' +
+        '<strong>この日はSHR記録対象外です。</strong><br><br>' +
+        escapeHtml(currentShrExclusionReason || '') +
+      '</div>';
+    return;
+  }
 
   document.getElementById("tableSub").textContent =
     currentDate + " の記録です。欠席者がいない場合は名簿を開かず保存できます。";
@@ -1045,6 +1064,8 @@ function loadShrDailyStatus() {
 
       currentShrHasSavedSession = !!data.hasSavedSession;
       currentShrLastSavedInfo = data.lastSavedInfo || null;
+      currentShrIsExcludedDate = !!data.isExcludedDate;
+      currentShrExclusionReason = String(data.exclusionReason || "");
 
       renderShrActionSelection(currentShrLastSavedInfo);
     })
@@ -1053,6 +1074,8 @@ function loadShrDailyStatus() {
       isShrStatusLoading = false;
       currentShrHasSavedSession = false;
       currentShrLastSavedInfo = null;
+      currentShrIsExcludedDate = false;
+      currentShrExclusionReason = "";
       document.getElementById("saveState").textContent = "保存状態を確認できませんでした";
       renderShrActionSelection();
     })
@@ -1195,6 +1218,20 @@ function renderSummaryCounts() {
     return;
   }
 
+  currentShrIsExcludedDate = !!data.isExcludedDate;
+  currentShrExclusionReason = String(data.exclusionReason || "");
+
+  if (currentShrIsExcludedDate) {
+    studentsState = [];
+    currentShrHasSavedSession = false;
+    currentShrLastSavedInfo = null;
+    currentDate = data.date || currentDate;
+    renderShrActionSelection();
+    renderSummaryCounts();
+    setBusy(false);
+    return;
+  }
+
   studentsState = Array.isArray(data.students) ? data.students : [];
   document.getElementById("tableTitle").textContent = data.classInfo.classLabel + " のSHR出席";
   document.getElementById("tableSub").textContent = data.date + " の記録です。未変更の学生は出席です。";
@@ -1220,6 +1257,11 @@ function renderSummaryCounts() {
       const dateValue = document.getElementById("dateInput").value;
       if (!dateValue) {
         showMessage("日付を選択してください。", "error");
+        return;
+      }
+
+      if (currentShrIsExcludedDate) {
+        showMessage("この日はSHR記録対象外です。", "error");
         return;
       }
 
@@ -1264,6 +1306,11 @@ function saveShrNoAbsence() {
   const dateValue = document.getElementById("dateInput").value;
   if (!selectedGrade || !selectedUnit || !dateValue) {
     showMessage("クラス・日付を確認してください。", "error");
+    return;
+  }
+
+  if (currentShrIsExcludedDate) {
+    showMessage("この日はSHR記録対象外です。", "error");
     return;
   }
 
@@ -1326,6 +1373,8 @@ document.getElementById("dateInput").addEventListener("change", function() {
 
   currentShrHasSavedSession = false;
   currentShrLastSavedInfo = null;
+  currentShrIsExcludedDate = false;
+  currentShrExclusionReason = "";
 
   renderShrActionSelection();
   loadShrDailyStatus();
