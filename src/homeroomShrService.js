@@ -2,8 +2,44 @@ const HOMEROOM_SHR_CONFIG = {
   PERIOD: 0,
   ACTION_TYPE: 'homeroom-shr',
   MODE_LABEL: '担任SHR',
-  ALLOWED_STATUS_CODES: ['', 'A', 'L', 'E']
+  ALLOWED_STATUS_CODES: ['', 'A', 'L', 'E'],
+  EXCLUDED_DATES: {
+    '2026-06-03': '休校日のためSHRは実施対象外です。通常授業は遠隔実施のため授業日扱いです。'
+  }
 };
+
+function normalizeHomeroomShrYmd_(date) {
+  const raw = String(date || '').trim();
+  if (!raw) return '';
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  return formatDateToYmd(date);
+}
+
+function getHomeroomShrExcludedReason_(date) {
+  const ymd = normalizeHomeroomShrYmd_(date);
+  if (!ymd) return '';
+
+  return Object.prototype.hasOwnProperty.call(HOMEROOM_SHR_CONFIG.EXCLUDED_DATES, ymd)
+    ? String(HOMEROOM_SHR_CONFIG.EXCLUDED_DATES[ymd] || '')
+    : '';
+}
+
+function isHomeroomShrExcludedDate_(date) {
+  return !!getHomeroomShrExcludedReason_(date);
+}
+
+function assertHomeroomShrRecordableDate_(date) {
+  const ymd = normalizeHomeroomShrYmd_(date);
+  const reason = getHomeroomShrExcludedReason_(ymd);
+
+  if (reason) {
+    throw new Error(ymd + ' はSHR記録対象外です。' + reason);
+  }
+}
 
 function toClientSafeLastSavedInfo_(info) {
   if (!info) return null;
@@ -269,7 +305,9 @@ function getHomeroomShrClassDayYmdList_(startYmd, endYmd) {
 
   // calendar が未整備でも止めず、平日ベースでフォールバック
   if (col.date === -1 || col.isClassDay === -1 || !rows.length) {
-    return buildWeekdayYmdList_(startYmd, endYmd);
+    return buildWeekdayYmdList_(startYmd, endYmd).filter(function(ymd) {
+      return !isHomeroomShrExcludedDate_(ymd);
+    });
   }
 
   const result = [];
@@ -282,7 +320,7 @@ function getHomeroomShrClassDayYmdList_(startYmd, endYmd) {
     const raw = row[col.isClassDay];
     const isClassDay = raw === true || String(raw || '').trim().toUpperCase() === 'TRUE' || String(raw || '').trim() === '1';
 
-    if (isClassDay) {
+    if (isClassDay && !isHomeroomShrExcludedDate_(rowDate)) {
       result.push(rowDate);
     }
   });
@@ -333,6 +371,28 @@ function getHomeroomShrDailyData(grade, unit, date) {
   const targetGrade = String(grade || '').trim();
   const targetUnit = String(unit || '').trim();
   const targetDate = formatDateToYmd(date || new Date());
+
+  if (isHomeroomShrExcludedDate_(targetDate)) {
+    return {
+      classInfo: {
+        grade: targetGrade,
+        unit: targetUnit,
+        classLabel: buildHomeroomShrClassLabel_(targetGrade, targetUnit)
+      },
+      date: targetDate,
+      students: [],
+      statusCounts: {
+        present: 0,
+        absent: 0,
+        late: 0,
+        early: 0
+      },
+      hasSavedSession: false,
+      lastSavedInfo: null,
+      isExcludedDate: true,
+      exclusionReason: getHomeroomShrExcludedReason_(targetDate)
+    };
+  }
 
   const students = getStudentsByHomeroomClass_(targetGrade, targetUnit);
   const attendanceMap = getHomeroomShrAttendanceMap_(targetGrade, targetUnit, targetDate);
@@ -385,7 +445,9 @@ return {
   students: studentRows,
   statusCounts: statusCounts,
   hasSavedSession: !!lastSavedInfo,
-  lastSavedInfo: toClientSafeLastSavedInfo_(lastSavedInfo)
+  lastSavedInfo: toClientSafeLastSavedInfo_(lastSavedInfo),
+  isExcludedDate: false,
+  exclusionReason: ''
 };
 }
 
@@ -395,6 +457,21 @@ function getHomeroomShrDailyStatus(grade, unit, date) {
   const targetGrade = String(grade || '').trim();
   const targetUnit = String(unit || '').trim();
   const targetDate = formatDateToYmd(date || new Date());
+
+  if (isHomeroomShrExcludedDate_(targetDate)) {
+    return {
+      classInfo: {
+        grade: targetGrade,
+        unit: targetUnit,
+        classLabel: buildHomeroomShrClassLabel_(targetGrade, targetUnit)
+      },
+      date: targetDate,
+      hasSavedSession: false,
+      lastSavedInfo: null,
+      isExcludedDate: true,
+      exclusionReason: getHomeroomShrExcludedReason_(targetDate)
+    };
+  }
 
   const classId = buildHomeroomShrClassId_(targetGrade, targetUnit);
   const period = String(HOMEROOM_SHR_CONFIG.PERIOD);
@@ -461,7 +538,9 @@ function getHomeroomShrDailyStatus(grade, unit, date) {
     },
     date: targetDate,
     hasSavedSession: !!latest,
-    lastSavedInfo: latest ? toClientSafeLastSavedInfo_(latest) : null
+    lastSavedInfo: latest ? toClientSafeLastSavedInfo_(latest) : null,
+    isExcludedDate: false,
+    exclusionReason: ''
   };
 }
 
@@ -479,6 +558,7 @@ function saveHomeroomShrAttendance(payload) {
     const targetDate = formatDateToYmd(payload.date || new Date());
 
     ensureHomeroomAccess_(grade, unit);
+    assertHomeroomShrRecordableDate_(targetDate);
 
     const students = getStudentsByHomeroomClass_(grade, unit);
     const validStudentIds = {};
@@ -654,6 +734,7 @@ function saveHomeroomShrNoAbsence(payload) {
     const targetDate = formatDateToYmd(payload.date || new Date());
 
     ensureHomeroomAccess_(grade, unit);
+    assertHomeroomShrRecordableDate_(targetDate);
 
     const classId = buildHomeroomShrClassId_(grade, unit);
     const period = String(HOMEROOM_SHR_CONFIG.PERIOD);
@@ -752,6 +833,7 @@ function getHomeroomShrSummary(grade, unit, startDate, endDate) {
     if (rowClassId !== targetClassId) return;
     if (rowPeriod !== targetPeriod) return;
     if (actionType && actionType !== HOMEROOM_SHR_CONFIG.ACTION_TYPE) return;
+    if (isHomeroomShrExcludedDate_(rowDate)) return;
     if (startYmd && rowDate < startYmd) return;
     if (endYmd && rowDate > endYmd) return;
 
