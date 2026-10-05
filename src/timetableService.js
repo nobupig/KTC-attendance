@@ -55,13 +55,15 @@ function getClassesForCurrentUserByDate(targetDate) {
     const classId = normalizeString_(row[ttCol.classId]);
     const period = normalizeString_(row[ttCol.period]);
     const weekday = ttCol.weekday !== -1 ? normalizeWeekday_(row[ttCol.weekday]) : '';
-    const teacherName = ttCol.teacherName !== -1 ? normalizeString_(row[ttCol.teacherName]) : '';
-    let teacherId = ttCol.teacherId !== -1 ? normalizeString_(row[ttCol.teacherId]) : '';
-
-    if (!teacherId && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherId = teacher ? teacher.teacherId : '';
-    }
+    const teacherNameRaw = ttCol.teacherName !== -1 ? normalizeString_(row[ttCol.teacherName]) : '';
+    const teacherIdRaw = ttCol.teacherId !== -1 ? normalizeString_(row[ttCol.teacherId]) : '';
+    const teacherRecord = resolveTeacherRecordForAssignment_(
+      teacherIdRaw,
+      teacherNameRaw,
+      'timetable'
+    );
+    const teacherId = teacherRecord ? teacherRecord.teacherId : teacherIdRaw;
+    const teacherName = teacherRecord ? teacherRecord.name : teacherNameRaw;
 
     if (!classId || !period || !weekday) return;
 
@@ -89,16 +91,18 @@ function getClassesForCurrentUserByDate(targetDate) {
     const classId = teamCol.classId !== -1 ? normalizeString_(row[teamCol.classId]) : '';
     const period = teamCol.period !== -1 ? normalizeString_(row[teamCol.period]) : '';
     const weekday = teamCol.weekday !== -1 ? normalizeWeekday_(row[teamCol.weekday]) : '';
-    const teacherName = teamCol.teacherName !== -1 ? normalizeString_(row[teamCol.teacherName]) : '';
-    let teacherId = teamCol.teacherId !== -1 ? normalizeString_(row[teamCol.teacherId]) : '';
+    const teacherNameRaw = teamCol.teacherName !== -1 ? normalizeString_(row[teamCol.teacherName]) : '';
+    const teacherIdRaw = teamCol.teacherId !== -1 ? normalizeString_(row[teamCol.teacherId]) : '';
     const roleType = teamCol.roleType !== -1
       ? normalizeString_(row[teamCol.roleType]).toLowerCase()
       : 'support';
-
-    if (!teacherId && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherId = teacher ? teacher.teacherId : '';
-    }
+    const teacherRecord = resolveTeacherRecordForAssignment_(
+      teacherIdRaw,
+      teacherNameRaw,
+      'classTeacherTeams'
+    );
+    const teacherId = teacherRecord ? teacherRecord.teacherId : teacherIdRaw;
+    const teacherName = teacherRecord ? teacherRecord.name : teacherNameRaw;
 
     if (!classId || !period || !weekday || !teacherId) return;
 
@@ -943,13 +947,15 @@ function getTeacherUnsavedContext_(teacherId) {
     const classId = normalizeString_(row[ttCol.classId]);
     const period = normalizeString_(row[ttCol.period]);
     const weekday = ttCol.weekday !== -1 ? normalizeWeekday_(row[ttCol.weekday]) : '';
-    const teacherName = ttCol.teacherName !== -1 ? normalizeString_(row[ttCol.teacherName]) : '';
-    let teacherIdInRow = ttCol.teacherId !== -1 ? normalizeString_(row[ttCol.teacherId]) : '';
-
-    if (!teacherIdInRow && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherIdInRow = teacher ? teacher.teacherId : '';
-    }
+    const teacherNameRaw = ttCol.teacherName !== -1 ? normalizeString_(row[ttCol.teacherName]) : '';
+    const teacherIdRaw = ttCol.teacherId !== -1 ? normalizeString_(row[ttCol.teacherId]) : '';
+    const teacherRecord = resolveTeacherRecordForAssignment_(
+      teacherIdRaw,
+      teacherNameRaw,
+      'teacherUnsavedContext:timetable'
+    );
+    const teacherIdInRow = teacherRecord ? teacherRecord.teacherId : teacherIdRaw;
+    const teacherName = teacherRecord ? teacherRecord.name : teacherNameRaw;
 
     if (!classId || !period || !weekday) return;
 
@@ -968,13 +974,15 @@ function getTeacherUnsavedContext_(teacherId) {
     const classId = teamCol.classId !== -1 ? normalizeString_(row[teamCol.classId]) : '';
     const period = teamCol.period !== -1 ? normalizeString_(row[teamCol.period]) : '';
     const weekday = teamCol.weekday !== -1 ? normalizeWeekday_(row[teamCol.weekday]) : '';
-    const teacherName = teamCol.teacherName !== -1 ? normalizeString_(row[teamCol.teacherName]) : '';
-    let teacherIdInRow = teamCol.teacherId !== -1 ? normalizeString_(row[teamCol.teacherId]) : '';
-
-    if (!teacherIdInRow && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherIdInRow = teacher ? teacher.teacherId : '';
-    }
+    const teacherNameRaw = teamCol.teacherName !== -1 ? normalizeString_(row[teamCol.teacherName]) : '';
+    const teacherIdRaw = teamCol.teacherId !== -1 ? normalizeString_(row[teamCol.teacherId]) : '';
+    const teacherRecord = resolveTeacherRecordForAssignment_(
+      teacherIdRaw,
+      teacherNameRaw,
+      'teacherUnsavedContext:classTeacherTeams'
+    );
+    const teacherIdInRow = teacherRecord ? teacherRecord.teacherId : teacherIdRaw;
+    const teacherName = teacherRecord ? teacherRecord.name : teacherNameRaw;
 
     if (!classId || !period || !weekday || !teacherIdInRow) return;
 
@@ -1038,15 +1046,23 @@ function getTeacherUnsavedContext_(teacherId) {
 }
 
 function buildTeacherUnsavedSummaryCacheKey_(teacherId, endYmd) {
-  return 'teacherUnsavedSummary__v3__' + String(teacherId || '') + '__' + String(endYmd || '');
+  return 'teacherUnsavedSummary__v4__' +
+    getTeachingAssignmentRevision_() + '__' +
+    String(teacherId || '') + '__' +
+    String(endYmd || '');
 }
 
 function buildTeacherUnsavedDetailsCacheKey_(teacherId, endYmd) {
-  return 'teacherUnsavedDetails__v3__' + String(teacherId || '') + '__' + String(endYmd || '');
+  return 'teacherUnsavedDetails__v4__' +
+    getTeachingAssignmentRevision_() + '__' +
+    String(teacherId || '') + '__' +
+    String(endYmd || '');
 }
 
 function buildTeacherUnsavedContextCacheKey_(teacherId) {
-  return 'teacherUnsavedContext__v3__' + String(teacherId || '');
+  return 'teacherUnsavedContext__v4__' +
+    getTeachingAssignmentRevision_() + '__' +
+    String(teacherId || '');
 }
 
 function getTeacherUnsavedStartDate_(baseDate) {
