@@ -934,26 +934,28 @@ function buildTeacherUnsavedAssignmentMap_(timetableData, teamData, teacherIndex
     const byName = name ? teacherIndex.byName[name] : null;
     const byId = storedTeacherId ? teacherIndex.byId[storedTeacherId] : null;
 
-    // teacherName は Operation 上の編集UIで人が選択する列なので、
-    // teachers マスタで一意に解決できる場合は teacherName を正とする。
-    if (byName) {
-      if (storedTeacherId && storedTeacherId !== byName.teacherId) {
-        addTeacherUnsavedWarning_(
-          warnings,
-          sourceLabel +
-            ': teacherName/teacherId 不一致を検出しました: ' +
-            name + ' / ' + storedTeacherId +
-            ' -> ' + byName.teacherId
-        );
+    // teacherName が入力されている場合は名前を優先する。
+    // 名前が解決できないのに旧 teacherId へフォールバックすると、
+    // 誤担当をFastキャッシュへ残すため、ここは fail-safe で除外する。
+    if (name) {
+      if (byName) {
+        if (storedTeacherId && storedTeacherId !== byName.teacherId) {
+          addTeacherUnsavedWarning_(
+            warnings,
+            sourceLabel +
+              ': teacherName/teacherId 不一致を検出しました: ' +
+              name + ' / ' + storedTeacherId +
+              ' -> ' + byName.teacherId
+          );
+        }
+        return byName.teacherId;
       }
-      return byName.teacherId;
-    }
 
-    if (name && !byName) {
       addTeacherUnsavedWarning_(
         warnings,
         sourceLabel + ': 担当者名から teacherId を解決できません: ' + name
       );
+      return '';
     }
 
     if (storedTeacherId && !byId) {
