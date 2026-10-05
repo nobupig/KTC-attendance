@@ -4,6 +4,9 @@ const TEACHING_ASSIGNMENT_REVISION_PROPERTY_ =
 const TEACHING_ASSIGNMENT_EDIT_TRIGGER_HANDLER_ =
   'handleTeachingAssignmentIntegrityEdit';
 
+const TEACHING_ASSIGNMENT_CHANGE_TRIGGER_HANDLER_ =
+  'handleTeachingAssignmentIntegrityChange';
+
 function getTeachingAssignmentRevision_() {
   return PropertiesService.getScriptProperties()
     .getProperty(TEACHING_ASSIGNMENT_REVISION_PROPERTY_) || 'r0';
@@ -327,6 +330,53 @@ function handleTeachingAssignmentIntegrityEdit(e) {
   };
 }
 
+function handleTeachingAssignmentIntegrityChange(e) {
+  if (!e || !e.source) return;
+
+  const changeType = normalizeString_(e.changeType).toUpperCase();
+  const structuralChangeTypes = {
+    INSERT_ROW: true,
+    REMOVE_ROW: true,
+    INSERT_COLUMN: true,
+    REMOVE_COLUMN: true
+  };
+
+  // セル値の変更は onEdit 側で処理する。
+  // 行・列の追加削除だけは onEdit では捕捉できないため、
+  // onChange 側で担当割当キャッシュを無効化する。
+  if (!structuralChangeTypes[changeType]) return;
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) {
+    throw new Error('担当教員構造変更チェックのロックを取得できませんでした。');
+  }
+
+  let revision = '';
+  try {
+    revision = bumpTeachingAssignmentRevision_();
+    invalidateTeachingAssignmentReadCaches_();
+    markTeacherUnsavedFastCacheStaleAfterAssignmentEdit_();
+  } finally {
+    lock.releaseLock();
+  }
+
+  const rebuildResult = rebuildTeacherUnsavedFastCacheAfterAssignmentEdit_();
+
+  Logger.log(JSON.stringify({
+    event: 'teaching-assignment-structural-change',
+    changeType: changeType,
+    teachingAssignmentRevision: revision,
+    cacheRebuildOk: !!(rebuildResult && rebuildResult.ok)
+  }));
+
+  return {
+    ok: true,
+    changeType: changeType,
+    teachingAssignmentRevision: revision,
+    cacheRebuild: rebuildResult
+  };
+}
+
 function auditTeacherAssignmentIntegrity() {
   const ss = getOperationSpreadsheet();
   const index = getTeacherAssignmentCanonicalIndex_();
@@ -450,41 +500,63 @@ function repairTeacherAssignmentIntegrityNow() {
 }
 
 function getTeachingAssignmentIntegrityTriggerStatus() {
-  const triggers = ScriptApp.getProjectTriggers().filter(function(trigger) {
+  const allTriggers = ScriptApp.getProjectTriggers();
+  const editTriggers = allTriggers.filter(function(trigger) {
     return trigger.getHandlerFunction() === TEACHING_ASSIGNMENT_EDIT_TRIGGER_HANDLER_;
+  });
+  const changeTriggers = allTriggers.filter(function(trigger) {
+    return trigger.getHandlerFunction() === TEACHING_ASSIGNMENT_CHANGE_TRIGGER_HANDLER_;
   });
 
   return {
     ok: true,
-    handlerFunction: TEACHING_ASSIGNMENT_EDIT_TRIGGER_HANDLER_,
-    triggerCount: triggers.length,
+    editHandlerFunction: TEACHING_ASSIGNMENT_EDIT_TRIGGER_HANDLER_,
+    changeHandlerFunction: TEACHING_ASSIGNMENT_CHANGE_TRIGGER_HANDLER_,
+    editTriggerCount: editTriggers.length,
+    changeTriggerCount: changeTriggers.length,
+    triggerCount: editTriggers.length + changeTriggers.length,
     teachingAssignmentRevision: getTeachingAssignmentRevision_()
   };
 }
 
 function installTeachingAssignmentIntegrityTrigger() {
+  const targetHandlers = {};
+  targetHandlers[TEACHING_ASSIGNMENT_EDIT_TRIGGER_HANDLER_] = true;
+  targetHandlers[TEACHING_ASSIGNMENT_CHANGE_TRIGGER_HANDLER_] = true;
+
   const existing = ScriptApp.getProjectTriggers().filter(function(trigger) {
-    return trigger.getHandlerFunction() === TEACHING_ASSIGNMENT_EDIT_TRIGGER_HANDLER_;
+    return !!targetHandlers[trigger.getHandlerFunction()];
   });
 
   existing.forEach(function(trigger) {
     ScriptApp.deleteTrigger(trigger);
   });
 
+  const spreadsheet = getOperationSpreadsheet();
+
   ScriptApp.newTrigger(TEACHING_ASSIGNMENT_EDIT_TRIGGER_HANDLER_)
-    .forSpreadsheet(getOperationSpreadsheet())
+    .forSpreadsheet(spreadsheet)
     .onEdit()
+    .create();
+
+  ScriptApp.newTrigger(TEACHING_ASSIGNMENT_CHANGE_TRIGGER_HANDLER_)
+    .forSpreadsheet(spreadsheet)
+    .onChange()
     .create();
 
   const status = getTeachingAssignmentIntegrityTriggerStatus();
   status.removedCount = existing.length;
-  status.createdCount = 1;
+  status.createdCount = 2;
   return status;
 }
 
 function removeTeachingAssignmentIntegrityTrigger() {
+  const targetHandlers = {};
+  targetHandlers[TEACHING_ASSIGNMENT_EDIT_TRIGGER_HANDLER_] = true;
+  targetHandlers[TEACHING_ASSIGNMENT_CHANGE_TRIGGER_HANDLER_] = true;
+
   const existing = ScriptApp.getProjectTriggers().filter(function(trigger) {
-    return trigger.getHandlerFunction() === TEACHING_ASSIGNMENT_EDIT_TRIGGER_HANDLER_;
+    return !!targetHandlers[trigger.getHandlerFunction()];
   });
 
   existing.forEach(function(trigger) {
