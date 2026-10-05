@@ -1750,6 +1750,7 @@ function buildTeacherUnsavedCacheBuildResult_(snapshot, elapsedMs, wroteSheets) 
     endYmd: snapshot.endYmd,
     checkedAt: formatTeacherUnsavedCacheDateTime_(snapshot.checkedAt),
     attendanceSessionsRowCountAtStart: snapshot.attendanceSessionsRowCount,
+    teachingAssignmentRevision: snapshot.teachingAssignmentRevision,
     teacherCount: snapshot.teacherCount,
     unsavedTeacherCount: snapshot.unsavedTeacherCount,
     summaryRowCount: snapshot.summaryRows.length,
