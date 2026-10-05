@@ -102,6 +102,8 @@ function rebuildTeacherUnsavedSummaryCache() {
           conflictReason: error.reason || '',
           expectedAttendanceSessionsRowCount: error.expectedRowCount,
           actualAttendanceSessionsRowCount: error.actualRowCount,
+          expectedTeachingAssignmentRevision: error.expectedTeachingAssignmentRevision || '',
+          actualTeachingAssignmentRevision: error.actualTeachingAssignmentRevision || '',
           willRetry: attempt < TEACHER_UNSAVED_CACHE_REBUILD_MAX_ATTEMPTS_
         }));
 
@@ -589,6 +591,7 @@ function debugLogCompareTeacherUnsavedCacheForCurrentUser() {
 
 function buildTeacherUnsavedCacheSnapshot_() {
   const checkedAt = new Date();
+  const teachingAssignmentRevision = getTeachingAssignmentRevision_();
   const attendanceSessionsRowCount = getTeacherUnsavedAttendanceSessionsRowCount_();
   const dateContext = getTeacherUnsavedCacheDateContext_(checkedAt);
   const snapshotId = buildTeacherUnsavedSnapshotId_(checkedAt);
@@ -729,6 +732,7 @@ function buildTeacherUnsavedCacheSnapshot_() {
     endYmd: dateContext.endYmd,
     checkedAt: checkedAt,
     attendanceSessionsRowCount: attendanceSessionsRowCount,
+    teachingAssignmentRevision: teachingAssignmentRevision,
     summaryRows: summaryRows,
     detailRows: detailRows,
     teacherCount: teacherIndex.teachers.length,
@@ -924,6 +928,46 @@ function buildTeacherUnsavedAssignmentMap_(timetableData, teamData, teacherIndex
 
   const map = {};
 
+  function resolveAssignmentTeacherId_(teacherIdRaw, teacherName, sourceLabel) {
+    const storedTeacherId = normalizeString_(teacherIdRaw);
+    const name = normalizeString_(teacherName);
+    const byName = name ? teacherIndex.byName[name] : null;
+    const byId = storedTeacherId ? teacherIndex.byId[storedTeacherId] : null;
+
+    // teacherName が入力されている場合は名前を優先する。
+    // 名前が解決できないのに旧 teacherId へフォールバックすると、
+    // 誤担当をFastキャッシュへ残すため、ここは fail-safe で除外する。
+    if (name) {
+      if (byName) {
+        if (storedTeacherId && storedTeacherId !== byName.teacherId) {
+          addTeacherUnsavedWarning_(
+            warnings,
+            sourceLabel +
+              ': teacherName/teacherId 不一致を検出しました: ' +
+              name + ' / ' + storedTeacherId +
+              ' -> ' + byName.teacherId
+          );
+        }
+        return byName.teacherId;
+      }
+
+      addTeacherUnsavedWarning_(
+        warnings,
+        sourceLabel + ': 担当者名から teacherId を解決できません: ' + name
+      );
+      return '';
+    }
+
+    if (storedTeacherId && !byId) {
+      addTeacherUnsavedWarning_(
+        warnings,
+        sourceLabel + ': teachers に存在しない teacherId です: ' + storedTeacherId
+      );
+    }
+
+    return byId ? byId.teacherId : '';
+  }
+
   timetableData.rows.forEach(function(row, index) {
     const classId = normalizeString_(row[ttCol.classId]);
     const period = normalizeString_(row[ttCol.period]);
@@ -931,29 +975,20 @@ function buildTeacherUnsavedAssignmentMap_(timetableData, teamData, teacherIndex
     const teacherName = ttCol.teacherName !== -1
       ? normalizeString_(row[ttCol.teacherName])
       : '';
-    let teacherId = ttCol.teacherId !== -1
-      ? normalizeString_(row[ttCol.teacherId])
-      : '';
-
-    if (!teacherId && teacherName && teacherIndex.byName[teacherName]) {
-      teacherId = teacherIndex.byName[teacherName].teacherId;
-    }
+    const teacherId = resolveAssignmentTeacherId_(
+      ttCol.teacherId !== -1 ? row[ttCol.teacherId] : '',
+      teacherName,
+      'timetable row ' + (index + 2)
+    );
 
     if (!classId || !period || !weekday) return;
 
     const key = [classId, weekday, period].join('__');
 
-    // 現行 getTeacherUnsavedContext_ と同じく、同一キーの timetable 行は後勝ちにする。
+    // 現行仕様どおり、同一キーの timetable 行は後勝ち。
     map[key] = {
       teacherIds: teacherId ? [teacherId] : []
     };
-
-    if (teacherName && !teacherId) {
-      addTeacherUnsavedWarning_(
-        warnings,
-        'timetable row ' + (index + 2) + ': 担当者名から teacherId を解決できません: ' + teacherName
-      );
-    }
   });
 
   teamData.rows.forEach(function(row, index) {
@@ -963,23 +998,13 @@ function buildTeacherUnsavedAssignmentMap_(timetableData, teamData, teacherIndex
     const teacherName = teamCol.teacherName !== -1
       ? normalizeString_(row[teamCol.teacherName])
       : '';
-    let teacherId = teamCol.teacherId !== -1
-      ? normalizeString_(row[teamCol.teacherId])
-      : '';
+    const teacherId = resolveAssignmentTeacherId_(
+      teamCol.teacherId !== -1 ? row[teamCol.teacherId] : '',
+      teacherName,
+      'classTeacherTeams row ' + (index + 2)
+    );
 
-    if (!teacherId && teacherName && teacherIndex.byName[teacherName]) {
-      teacherId = teacherIndex.byName[teacherName].teacherId;
-    }
-
-    if (!classId || !period || !weekday || !teacherId) {
-      if (teacherName && !teacherId) {
-        addTeacherUnsavedWarning_(
-          warnings,
-          'classTeacherTeams row ' + (index + 2) + ': 担当者名から teacherId を解決できません: ' + teacherName
-        );
-      }
-      return;
-    }
+    if (!classId || !period || !weekday || !teacherId) return;
 
     const key = [classId, weekday, period].join('__');
     if (!map[key]) {
@@ -993,7 +1018,6 @@ function buildTeacherUnsavedAssignmentMap_(timetableData, teamData, teacherIndex
 
   return map;
 }
-
 function buildTeacherUnsavedSavedKeySet_(data, startYmd, endYmd) {
   const col = resolveTeacherUnsavedRequiredColumns_(
     'attendanceSessions',
@@ -1051,6 +1075,20 @@ function buildTeacherUnsavedCachePublishConflict_(expectedRowCount, actualRowCou
   error.reason = 'attendance-sessions-row-count-changed';
   error.expectedRowCount = expectedRowCount;
   error.actualRowCount = actualRowCount;
+  return error;
+}
+
+function buildTeacherUnsavedAssignmentRevisionConflict_(expectedRevision, actualRevision) {
+  const error = new Error(
+    'キャッシュ計算中に担当教員設定が更新されました。' +
+    ' expectedRevision=' + expectedRevision +
+    ' actualRevision=' + actualRevision
+  );
+  error.name = 'TeacherUnsavedCachePublishConflictError';
+  error.retryable = true;
+  error.reason = 'teaching-assignment-revision-changed';
+  error.expectedTeachingAssignmentRevision = expectedRevision;
+  error.actualTeachingAssignmentRevision = actualRevision;
   return error;
 }
 
@@ -1209,6 +1247,14 @@ function publishTeacherUnsavedCacheSnapshot_(snapshot) {
       throw buildTeacherUnsavedCachePublishConflict_(
         snapshot.attendanceSessionsRowCount,
         currentAttendanceSessionsRowCount
+      );
+    }
+
+    const currentTeachingAssignmentRevision = getTeachingAssignmentRevision_();
+    if (currentTeachingAssignmentRevision !== snapshot.teachingAssignmentRevision) {
+      throw buildTeacherUnsavedAssignmentRevisionConflict_(
+        snapshot.teachingAssignmentRevision,
+        currentTeachingAssignmentRevision
       );
     }
 
@@ -1706,6 +1752,7 @@ function buildTeacherUnsavedCacheBuildResult_(snapshot, elapsedMs, wroteSheets) 
     endYmd: snapshot.endYmd,
     checkedAt: formatTeacherUnsavedCacheDateTime_(snapshot.checkedAt),
     attendanceSessionsRowCountAtStart: snapshot.attendanceSessionsRowCount,
+    teachingAssignmentRevision: snapshot.teachingAssignmentRevision,
     teacherCount: snapshot.teacherCount,
     unsavedTeacherCount: snapshot.unsavedTeacherCount,
     summaryRowCount: snapshot.summaryRows.length,
