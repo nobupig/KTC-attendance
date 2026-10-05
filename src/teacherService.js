@@ -75,7 +75,7 @@ function getTeacherRecordByName_(name) {
 }
 
 function getClassTeacherTeamRows_() {
-  const cacheKey = 'classTeacherTeamRows__all';
+  const cacheKey = 'classTeacherTeamRows__v2__' + getTeachingAssignmentRevision_();
   const cached = getScriptCacheJson_(cacheKey);
   if (cached !== null) {
     return cached;
@@ -94,14 +94,46 @@ function getClassTeacherTeamRows_() {
   return rows;
 }
 
-function buildTeacherTeamMember_(teacherId, teacherName, roleType) {
-  let record = null;
+function resolveTeacherRecordForAssignment_(teacherId, teacherName, sourceLabel) {
+  const normalizedId = normalizeString_(teacherId);
+  const normalizedName = normalizeString_(teacherName);
+  const byName = normalizedName ? getTeacherRecordByName_(normalizedName) : null;
+  const byId = normalizedId ? getTeacherRecordById_(normalizedId) : null;
+  const source = normalizeString_(sourceLabel || 'assignment');
 
-  if (teacherId) {
-    record = getTeacherRecordById_(teacherId);
-  } else if (teacherName) {
-    record = getTeacherRecordByName_(teacherName);
+  if (
+    byName &&
+    byId &&
+    byName.teacherId !== byId.teacherId
+  ) {
+    Logger.log(
+      '[TEACHER_ASSIGNMENT_MISMATCH] source=' + source +
+      ' teacherName=' + normalizedName +
+      ' storedTeacherId=' + normalizedId +
+      ' resolvedTeacherId=' + byName.teacherId
+    );
+    return byName;
   }
+
+  if (byName) return byName;
+
+  if (normalizedName && !byName) {
+    Logger.log(
+      '[TEACHER_ASSIGNMENT_NAME_UNRESOLVED] source=' + source +
+      ' teacherName=' + normalizedName +
+      ' storedTeacherId=' + normalizedId
+    );
+  }
+
+  return byId || null;
+}
+
+function buildTeacherTeamMember_(teacherId, teacherName, roleType) {
+  const record = resolveTeacherRecordForAssignment_(
+    teacherId,
+    teacherName,
+    'teacherService'
+  );
 
   return {
     teacherId: record ? record.teacherId : normalizeString_(teacherId),
@@ -116,7 +148,7 @@ function getTeacherAssignmentsByClassId_(classId) {
   const targetClassId = normalizeString_(classId);
   if (!targetClassId) return [];
 
-  const cacheKey = 'teacherAssignmentsByClassId__' + targetClassId;
+  const cacheKey = 'teacherAssignmentsByClassId__v2__' + getTeachingAssignmentRevision_() + '__' + targetClassId;
   const cached = getScriptCacheJson_(cacheKey);
   if (cached !== null) {
     return cached;
@@ -166,7 +198,7 @@ function getTeacherAssignmentsByClassPeriod_(classId, weekday, period) {
 
   if (!targetClassId || !targetPeriod) return [];
 
-  const cacheKey = 'teacherAssignmentsByClassPeriod__' + [targetClassId, targetWeekday, targetPeriod].join('__');
+  const cacheKey = 'teacherAssignmentsByClassPeriod__v2__' + getTeachingAssignmentRevision_() + '__' + [targetClassId, targetWeekday, targetPeriod].join('__');
   const cached = getScriptCacheJson_(cacheKey);
   if (cached !== null) {
     return cached;
