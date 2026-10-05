@@ -59,24 +59,31 @@ function resolveTeacherAssignmentCanonicalRecord_(teacherId, teacherName, index)
   const normalizedName = normalizeString_(teacherName);
   const sourceIndex = index || getTeacherAssignmentCanonicalIndex_();
 
-  if (
-    normalizedName &&
-    !sourceIndex.ambiguousNames[normalizedName] &&
-    sourceIndex.byName[normalizedName]
-  ) {
-    return {
-      record: sourceIndex.byName[normalizedName],
-      resolution: 'name'
-    };
-  }
+  // teacherName が入力されている場合は、名前を人間が選択した意図として優先する。
+  // 名前がマスタで一意に解決できない時は、古い teacherId へフォールバックしない。
+  // これにより「名前だけ変更したがIDが旧担当のまま」の再発を fail-safe で防ぐ。
+  if (normalizedName) {
+    if (sourceIndex.ambiguousNames[normalizedName]) {
+      return {
+        record: null,
+        resolution: 'ambiguous-name'
+      };
+    }
 
-  if (normalizedName && sourceIndex.ambiguousNames[normalizedName]) {
+    if (sourceIndex.byName[normalizedName]) {
+      return {
+        record: sourceIndex.byName[normalizedName],
+        resolution: 'name'
+      };
+    }
+
     return {
       record: null,
-      resolution: 'ambiguous-name'
+      resolution: 'name-not-found'
     };
   }
 
+  // 名前が空欄の場合だけ、既存 teacherId から正規レコードを復元する。
   if (normalizedId && sourceIndex.byId[normalizedId]) {
     return {
       record: sourceIndex.byId[normalizedId],
@@ -86,7 +93,7 @@ function resolveTeacherAssignmentCanonicalRecord_(teacherId, teacherName, index)
 
   return {
     record: null,
-    resolution: normalizedName ? 'name-not-found' : 'id-not-found'
+    resolution: 'id-not-found'
   };
 }
 
