@@ -97,35 +97,39 @@ function getClassTeacherTeamRows_() {
 function resolveTeacherRecordForAssignment_(teacherId, teacherName, sourceLabel) {
   const normalizedId = normalizeString_(teacherId);
   const normalizedName = normalizeString_(teacherName);
-  const byName = normalizedName ? getTeacherRecordByName_(normalizedName) : null;
-  const byId = normalizedId ? getTeacherRecordById_(normalizedId) : null;
   const source = normalizeString_(sourceLabel || 'assignment');
+  const index = getTeacherAssignmentCanonicalIndex_();
+  const resolved = resolveTeacherAssignmentCanonicalRecord_(
+    normalizedId,
+    normalizedName,
+    index
+  );
+  const record = resolved.record;
 
   if (
-    byName &&
-    byId &&
-    byName.teacherId !== byId.teacherId
+    record &&
+    normalizedName &&
+    normalizedId &&
+    record.teacherId !== normalizedId
   ) {
     Logger.log(
       '[TEACHER_ASSIGNMENT_MISMATCH] source=' + source +
       ' teacherName=' + normalizedName +
       ' storedTeacherId=' + normalizedId +
-      ' resolvedTeacherId=' + byName.teacherId
+      ' resolvedTeacherId=' + record.teacherId
     );
-    return byName;
   }
 
-  if (byName) return byName;
-
-  if (normalizedName && !byName) {
+  if (!record && normalizedName) {
     Logger.log(
       '[TEACHER_ASSIGNMENT_NAME_UNRESOLVED] source=' + source +
       ' teacherName=' + normalizedName +
-      ' storedTeacherId=' + normalizedId
+      ' storedTeacherId=' + normalizedId +
+      ' resolution=' + resolved.resolution
     );
   }
 
-  return byId || null;
+  return record || null;
 }
 
 function buildTeacherTeamMember_(teacherId, teacherName, roleType) {
