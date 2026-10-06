@@ -60,13 +60,64 @@ function canEditAttendance(session) {
   const weekday = getWeekdayFromYmdJst_(formatDateToYmd(session.date));
   const assignment = getTeacherAssignmentByClassPeriod_(session.classId, weekday, session.period);
 
-  if (!assignment || !Array.isArray(assignment.teachers)) {
+  if (assignment && Array.isArray(assignment.teachers)) {
+    const matchedByResolvedAssignment = assignment.teachers.some(function(t) {
+      return normalizeString_(t.teacherId) === normalizeString_(user.teacherId);
+    });
+
+    if (matchedByResolvedAssignment) {
+      return true;
+    }
+  }
+
+  // Version 192 では担当者の正規化を強化したが、保存権限判定まで
+  // 正規化結果だけに依存すると、解決失敗時に正しい担当教員を拒否してしまう。
+  // Operation 上の teacherId が classId / weekday / period に直接一致する場合は
+  // 従来どおり保存を許可する。teacherId の完全一致だけを見るため権限は拡張しない。
+  const matchedByDirectAssignment = hasDirectTeachingAssignmentForSession_(
+    user.teacherId,
+    session.classId,
+    weekday,
+    session.period
+  );
+
+  if (matchedByDirectAssignment) {
+    Logger.log(
+      '[ATTENDANCE_PERMISSION_DIRECT_ASSIGNMENT_FALLBACK] teacherId=' +
+      normalizeString_(user.teacherId) +
+      ' classId=' + normalizeString_(session.classId) +
+      ' weekday=' + normalizeWeekday_(weekday) +
+      ' period=' + normalizeString_(session.period)
+    );
+  }
+
+  return matchedByDirectAssignment;
+}
+
+function hasDirectTeachingAssignmentForSession_(teacherId, classId, weekday, period) {
+  const targetTeacherId = normalizeString_(teacherId);
+  const targetClassId = normalizeString_(classId);
+  const targetWeekday = normalizeWeekday_(weekday);
+  const targetPeriod = normalizeString_(period);
+
+  if (!targetTeacherId || !targetClassId || !targetWeekday || !targetPeriod) {
     return false;
   }
 
-  return assignment.teachers.some(function(t) {
-    return normalizeString_(t.teacherId) === normalizeString_(user.teacherId);
-  });
+  const ss = openOperationSpreadsheet_();
+  const timetableRows = readSheetAsObjects_(ss, CONFIG.SHEETS.TIMETABLE);
+  const teamRows = getClassTeacherTeamRows_();
+
+  function matches(row) {
+    return (
+      normalizeString_(row.teacherId) === targetTeacherId &&
+      normalizeString_(row.classId) === targetClassId &&
+      normalizeWeekday_(row.weekday) === targetWeekday &&
+      normalizeString_(row.period) === targetPeriod
+    );
+  }
+
+  return timetableRows.some(matches) || teamRows.some(matches);
 }
 
 /**

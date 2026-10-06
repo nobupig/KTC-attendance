@@ -94,11 +94,11 @@ function getClassTeacherTeamRows_() {
   return rows;
 }
 
-function resolveTeacherRecordForAssignment_(teacherId, teacherName, sourceLabel) {
+function resolveTeacherRecordForAssignment_(teacherId, teacherName, sourceLabel, canonicalIndex) {
   const normalizedId = normalizeString_(teacherId);
   const normalizedName = normalizeString_(teacherName);
   const source = normalizeString_(sourceLabel || 'assignment');
-  const index = getTeacherAssignmentCanonicalIndex_();
+  const index = canonicalIndex || getTeacherAssignmentCanonicalIndex_();
   const resolved = resolveTeacherAssignmentCanonicalRecord_(
     normalizedId,
     normalizedName,
