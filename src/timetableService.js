@@ -49,6 +49,8 @@ function getClassesForCurrentUserByDate(targetDate) {
     roleType: findColumnIndex_(teamHeaders, ['roleType', '役割'])
   };
 
+  const teacherAssignmentIndex = getTeacherAssignmentCanonicalIndex_();
+
   const timetableMapStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const timetableMap = {};
   timetable.forEach(function(row) {
@@ -60,7 +62,8 @@ function getClassesForCurrentUserByDate(targetDate) {
     const teacherRecord = resolveTeacherRecordForAssignment_(
       teacherIdRaw,
       teacherNameRaw,
-      'timetable'
+      'timetable',
+      teacherAssignmentIndex
     );
     const teacherId = teacherRecord ? teacherRecord.teacherId : teacherIdRaw;
     const teacherName = teacherRecord ? teacherRecord.name : teacherNameRaw;
@@ -99,7 +102,8 @@ function getClassesForCurrentUserByDate(targetDate) {
     const teacherRecord = resolveTeacherRecordForAssignment_(
       teacherIdRaw,
       teacherNameRaw,
-      'classTeacherTeams'
+      'classTeacherTeams',
+      teacherAssignmentIndex
     );
     const teacherId = teacherRecord ? teacherRecord.teacherId : teacherIdRaw;
     const teacherName = teacherRecord ? teacherRecord.name : teacherNameRaw;
@@ -941,6 +945,7 @@ function getTeacherUnsavedContext_(teacherId) {
     roleType: findColumnIndex_(teamHeaders, ['roleType', '役割'])
   };
 
+  const teacherAssignmentIndex = getTeacherAssignmentCanonicalIndex_();
   const timetableMap = {};
 
   timetable.forEach(function(row) {
@@ -952,7 +957,8 @@ function getTeacherUnsavedContext_(teacherId) {
     const teacherRecord = resolveTeacherRecordForAssignment_(
       teacherIdRaw,
       teacherNameRaw,
-      'teacherUnsavedContext:timetable'
+      'teacherUnsavedContext:timetable',
+      teacherAssignmentIndex
     );
     const teacherIdInRow = teacherRecord ? teacherRecord.teacherId : teacherIdRaw;
     const teacherName = teacherRecord ? teacherRecord.name : teacherNameRaw;
@@ -979,7 +985,8 @@ function getTeacherUnsavedContext_(teacherId) {
     const teacherRecord = resolveTeacherRecordForAssignment_(
       teacherIdRaw,
       teacherNameRaw,
-      'teacherUnsavedContext:classTeacherTeams'
+      'teacherUnsavedContext:classTeacherTeams',
+      teacherAssignmentIndex
     );
     const teacherIdInRow = teacherRecord ? teacherRecord.teacherId : teacherIdRaw;
     const teacherName = teacherRecord ? teacherRecord.name : teacherNameRaw;
