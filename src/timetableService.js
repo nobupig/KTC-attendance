@@ -504,13 +504,36 @@ function buildExperimentSessionKeyForTimetable_(classId, date, period) {
  * savedByCurrentUser は呼び出し側で付与する
  */
 function getSavedSessionMapByDateCached_(ymd) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const cacheKey = 'savedSessionMapByDate__' + ymd;
   const cached = getScriptCacheJson_(cacheKey);
+
   if (cached) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getSavedSessionMapByDateCached_ total',
+        totalStartedAt,
+        'cache=hit keys=' + Object.keys(cached).length + ' ymd=' + ymd
+      );
+    }
     return cached;
   }
 
-  const attendanceSessionsData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.ATTENDANCE_SESSIONS, 60);
+  const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const attendanceSessionsData = getSheetDataCached_(
+    'OPERATION',
+    CONFIG.SHEETS.ATTENDANCE_SESSIONS,
+    60
+  );
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSavedSessionMapByDateCached_ load sheet',
+      loadStartedAt,
+      'rows=' + attendanceSessionsData.rows.length + ' ymd=' + ymd
+    );
+  }
+
   const headers = attendanceSessionsData.headers;
   const rows = attendanceSessionsData.rows;
 
@@ -524,9 +547,22 @@ function getSavedSessionMapByDateCached_(ymd) {
     targetSessionKey: findColumnIndex_(headers, ['targetSessionKey']),
     savedModeLabel: findColumnIndex_(headers, ['savedModeLabel'])
   };
-  validateRequiredColumnsForTimetable_('attendanceSessions', asCol, ['classId', 'date', 'period']);
+
+  validateRequiredColumnsForTimetable_(
+    'attendanceSessions',
+    asCol,
+    ['classId', 'date', 'period']
+  );
 
   const map = {};
+  const scanStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  function setLatest_(key, info) {
+    if (!key) return;
+    if (!map[key] || Number(info._ms || 0) >= Number(map[key]._ms || 0)) {
+      map[key] = info;
+    }
+  }
 
   rows.forEach(function(row) {
     const rowDate = fastYmdFromCell_(row[asCol.date]);
@@ -537,27 +573,68 @@ function getSavedSessionMapByDateCached_(ymd) {
     if (!rowClassId || !rowPeriod) return;
 
     const key = [rowClassId, rowDate, rowPeriod].join('__');
+
     const teacherEmail = asCol.teacherEmail !== -1
       ? normalizeString_(row[asCol.teacherEmail]).toLowerCase()
       : '';
 
     const accessedAtRaw = asCol.accessedAt !== -1 ? row[asCol.accessedAt] : '';
-    const accessedAt = accessedAtRaw instanceof Date ? accessedAtRaw : new Date(accessedAtRaw);
+    const accessedAt = accessedAtRaw instanceof Date
+      ? accessedAtRaw
+      : new Date(accessedAtRaw);
     const accessedAtMs = isNaN(accessedAt.getTime()) ? 0 : accessedAt.getTime();
+    const accessedAtSerialized = accessedAtRaw instanceof Date
+      ? accessedAtRaw.toISOString()
+      : String(accessedAtRaw || '');
 
-    if (!map[key] || accessedAtMs >= map[key]._ms) {
-      map[key] = {
-        teacherEmail: teacherEmail,
-        savedAtText: formatDateTimeJst_(accessedAtRaw),
-        actionType: asCol.actionType !== -1 ? normalizeString_(row[asCol.actionType]) : '',
-        targetSessionKey: asCol.targetSessionKey !== -1 ? normalizeString_(row[asCol.targetSessionKey]) : '',
-        savedModeLabel: asCol.savedModeLabel !== -1 ? normalizeString_(row[asCol.savedModeLabel]) : '',
-        _ms: accessedAtMs
-      };
+    const info = {
+      teacherEmail: teacherEmail,
+      savedAt: accessedAtSerialized,
+      savedAtText: formatDateTimeJst_(accessedAtRaw),
+      actionType: asCol.actionType !== -1
+        ? normalizeString_(row[asCol.actionType])
+        : '',
+      targetSessionKey: asCol.targetSessionKey !== -1
+        ? normalizeString_(row[asCol.targetSessionKey])
+        : key,
+      savedModeLabel: asCol.savedModeLabel !== -1
+        ? normalizeString_(row[asCol.savedModeLabel])
+        : '',
+      _ms: accessedAtMs
+    };
+
+    setLatest_(key, info);
+
+    const experimentKey = buildExperimentSessionKeyForTimetable_(
+      rowClassId,
+      rowDate,
+      rowPeriod
+    );
+    if (experimentKey) {
+      setLatest_(experimentKey, info);
     }
   });
 
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSavedSessionMapByDateCached_ scan rows',
+      scanStartedAt,
+      'rows=' + rows.length +
+      ' keys=' + Object.keys(map).length +
+      ' ymd=' + ymd
+    );
+  }
+
   putScriptCacheJson_(cacheKey, map, 60);
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSavedSessionMapByDateCached_ total',
+      totalStartedAt,
+      'cache=miss keys=' + Object.keys(map).length + ' ymd=' + ymd
+    );
+  }
+
   return map;
 }
 
@@ -1204,7 +1281,100 @@ function getWeekdayFromYmdJst_(ymd) {
 }
 
 function getSaveStatusForTeacherSessions(sessionItems) {
-  return getSaveStatusForTeacherSessionsDirect_(sessionItems);
+  return getSaveStatusForTeacherSessionsCached_(sessionItems);
+}
+
+function getSaveStatusForTeacherSessionsCached_(sessionItems) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const items = Array.isArray(sessionItems) ? sessionItems : [];
+  const result = {};
+  const targets = [];
+  const dateSet = {};
+
+  items.forEach(function(item) {
+    const classId = normalizeString_(item.classId);
+    const date = formatDateToYmd(item.date);
+    const period = normalizeString_(item.period);
+
+    if (!classId || !date || !period) return;
+
+    const key = [classId, date, period].join('__');
+    const experimentKey = buildExperimentSessionKeyForTimetable_(classId, date, period);
+
+    result[key] = {
+      isSaved: false,
+      lastSavedInfo: null,
+      saveStatusNotLoaded: false
+    };
+
+    targets.push({
+      key: key,
+      date: date,
+      experimentKey: experimentKey
+    });
+    dateSet[date] = true;
+  });
+
+  if (targets.length === 0) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_('getSaveStatusForTeacherSessionsCached_ total', totalStartedAt, 'empty');
+    }
+    return result;
+  }
+
+  const mapByDate = {};
+  Object.keys(dateSet).forEach(function(date) {
+    mapByDate[date] = getSavedSessionMapByDateCached_(date);
+  });
+
+  let foundCount = 0;
+
+  targets.forEach(function(target) {
+    const dateMap = mapByDate[target.date] || {};
+    const exactInfo = dateMap[target.key] || null;
+    const experimentInfo = target.experimentKey
+      ? (dateMap[target.experimentKey] || null)
+      : null;
+
+    let latest = exactInfo;
+
+    if (
+      experimentInfo &&
+      (!latest || Number(experimentInfo._ms || 0) >= Number(latest._ms || 0))
+    ) {
+      latest = experimentInfo;
+    }
+
+    if (!latest) return;
+
+    foundCount++;
+
+    result[target.key] = {
+      isSaved: true,
+      lastSavedInfo: {
+        teacherEmail: latest.teacherEmail || '',
+        savedAt: latest.savedAt || '',
+        savedAtText: latest.savedAtText || '',
+        actionType: latest.actionType || '',
+        targetSessionKey: latest.targetSessionKey || '',
+        savedModeLabel: latest.savedModeLabel || ''
+      },
+      saveStatusNotLoaded: false
+    };
+  });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSaveStatusForTeacherSessionsCached_ total',
+      totalStartedAt,
+      'targets=' + targets.length +
+      ' found=' + foundCount +
+      ' dates=' + Object.keys(dateSet).length
+    );
+  }
+
+  return result;
 }
 
 function getSaveStatusForTeacherSessionsDirect_(sessionItems) {
