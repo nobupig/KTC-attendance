@@ -15,12 +15,21 @@ function savePastNoAbsenceAttendance(payload) {
 }
 
 function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const spreadsheetStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const ss = getOperationSpreadsheet();
   const attendanceSessionsSheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE_SESSIONS);
   const attendanceSheet = ss.getSheetByName(CONFIG.SHEETS.ATTENDANCE);
+  if (typeof logPerf_ === 'function') {
+    logPerf_('saveNoAbsenceAttendanceInternal_ open sheets', spreadsheetStartedAt);
+  }
 
+  const lockStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
+  if (typeof logPerf_ === 'function') {
+    logPerf_('saveNoAbsenceAttendanceInternal_ acquire lock', lockStartedAt);
+  }
 
   try {
     if (!payload) {
@@ -50,7 +59,12 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
       period: targetPeriod
     };
 
-    if (!canEditAttendance(session)) {
+    const permissionStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+    const canEdit = canEditAttendance(session);
+    if (typeof logPerf_ === 'function') {
+      logPerf_('saveNoAbsenceAttendanceInternal_ permission', permissionStartedAt);
+    }
+    if (!canEdit) {
       throw new Error("この授業の出席を編集する権限がありません");
     }
 
@@ -66,9 +80,17 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
       throw new Error("attendance シートが見つかりません");
     }
 
+    const attendanceLoadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
     const values = attendanceSheet.getDataRange().getValues();
     const headers = values.length > 0 ? values[0] : [];
     const rows = values.length > 1 ? values.slice(1) : [];
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveNoAbsenceAttendanceInternal_ load attendance',
+        attendanceLoadStartedAt,
+        'rows=' + rows.length
+      );
+    }
 
     const col = {
       classId: headers.indexOf("classId"),
@@ -86,6 +108,7 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
     });
 
     const rowsToClear = [];
+    const attendanceScanStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
     rows.forEach(function(row, index) {
       const rowClassId = String(row[col.classId] || "").trim();
@@ -103,6 +126,15 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
 
     rowsToClear.sort(function(a, b) { return a - b; });
 
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveNoAbsenceAttendanceInternal_ scan attendance',
+        attendanceScanStartedAt,
+        'rows=' + rows.length + ' clear=' + rowsToClear.length
+      );
+    }
+
+    const clearStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
     if (rowsToClear.length > 0) {
       if (isSequentialRows_(rowsToClear)) {
         attendanceSheet
@@ -116,7 +148,15 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
         });
       }
     }
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveNoAbsenceAttendanceInternal_ clear attendance',
+        clearStartedAt,
+        'clear=' + rowsToClear.length
+      );
+    }
 
+    const appendStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
     appendAttendanceSessionLog_(attendanceSessionsSheet, [
       targetClassId,
       targetDate,
@@ -127,15 +167,32 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
       targetSessionKey,
       savedModeLabel
     ]);
+    if (typeof logPerf_ === 'function') {
+      logPerf_('saveNoAbsenceAttendanceInternal_ append session log', appendStartedAt);
+    }
 
+    const unsavedInvalidateStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
     tryInvalidateTeacherUnsavedFastSnapshotAfterSaveUnderLock_(
       targetClassId,
       targetDate,
       targetPeriod,
       actionType
     );
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveNoAbsenceAttendanceInternal_ invalidate unsaved snapshot',
+        unsavedInvalidateStartedAt
+      );
+    }
 
+    const attendanceInvalidateStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
     invalidateAttendanceCaches_(targetClassId, targetDate, targetPeriod);
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveNoAbsenceAttendanceInternal_ invalidate attendance caches',
+        attendanceInvalidateStartedAt
+      );
+    }
 
     const currentUser = getCurrentUserContext();
     const currentTeacherId = currentUser && currentUser.teacherId
@@ -160,7 +217,15 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
         buildTeacherUnsavedDetailsCacheKey_(currentTeacherId, summaryEndYmd)
       );
     }
+    const teacherCacheInvalidateStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
     removeScriptCacheKeys_(teacherUnsavedCacheKeys);
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveNoAbsenceAttendanceInternal_ invalidate teacher caches',
+        teacherCacheInvalidateStartedAt,
+        'keys=' + teacherUnsavedCacheKeys.length
+      );
+    }
 
     const lastSavedInfo = {
       teacherEmail: currentUserEmail,
@@ -171,6 +236,14 @@ function saveNoAbsenceAttendanceInternal_(payload, allowPastEdit) {
       savedModeLabel: savedModeLabel,
       savedByCurrentUser: true
     };
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'saveNoAbsenceAttendanceInternal_ total',
+        totalStartedAt,
+        'clear=' + rowsToClear.length
+      );
+    }
 
     return {
       success: true,
