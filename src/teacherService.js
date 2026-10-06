@@ -75,7 +75,7 @@ function getTeacherRecordByName_(name) {
 }
 
 function getClassTeacherTeamRows_() {
-  const cacheKey = 'classTeacherTeamRows__all';
+  const cacheKey = 'classTeacherTeamRows__v193__' + getTeachingAssignmentRevision_();
   const cached = getScriptCacheJson_(cacheKey);
   if (cached !== null) {
     return cached;
@@ -116,7 +116,7 @@ function getTeacherAssignmentsByClassId_(classId) {
   const targetClassId = normalizeString_(classId);
   if (!targetClassId) return [];
 
-  const cacheKey = 'teacherAssignmentsByClassId__' + targetClassId;
+  const cacheKey = 'teacherAssignmentsByClassId__v193__' + getTeachingAssignmentRevision_() + '__' + targetClassId;
   const cached = getScriptCacheJson_(cacheKey);
   if (cached !== null) {
     return cached;
@@ -166,7 +166,7 @@ function getTeacherAssignmentsByClassPeriod_(classId, weekday, period) {
 
   if (!targetClassId || !targetPeriod) return [];
 
-  const cacheKey = 'teacherAssignmentsByClassPeriod__' + [targetClassId, targetWeekday, targetPeriod].join('__');
+  const cacheKey = 'teacherAssignmentsByClassPeriod__v193__' + getTeachingAssignmentRevision_() + '__' + [targetClassId, targetWeekday, targetPeriod].join('__');
   const cached = getScriptCacheJson_(cacheKey);
   if (cached !== null) {
     return cached;
