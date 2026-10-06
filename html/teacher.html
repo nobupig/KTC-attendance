@@ -5912,7 +5912,10 @@ function handleNoAbsenceSaveClick(cls) {
         .withFailureHandler(function(error) {
           setTeacherSavingState(false);
           markDirty(true);
-          showMessage("保存に失敗しました", "error");
+          const errorMessage = error && error.message
+            ? String(error.message)
+            : "不明なエラー";
+          showMessage("保存に失敗しました。 " + errorMessage, "error");
           console.error(error);
         });
 
