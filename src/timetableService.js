@@ -18,128 +18,24 @@ function getClassesForCurrentUserByDate(targetDate) {
   : formatDateToYmd(new Date());
 
   const loadSheetsStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 300);
-  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
-  const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
+  const timetableData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.TIMETABLE, 1800);
+  const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 1800);
+  const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 1800);
   if (typeof logPerf_ === 'function') {
     logPerf_('getClassesForCurrentUserByDate load base sheet data', loadSheetsStartedAt);
   }
 
-  const timetable = timetableData.rows;
   const classes = classesData.rows;
-  const teamRows = teamData.rows;
-
-  const timetableHeaders = timetableData.headers;
-  const ttCol = {
-    classId: findColumnIndex_(timetableHeaders, ['classId', 'ClassID']),
-    weekday: findColumnIndex_(timetableHeaders, ['weekday', '曜日']),
-    period: findColumnIndex_(timetableHeaders, ['period', '時限']),
-    teacherName: findColumnIndex_(timetableHeaders, ['teacherName', '担当者名', 'name']),
-    teacherId: findColumnIndex_(timetableHeaders, ['teacherId', 'TeacherID'])
-  };
-  validateRequiredColumnsForTimetable_('timetable', ttCol, ['classId', 'weekday', 'period']);
-
-  const teamHeaders = teamData.headers;
-  const teamCol = {
-    classId: findColumnIndex_(teamHeaders, ['classId', 'ClassID']),
-    weekday: findColumnIndex_(teamHeaders, ['weekday', '曜日']),
-    period: findColumnIndex_(teamHeaders, ['period', '時限']),
-    teacherName: findColumnIndex_(teamHeaders, ['teacherName', '担当者名', 'name']),
-    teacherId: findColumnIndex_(teamHeaders, ['teacherId', 'TeacherID']),
-    roleType: findColumnIndex_(teamHeaders, ['roleType', '役割'])
-  };
-
-  const timetableMapStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const timetableMap = {};
-  timetable.forEach(function(row) {
-    const classId = normalizeString_(row[ttCol.classId]);
-    const period = normalizeString_(row[ttCol.period]);
-    const weekday = ttCol.weekday !== -1 ? normalizeWeekday_(row[ttCol.weekday]) : '';
-    const teacherName = ttCol.teacherName !== -1 ? normalizeString_(row[ttCol.teacherName]) : '';
-    let teacherId = ttCol.teacherId !== -1 ? normalizeString_(row[ttCol.teacherId]) : '';
-
-    if (!teacherId && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherId = teacher ? teacher.teacherId : '';
-    }
-
-    if (!classId || !period || !weekday) return;
-
-    const key = classId + '__' + weekday + '__' + period;
-    timetableMap[key] = {
-      classId: classId,
-      weekday: weekday,
-      period: period,
-      teacherId: teacherId,
-      teacherName: teacherName,
-      teacherIds: teacherId ? [teacherId] : [],
-      teachers: teacherId ? [{
-        teacherId: teacherId,
-        teacherName: teacherName,
-        roleType: 'main'
-      }] : []
-    };
-  });
-  if (typeof logPerf_ === 'function') {
-    logPerf_('getClassesForCurrentUserByDate build timetableMap', timetableMapStartedAt, 'rows=' + timetable.length);
+  const classDayContext = getEffectiveClassDayContext_(ymd);
+  if (!classDayContext.isClassDay || !classDayContext.effectiveWeekday) {
+    return [];
   }
-
-  const teamMergeStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  teamRows.forEach(function(row) {
-    const classId = teamCol.classId !== -1 ? normalizeString_(row[teamCol.classId]) : '';
-    const period = teamCol.period !== -1 ? normalizeString_(row[teamCol.period]) : '';
-    const weekday = teamCol.weekday !== -1 ? normalizeWeekday_(row[teamCol.weekday]) : '';
-    const teacherName = teamCol.teacherName !== -1 ? normalizeString_(row[teamCol.teacherName]) : '';
-    let teacherId = teamCol.teacherId !== -1 ? normalizeString_(row[teamCol.teacherId]) : '';
-    const roleType = teamCol.roleType !== -1
-      ? normalizeString_(row[teamCol.roleType]).toLowerCase()
-      : 'support';
-
-    if (!teacherId && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherId = teacher ? teacher.teacherId : '';
-    }
-
-    if (!classId || !period || !weekday || !teacherId) return;
-
-    const key = classId + '__' + weekday + '__' + period;
-    if (!timetableMap[key]) {
-      timetableMap[key] = {
-        classId: classId,
-        weekday: weekday,
-        period: period,
-        teacherId: '',
-        teacherName: '',
-        teacherIds: [],
-        teachers: []
-      };
-    }
-
-    if (!timetableMap[key].teacherIds.includes(teacherId)) {
-      timetableMap[key].teacherIds.push(teacherId);
-      timetableMap[key].teachers.push({
-        teacherId: teacherId,
-        teacherName: teacherName,
-        roleType: roleType || 'support'
-      });
-    }
-  });
-  if (typeof logPerf_ === 'function') {
-    logPerf_('getClassesForCurrentUserByDate merge classTeacherTeams', teamMergeStartedAt, 'rows=' + teamRows.length);
-  }
-
-  // 先に「この教員が担当する授業キー」だけを抽出
-    const teacherKeyStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-    const teacherSessionKeyMap = {};
-    Object.keys(timetableMap).forEach(function(key) {
-      const tt = timetableMap[key];
-      if (tt && Array.isArray(tt.teacherIds) && tt.teacherIds.includes(currentTeacherId)) {
-        teacherSessionKeyMap[key] = true;
-      }
-    });
-    if (typeof logPerf_ === 'function') {
-      logPerf_('getClassesForCurrentUserByDate build teacherSessionKeyMap', teacherKeyStartedAt, 'keys=' + Object.keys(teacherSessionKeyMap).length);
-    }
+  // 年間累積 timetable では date の有効termで解決する。index はこのリクエスト中で共有する。
+  const assignmentIndex = buildTeachingAssignmentIndex_(
+    timetableData,
+    teamData,
+    createTeacherTeamMemberResolver_()
+  );
 
   const savedSessionStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
@@ -200,15 +96,14 @@ function getClassesForCurrentUserByDate(targetDate) {
     const period = session.period;
     const sessionNumber = session.sessionNumber;
     const sessionYmd = session.date;
-    const weekday = session.weekday;
-
-    const teacherKey = classId + '__' + weekday + '__' + period;
-    if (!teacherSessionKeyMap[teacherKey]) {
-      return;
-    }
-
-    const tt = timetableMap[teacherKey];
-    if (!tt) {
+    const tt = getTeachingAssignmentForSessionFromIndex_(
+      assignmentIndex,
+      classId,
+      sessionYmd,
+      period,
+      classDayContext
+    );
+    if (!tt || !tt.teacherIds.includes(currentTeacherId)) {
       return;
     }
 
@@ -261,7 +156,20 @@ function getClassSessionsByDateCached_(ymd) {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
   const targetYmd = formatDateToYmd(ymd);
-  const cacheKey = 'classSessionsByDate__v6__' + targetYmd;
+  const classDayInfo = getEffectiveClassDayInfo_(targetYmd);
+
+  if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getClassSessionsByDateCached_ total',
+        totalStartedAt,
+        'non-class-day ymd=' + targetYmd
+      );
+    }
+    return [];
+  }
+
+  const cacheKey = buildClassSessionsByDateCacheKey_(targetYmd);
 
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
@@ -272,7 +180,9 @@ function getClassSessionsByDateCached_(ymd) {
         'cache=hit rows=' + cached.length + ' ymd=' + targetYmd
       );
     }
-    return cached;
+    return cached.map(function(session) {
+      return Object.assign({}, session, { weekday: classDayInfo.weekday });
+    });
   }
 
   const ss = getOperationSpreadsheet();
@@ -305,26 +215,107 @@ function getClassSessionsByDateCached_(ymd) {
     logPerf_('getClassSessionsByDateCached_ resolve headers', headerStartedAt);
   }
 
+  const rangeIndexStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+  const rangeIndex = getClassSessionsDateRowRangeIndexCached_(
+    sheet,
+    csCol.date + 1,
+    lastRow
+  );
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getClassSessionsByDateCached_ row-range index',
+      rangeIndexStartedAt,
+      'cache=' + (rangeIndex.cacheHit ? 'hit' : 'miss') +
+        ' usable=' + rangeIndex.usable +
+        ' dates=' + Object.keys(rangeIndex.ranges || {}).length
+    );
+  }
+
+  const targetRange = rangeIndex.usable
+    ? rangeIndex.ranges[targetYmd]
+    : null;
+
+  if (targetRange) {
+    const targetedReadStartedAt =
+      typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+    const targetedResult = readClassSessionsTargetRowRange_(
+      sheet,
+      lastCol,
+      csCol,
+      targetYmd,
+      classDayInfo.weekday,
+      lastRow,
+      targetRange
+    );
+
+    if (targetedResult) {
+      putScriptCacheJson_(cacheKey, targetedResult, 300);
+
+      if (typeof logPerf_ === 'function') {
+        logPerf_(
+          'getClassSessionsByDateCached_ targeted row-range read',
+          targetedReadStartedAt,
+          'rows=' + targetedResult.length +
+            ' startRow=' + targetRange.startRow +
+            ' rowCount=' + targetRange.rowCount
+        );
+        logPerf_(
+          'getClassSessionsByDateCached_ total',
+          totalStartedAt,
+          'cache=miss range-index=' +
+            (rangeIndex.cacheHit ? 'hit' : 'miss') +
+            ' rows=' + targetedResult.length +
+            ' ymd=' + targetYmd
+        );
+      }
+
+      return targetedResult;
+    }
+
+    // Cached range did not match the actual local boundary anymore.
+    // Drop the compact index and fall back to the previous safe full scan.
+    removeScriptCacheKeys_([
+      getClassSessionsDateRowRangeIndexCacheKey_()
+    ]);
+  } else if (rangeIndex.usable && !rangeIndex.cacheHit) {
+    // A freshly-built full date-column index proves the date is absent.
+    putScriptCacheJson_(cacheKey, [], 300);
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getClassSessionsByDateCached_ total',
+        totalStartedAt,
+        'cache=miss fresh-index-no-range rows=0 ymd=' + targetYmd
+      );
+    }
+
+    return [];
+  }
+
   const loadStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const numRows = lastRow - 1;
 
   const values = sheet.getRange(2, 1, numRows, lastCol).getValues();
 
-  // 日付列だけは表示値で読む。これが今回の安全ポイント。
+  // Fallback is intentionally the old safe path.
   const dateDisplayValues = sheet
     .getRange(2, csCol.date + 1, numRows, 1)
     .getDisplayValues();
 
   if (typeof logPerf_ === 'function') {
     logPerf_(
-      'getClassSessionsByDateCached_ load sheet direct',
+      'getClassSessionsByDateCached_ fallback full sheet read',
       loadStartedAt,
-      'rows=' + numRows
+      'rows=' + numRows +
+        ' indexUsable=' + rangeIndex.usable +
+        ' indexCache=' + (rangeIndex.cacheHit ? 'hit' : 'miss')
     );
   }
 
   const buildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
-  const weekday = getWeekdayFromYmdJst_(targetYmd);
+  const weekday = classDayInfo.weekday;
   const result = [];
 
   values.forEach(function(row, index) {
@@ -342,7 +333,7 @@ function getClassSessionsByDateCached_(ymd) {
 
   if (typeof logPerf_ === 'function') {
     logPerf_(
-      'getClassSessionsByDateCached_ build result',
+      'getClassSessionsByDateCached_ build fallback result',
       buildStartedAt,
       'rows=' + result.length + ' ymd=' + targetYmd
     );
@@ -354,17 +345,215 @@ function getClassSessionsByDateCached_(ymd) {
     logPerf_(
       'getClassSessionsByDateCached_ total',
       totalStartedAt,
-      'cache=miss rows=' + result.length + ' ymd=' + targetYmd
+      'cache=miss fallback rows=' + result.length + ' ymd=' + targetYmd
     );
   }
 
   return result;
 }
 
+function getClassSessionsDateRowRangeIndexCached_(sheet, dateColumnNumber, lastRow) {
+  const cacheKey = getClassSessionsDateRowRangeIndexCacheKey_();
+  const sheetId = sheet.getSheetId();
+  const normalizedLastRow = Number(lastRow || 0);
+  const normalizedDateColumn = Number(dateColumnNumber || 0);
+
+  const cached = getScriptCacheJson_(cacheKey);
+  if (
+    cached &&
+    cached.usable === true &&
+    Number(cached.sheetId) === Number(sheetId) &&
+    Number(cached.lastRow) === normalizedLastRow &&
+    Number(cached.dateColumn) === normalizedDateColumn &&
+    cached.ranges &&
+    typeof cached.ranges === 'object'
+  ) {
+    return {
+      usable: true,
+      cacheHit: true,
+      ranges: cached.ranges
+    };
+  }
+
+  if (cached) {
+    removeScriptCacheKeys_([cacheKey]);
+  }
+
+  const numRows = normalizedLastRow - 1;
+  if (numRows <= 0 || normalizedDateColumn <= 0) {
+    return {
+      usable: true,
+      cacheHit: false,
+      ranges: {}
+    };
+  }
+
+  const dateDisplayValues = sheet
+    .getRange(2, normalizedDateColumn, numRows, 1)
+    .getDisplayValues();
+
+  const ranges = {};
+  let previousYmd = '';
+  let currentYmd = '';
+  let currentStartRow = 0;
+  let currentCount = 0;
+  let usable = true;
+
+  function closeCurrentRange_() {
+    if (!currentYmd || currentCount <= 0) return;
+
+    if (ranges[currentYmd]) {
+      usable = false;
+      return;
+    }
+
+    ranges[currentYmd] = {
+      startRow: currentStartRow,
+      rowCount: currentCount
+    };
+  }
+
+  for (let index = 0; index < dateDisplayValues.length; index++) {
+    const rowYmd = normalizeYmdDisplayText_(dateDisplayValues[index][0]);
+
+    if (!rowYmd) {
+      usable = false;
+      break;
+    }
+
+    if (previousYmd && rowYmd < previousYmd) {
+      usable = false;
+      break;
+    }
+
+    if (rowYmd !== currentYmd) {
+      closeCurrentRange_();
+      if (!usable) break;
+
+      currentYmd = rowYmd;
+      currentStartRow = index + 2;
+      currentCount = 1;
+    } else {
+      currentCount += 1;
+    }
+
+    previousYmd = rowYmd;
+  }
+
+  if (usable) {
+    closeCurrentRange_();
+  }
+
+  if (!usable) {
+    return {
+      usable: false,
+      cacheHit: false,
+      ranges: {}
+    };
+  }
+
+  putScriptCacheJson_(
+    cacheKey,
+    {
+      usable: true,
+      sheetId: sheetId,
+      lastRow: normalizedLastRow,
+      dateColumn: normalizedDateColumn,
+      ranges: ranges
+    },
+    300
+  );
+
+  return {
+    usable: true,
+    cacheHit: false,
+    ranges: ranges
+  };
+}
+
+function readClassSessionsTargetRowRange_(
+  sheet,
+  lastCol,
+  csCol,
+  targetYmd,
+  weekday,
+  lastRow,
+  targetRange
+) {
+  const startRow = Number(targetRange && targetRange.startRow);
+  const rowCount = Number(targetRange && targetRange.rowCount);
+
+  if (
+    !isFinite(startRow) ||
+    !isFinite(rowCount) ||
+    startRow < 2 ||
+    rowCount <= 0
+  ) {
+    return null;
+  }
+
+  const endRow = startRow + rowCount - 1;
+  if (endRow > Number(lastRow)) {
+    return null;
+  }
+
+  // Guard the cached range against same-row-count manual edits:
+  // every row inside the block must still be targetYmd, and adjacent rows
+  // must not also be targetYmd.
+  const guardStartRow = Math.max(2, startRow - 1);
+  const guardEndRow = Math.min(Number(lastRow), endRow + 1);
+  const guardValues = sheet
+    .getRange(
+      guardStartRow,
+      csCol.date + 1,
+      guardEndRow - guardStartRow + 1,
+      1
+    )
+    .getDisplayValues();
+
+  function ymdAtSheetRow_(sheetRow) {
+    return normalizeYmdDisplayText_(
+      guardValues[sheetRow - guardStartRow][0]
+    );
+  }
+
+  if (startRow > 2 && ymdAtSheetRow_(startRow - 1) === targetYmd) {
+    return null;
+  }
+
+  for (let rowNumber = startRow; rowNumber <= endRow; rowNumber++) {
+    if (ymdAtSheetRow_(rowNumber) !== targetYmd) {
+      return null;
+    }
+  }
+
+  if (
+    endRow < Number(lastRow) &&
+    ymdAtSheetRow_(endRow + 1) === targetYmd
+  ) {
+    return null;
+  }
+
+  const values = sheet
+    .getRange(startRow, 1, rowCount, lastCol)
+    .getValues();
+
+  return values.map(function(row) {
+    return {
+      classId: normalizeString_(row[csCol.classId]),
+      date: targetYmd,
+      period: normalizeString_(row[csCol.period]),
+      sessionNumber:
+        csCol.sessionNumber !== -1 ? row[csCol.sessionNumber] : '',
+      weekday: weekday
+    };
+  });
+}
+
 function getClassSessionsByDateIndexCached_() {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 
-  const cacheKey = 'classSessionsByDateIndex__v4';
+  const cacheKey = getClassSessionsByDateIndexCacheKey_();
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
     if (typeof logPerf_ === 'function') {
@@ -374,7 +563,7 @@ function getClassSessionsByDateIndexCached_() {
         'cache=hit dates=' + Object.keys(cached).length
       );
     }
-    return cached;
+    return applyEffectiveClassDayInfoToSessionIndex_(cached, getEffectiveClassDayIndex_());
   }
 
   const ss = getOperationSpreadsheet();
@@ -426,15 +615,10 @@ function getClassSessionsByDateIndexCached_() {
 
   const buildStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
   const byDateMap = {};
-  const weekdayCache = {};
 
   values.forEach(function(row, index) {
     const rowYmd = normalizeYmdDisplayText_(dateDisplayValues[index][0]);
     if (!rowYmd) return;
-
-    if (!weekdayCache[rowYmd]) {
-      weekdayCache[rowYmd] = getWeekdayFromYmdJst_(rowYmd);
-    }
 
     if (!byDateMap[rowYmd]) {
       byDateMap[rowYmd] = [];
@@ -445,7 +629,7 @@ function getClassSessionsByDateIndexCached_() {
       date: rowYmd,
       period: normalizeString_(row[csCol.period]),
       sessionNumber: csCol.sessionNumber !== -1 ? row[csCol.sessionNumber] : '',
-      weekday: weekdayCache[rowYmd]
+      weekday: ''
     });
   });
 
@@ -468,7 +652,26 @@ function getClassSessionsByDateIndexCached_() {
     );
   }
 
-  return byDateMap;
+  return applyEffectiveClassDayInfoToSessionIndex_(byDateMap, getEffectiveClassDayIndex_());
+}
+
+function applyEffectiveClassDayInfoToSessionIndex_(byDateMap, calendarIndex) {
+  const result = byDateMap || {};
+
+  Object.keys(result).forEach(function(ymd) {
+    const classDayInfo = getEffectiveClassDayInfo_(ymd, calendarIndex);
+
+    if (!classDayInfo.isClassDay || !classDayInfo.weekday) {
+      delete result[ymd];
+      return;
+    }
+
+    (result[ymd] || []).forEach(function(session) {
+      session.weekday = classDayInfo.weekday;
+    });
+  });
+
+  return result;
 }
 
 
@@ -802,6 +1005,7 @@ function getTeacherUnsavedCount_(teacherId, startYmd, endYmd) {
 
   const context = getTeacherUnsavedContext_(teacherId);
   const byDateMap = getClassSessionsByDateIndexCached_();
+  const effectiveClassDayIndex = getEffectiveClassDayIndex_();
   const savedKeySet = getSavedSessionKeySetByRangeCached_(startYmd, endYmd);
   const dateKeys = Object.keys(byDateMap).sort();
 
@@ -815,10 +1019,9 @@ function getTeacherUnsavedCount_(teacherId, startYmd, endYmd) {
     daySessions.forEach(function(session) {
       const classId = normalizeString_(session.classId);
       const period = normalizeString_(session.period);
-      const weekday = normalizeWeekday_(session.weekday);
-      const teacherKey = [classId, weekday, period].join('__');
-
-      if (!context.teacherSessionKeyMap[teacherKey]) return;
+      const classDayContext = getEffectiveClassDayContext_(ymd, effectiveClassDayIndex);
+      const assignment = getTeachingAssignmentForSessionFromIndex_(context.assignmentIndex, classId, ymd, period, classDayContext);
+      if (!assignment || !assignment.teacherIds.includes(teacherId)) return;
 
       const cls = context.classMap[classId] || {};
       const displayKey = buildTeacherUnsavedDisplayKey_(cls, classId, ymd, period);
@@ -844,6 +1047,7 @@ function getTeacherUnsavedSessionItems_(teacherId, startYmd, endYmd) {
 
   const context = getTeacherUnsavedContext_(teacherId);
   const byDateMap = getClassSessionsByDateIndexCached_();
+  const effectiveClassDayIndex = getEffectiveClassDayIndex_();
   const savedKeySet = getSavedSessionKeySetByRangeCached_(startYmd, endYmd);
   const dateKeys = Object.keys(byDateMap).sort();
   const result = [];
@@ -857,10 +1061,9 @@ function getTeacherUnsavedSessionItems_(teacherId, startYmd, endYmd) {
     daySessions.forEach(function(session) {
       const classId = normalizeString_(session.classId);
       const period = normalizeString_(session.period);
-      const weekday = normalizeWeekday_(session.weekday);
-      const teacherKey = [classId, weekday, period].join('__');
-
-      if (!context.teacherSessionKeyMap[teacherKey]) return;
+      const classDayContext = getEffectiveClassDayContext_(ymd, effectiveClassDayIndex);
+      const assignment = getTeachingAssignmentForSessionFromIndex_(context.assignmentIndex, classId, ymd, period, classDayContext);
+      if (!assignment || !assignment.teacherIds.includes(teacherId)) return;
 
       const cls = context.classMap[classId] || {};
       const displayKey = buildTeacherUnsavedDisplayKey_(cls, classId, ymd, period);
@@ -913,95 +1116,12 @@ function getTeacherUnsavedContext_(teacherId) {
   const classesData = getSheetDataCached_('MASTER', CONFIG.SHEETS.CLASSES, 300);
   const teamData = getSheetDataCached_('OPERATION', CONFIG.SHEETS.CLASS_TEACHER_TEAMS, 300);
 
-  const timetable = timetableData.rows;
   const classes = classesData.rows;
-  const teamRows = teamData.rows;
-
-  const timetableHeaders = timetableData.headers;
-  const ttCol = {
-    classId: findColumnIndex_(timetableHeaders, ['classId', 'ClassID']),
-    weekday: findColumnIndex_(timetableHeaders, ['weekday', '曜日']),
-    period: findColumnIndex_(timetableHeaders, ['period', '時限']),
-    teacherName: findColumnIndex_(timetableHeaders, ['teacherName', '担当者名', 'name']),
-    teacherId: findColumnIndex_(timetableHeaders, ['teacherId', 'TeacherID'])
-  };
-  validateRequiredColumnsForTimetable_('timetable', ttCol, ['classId', 'weekday', 'period']);
-
-  const teamHeaders = teamData.headers;
-  const teamCol = {
-    classId: findColumnIndex_(teamHeaders, ['classId', 'ClassID']),
-    weekday: findColumnIndex_(teamHeaders, ['weekday', '曜日']),
-    period: findColumnIndex_(teamHeaders, ['period', '時限']),
-    teacherName: findColumnIndex_(teamHeaders, ['teacherName', '担当者名', 'name']),
-    teacherId: findColumnIndex_(teamHeaders, ['teacherId', 'TeacherID']),
-    roleType: findColumnIndex_(teamHeaders, ['roleType', '役割'])
-  };
-
-  const timetableMap = {};
-
-  timetable.forEach(function(row) {
-    const classId = normalizeString_(row[ttCol.classId]);
-    const period = normalizeString_(row[ttCol.period]);
-    const weekday = ttCol.weekday !== -1 ? normalizeWeekday_(row[ttCol.weekday]) : '';
-    const teacherName = ttCol.teacherName !== -1 ? normalizeString_(row[ttCol.teacherName]) : '';
-    let teacherIdInRow = ttCol.teacherId !== -1 ? normalizeString_(row[ttCol.teacherId]) : '';
-
-    if (!teacherIdInRow && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherIdInRow = teacher ? teacher.teacherId : '';
-    }
-
-    if (!classId || !period || !weekday) return;
-
-    const key = classId + '__' + weekday + '__' + period;
-    timetableMap[key] = {
-      classId: classId,
-      weekday: weekday,
-      period: period,
-      teacherId: teacherIdInRow,
-      teacherName: teacherName,
-      teacherIds: teacherIdInRow ? [teacherIdInRow] : []
-    };
-  });
-
-  teamRows.forEach(function(row) {
-    const classId = teamCol.classId !== -1 ? normalizeString_(row[teamCol.classId]) : '';
-    const period = teamCol.period !== -1 ? normalizeString_(row[teamCol.period]) : '';
-    const weekday = teamCol.weekday !== -1 ? normalizeWeekday_(row[teamCol.weekday]) : '';
-    const teacherName = teamCol.teacherName !== -1 ? normalizeString_(row[teamCol.teacherName]) : '';
-    let teacherIdInRow = teamCol.teacherId !== -1 ? normalizeString_(row[teamCol.teacherId]) : '';
-
-    if (!teacherIdInRow && teacherName) {
-      const teacher = getTeacherRecordByName_(teacherName);
-      teacherIdInRow = teacher ? teacher.teacherId : '';
-    }
-
-    if (!classId || !period || !weekday || !teacherIdInRow) return;
-
-    const key = classId + '__' + weekday + '__' + period;
-    if (!timetableMap[key]) {
-      timetableMap[key] = {
-        classId: classId,
-        weekday: weekday,
-        period: period,
-        teacherId: '',
-        teacherName: '',
-        teacherIds: []
-      };
-    }
-
-    if (!timetableMap[key].teacherIds.includes(teacherIdInRow)) {
-      timetableMap[key].teacherIds.push(teacherIdInRow);
-    }
-  });
-
-  const teacherSessionKeyMap = {};
-  Object.keys(timetableMap).forEach(function(key) {
-    const tt = timetableMap[key];
-    if (tt && Array.isArray(tt.teacherIds) && tt.teacherIds.includes(teacherId)) {
-      teacherSessionKeyMap[key] = true;
-    }
-  });
+  const assignmentIndex = buildTeachingAssignmentIndex_(
+    timetableData,
+    teamData,
+    createTeacherTeamMemberResolver_()
+  );
 
   const classHeaders = classesData.headers;
   const clsCol = {
@@ -1028,8 +1148,7 @@ function getTeacherUnsavedContext_(teacherId) {
   });
 
   const result = {
-    timetableMap: timetableMap,
-    teacherSessionKeyMap: teacherSessionKeyMap,
+    assignmentIndex: assignmentIndex,
     classMap: classMap
   };
 
@@ -1038,15 +1157,19 @@ function getTeacherUnsavedContext_(teacherId) {
 }
 
 function buildTeacherUnsavedSummaryCacheKey_(teacherId, endYmd) {
-  return 'teacherUnsavedSummary__v3__' + String(teacherId || '') + '__' + String(endYmd || '');
+  return 'teacherUnsavedSummary__v3__' + String(teacherId || '') + '__' + String(endYmd || '') +
+    '__assignmentRevision__' + getTeachingAssignmentRevision_();
 }
 
 function buildTeacherUnsavedDetailsCacheKey_(teacherId, endYmd) {
-  return 'teacherUnsavedDetails__v3__' + String(teacherId || '') + '__' + String(endYmd || '');
+  return 'teacherUnsavedDetails__v3__' + String(teacherId || '') + '__' + String(endYmd || '') +
+    '__assignmentRevision__' + getTeachingAssignmentRevision_();
 }
 
 function buildTeacherUnsavedContextCacheKey_(teacherId) {
-  return 'teacherUnsavedContext__v3__' + String(teacherId || '');
+  // v4 adds the term-aware assignment index; v3 values have no assignmentIndex.
+  return 'teacherUnsavedContext__v4__' + String(teacherId || '') +
+    '__assignmentRevision__' + getTeachingAssignmentRevision_();
 }
 
 function getTeacherUnsavedStartDate_(baseDate) {
@@ -1163,8 +1286,15 @@ function debugTeacherClassesByDate() {
     period: findColumnIndex_(classSessionsData.headers, ['period', '時限'])
   };
 
-  const weekday = getWeekdayFromYmdJst_(ymd);
-  Logger.log('targetDate=' + ymd + ', weekday=' + weekday + ', teacherId=' + currentTeacherId);
+  const classDayInfo = getEffectiveClassDayInfo_(ymd);
+  const weekday = classDayInfo.weekday;
+  Logger.log(
+    'targetDate=' + ymd +
+    ', effectiveWeekday=' + weekday +
+    ', isClassDay=' + classDayInfo.isClassDay +
+    ', calendarEntry=' + classDayInfo.hasCalendarEntry +
+    ', teacherId=' + currentTeacherId
+  );
 
   const targetSessions = classSessions.filter(row => formatDateToYmd(row[csCol.date]) === ymd);
   Logger.log('targetSessions=' + JSON.stringify(targetSessions, null, 2));
@@ -1204,9 +1334,169 @@ function getWeekdayFromYmdJst_(ymd) {
 }
 
 function getSaveStatusForTeacherSessions(sessionItems) {
-  return getSaveStatusForTeacherSessionsDirect_(sessionItems);
+  return getSaveStatusForTeacherSessionsByDateCache_(sessionItems);
 }
 
+
+/**
+ * attendanceSessions の保存状態を日付単位キャッシュから解決する。
+ *
+ * 旧 getSaveStatusForTeacherSessionsDirect_ は比較・即時ロールバック用に残す。
+ * 実験科目は従来どおり、同一 subject/date/period の関連 classId のうち
+ * 最新保存レコードを共有する。
+ */
+function getSaveStatusForTeacherSessionsByDateCache_(sessionItems) {
+  const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+
+  const items = Array.isArray(sessionItems) ? sessionItems : [];
+  const result = {};
+  const targetsByDate = {};
+  let targetCount = 0;
+
+  items.forEach(function(item) {
+    const classId = normalizeString_(item.classId);
+    const date = formatDateToYmd(item.date);
+    const period = normalizeString_(item.period);
+
+    if (!classId || !date || !period) return;
+
+    const key = [classId, date, period].join('__');
+
+    if (!result[key]) {
+      result[key] = {
+        isSaved: false,
+        lastSavedInfo: null,
+        saveStatusNotLoaded: false
+      };
+      targetCount++;
+    }
+
+    if (!targetsByDate[date]) {
+      targetsByDate[date] = [];
+    }
+
+    if (!targetsByDate[date].some(function(target) { return target.key === key; })) {
+      targetsByDate[date].push({
+        key: key,
+        classId: classId,
+        date: date,
+        period: period,
+        experimentKey: buildExperimentSessionKeyForTimetable_(classId, date, period)
+      });
+    }
+  });
+
+  if (targetCount === 0) {
+    if (typeof logPerf_ === 'function') {
+      logPerf_('getSaveStatusForTeacherSessionsByDateCache_ total', totalStartedAt, 'empty');
+    }
+    return result;
+  }
+
+  let foundCount = 0;
+
+  Object.keys(targetsByDate).forEach(function(date) {
+    const dateStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
+    const targets = targetsByDate[date];
+    const latestMap = getAttendanceSessionLatestMapByDateCached_(date) || {};
+
+    const targetExperimentKeys = {};
+    targets.forEach(function(target) {
+      if (target.experimentKey) {
+        targetExperimentKeys[target.experimentKey] = true;
+      }
+    });
+
+    const experimentLatestMap = {};
+
+    if (Object.keys(targetExperimentKeys).length > 0) {
+      const marker = '__' + date + '__';
+
+      Object.keys(latestMap).forEach(function(sessionKey) {
+        const markerIndex = sessionKey.lastIndexOf(marker);
+        if (markerIndex <= 0) return;
+
+        const rowClassId = sessionKey.substring(0, markerIndex);
+        const rowPeriod = sessionKey.substring(markerIndex + marker.length);
+        if (!rowClassId || !rowPeriod) return;
+
+        const experimentKey =
+          buildExperimentSessionKeyForTimetable_(rowClassId, date, rowPeriod);
+
+        if (!experimentKey || !targetExperimentKeys[experimentKey]) return;
+
+        const candidate = latestMap[sessionKey];
+        if (!candidate) return;
+
+        const candidateMs = Number(candidate._ms || 0);
+        const current = experimentLatestMap[experimentKey];
+        const currentMs = current ? Number(current._ms || 0) : -1;
+
+        if (!current || candidateMs >= currentMs) {
+          experimentLatestMap[experimentKey] = candidate;
+        }
+      });
+    }
+
+    targets.forEach(function(target) {
+      let latest = latestMap[target.key] || null;
+
+      if (target.experimentKey && experimentLatestMap[target.experimentKey]) {
+        const experimentLatest = experimentLatestMap[target.experimentKey];
+        const exactMs = latest ? Number(latest._ms || 0) : -1;
+        const experimentMs = Number(experimentLatest._ms || 0);
+
+        if (!latest || experimentMs >= exactMs) {
+          latest = experimentLatest;
+        }
+      }
+
+      if (!latest) return;
+
+      const savedAtRaw = latest.savedAt || '';
+      const savedAtSerialized = savedAtRaw instanceof Date
+        ? savedAtRaw.toISOString()
+        : String(savedAtRaw || '');
+
+      result[target.key] = {
+        isSaved: true,
+        lastSavedInfo: {
+          teacherEmail: String(latest.teacherEmail || '').trim().toLowerCase(),
+          savedAt: savedAtSerialized,
+          savedAtText: String(latest.savedAtText || ''),
+          actionType: String(latest.actionType || ''),
+          targetSessionKey: String(latest.targetSessionKey || target.key),
+          savedModeLabel: String(latest.savedModeLabel || '')
+        },
+        saveStatusNotLoaded: false
+      };
+
+      foundCount++;
+    });
+
+    if (typeof logPerf_ === 'function') {
+      logPerf_(
+        'getSaveStatusForTeacherSessionsByDateCache_ date',
+        dateStartedAt,
+        'date=' + date +
+          ' targets=' + targets.length +
+          ' cachedKeys=' + Object.keys(latestMap).length
+      );
+    }
+  });
+
+  if (typeof logPerf_ === 'function') {
+    logPerf_(
+      'getSaveStatusForTeacherSessionsByDateCache_ total',
+      totalStartedAt,
+      'targets=' + targetCount +
+        ' found=' + foundCount +
+        ' dates=' + Object.keys(targetsByDate).length
+    );
+  }
+
+  return result;
+}
 function getSaveStatusForTeacherSessionsDirect_(sessionItems) {
   const totalStartedAt = typeof perfNow_ === 'function' ? perfNow_() : Date.now();
 

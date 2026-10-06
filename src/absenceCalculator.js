@@ -612,9 +612,14 @@ function isSubjectIncludedByTerm_(subjectTerm, termFilter) {
 }
 
 function isStudentActive_(status) {
-  const s = String(status || '').trim();
+  if (typeof isActiveStudentStatus_ === 'function') {
+    return isActiveStudentStatus_(status);
+  }
+
+  const s = String(status || '').trim().toLowerCase();
   if (!s) return true;
-  return s !== 'inactive' && s !== '卒業' && s !== '退学';
+
+  return ['active', '在籍', '有効'].includes(s);
 }
 
 function normalizeStatusCode_(value) {

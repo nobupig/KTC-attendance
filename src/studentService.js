@@ -4,7 +4,7 @@ function getStudentsByClassId(classId) {
     return [];
   }
 
-  const cacheKey = 'studentsByClassId__' + targetClassId;
+  const cacheKey = 'studentsByClassId__statusV2__' + targetClassId;
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
     return cached;
@@ -460,7 +460,8 @@ function getStudentRiskMapForTeacherSession(classId, studentIds) {
         grade: findColumnIndex_(studentHeaders, ['grade', '学年']),
         unit: findColumnIndex_(studentHeaders, ['unit', '組・コース', '対象区分']),
         attendanceNumber: findColumnIndex_(studentHeaders, ['attendanceNumber', '出席番号']),
-        name: findColumnIndex_(studentHeaders, ['name', '氏名'])
+        name: findColumnIndex_(studentHeaders, ['name', '氏名']),
+        status: findColumnIndex_(studentHeaders, ['status', '在籍状態'])
       };
 
       ['studentId', 'grade', 'unit', 'attendanceNumber', 'name'].forEach(function(key) {
@@ -478,13 +479,17 @@ function getStudentRiskMapForTeacherSession(classId, studentIds) {
             grade: normalizeString_(row[studentCol.grade]),
             unit: normalizeString_(row[studentCol.unit]),
             attendanceNumber: normalizeString_(row[studentCol.attendanceNumber]),
-            name: normalizeString_(row[studentCol.name])
+            name: normalizeString_(row[studentCol.name]),
+            status: studentCol.status !== -1
+              ? normalizeString_(row[studentCol.status])
+              : 'active'
           };
         })
         .filter(function(student) {
           return !!student.studentId &&
                  student.grade === targetGrade &&
-                 !!allowMap[student.studentId];
+                 !!allowMap[student.studentId] &&
+                 isActiveStudentStatus_(student.status);
         });
     } else {
       const classStudents = getStudentsByClassId(targetClassId);
@@ -848,7 +853,8 @@ function getStudentsByClassIdAndGroup(classId, group) {
     grade: findColumnIndex_(studentHeaders, ['grade', '学年']),
     unit: findColumnIndex_(studentHeaders, ['unit', '組・コース', '対象区分']),
     attendanceNumber: findColumnIndex_(studentHeaders, ['attendanceNumber', '出席番号']),
-    name: findColumnIndex_(studentHeaders, ['name', '氏名'])
+    name: findColumnIndex_(studentHeaders, ['name', '氏名']),
+    status: findColumnIndex_(studentHeaders, ['status', '在籍状態'])
   };
 
   ['studentId', 'grade', 'unit', 'attendanceNumber', 'name'].forEach(function(key) {
@@ -861,16 +867,21 @@ function getStudentsByClassIdAndGroup(classId, group) {
   studentRows.forEach(function(row) {
     const studentId = normalizeString_(row[studentCol.studentId]);
     const studentGrade = normalizeString_(row[studentCol.grade]);
+    const studentStatus = studentCol.status !== -1
+      ? normalizeString_(row[studentCol.status])
+      : 'active';
 
     if (!studentId) return;
     if (studentGrade !== targetGrade) return;
+    if (!isActiveStudentStatus_(studentStatus)) return;
 
     activeStudentMap[studentId] = {
       studentId: studentId,
       grade: normalizeString_(row[studentCol.grade]),
       unit: normalizeString_(row[studentCol.unit]),
       attendanceNumber: normalizeString_(row[studentCol.attendanceNumber]),
-      name: normalizeString_(row[studentCol.name])
+      name: normalizeString_(row[studentCol.name]),
+      status: studentStatus
     };
   });
 

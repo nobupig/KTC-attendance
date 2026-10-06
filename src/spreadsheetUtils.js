@@ -73,10 +73,33 @@ function safeJsonStringifyForCache_(value) {
 
 function removeScriptCacheKeys_(keys) {
   const cache = CacheService.getScriptCache();
+  const validKeys = [];
+  const seen = {};
+
   (keys || []).forEach(function(key) {
-    if (!isSafeScriptCacheKey_(key)) {
-      return;
-    }
+    const normalizedKey = String(key || '');
+    if (!isSafeScriptCacheKey_(normalizedKey)) return;
+    if (seen[normalizedKey]) return;
+
+    seen[normalizedKey] = true;
+    validKeys.push(normalizedKey);
+  });
+
+  if (validKeys.length === 0) return;
+
+  try {
+    cache.removeAll(validKeys);
+    return;
+  } catch (e) {
+    Logger.log(
+      'Cache removeAll failed; falling back to per-key remove: ' +
+      e +
+      ' keys=' +
+      validKeys.length
+    );
+  }
+
+  validKeys.forEach(function(key) {
     try {
       cache.remove(key);
     } catch (e) {
@@ -85,8 +108,22 @@ function removeScriptCacheKeys_(keys) {
   });
 }
 
+function buildSheetDataCacheKey_(spreadsheetType, sheetName) {
+  const baseKey = 'sheetData__' + spreadsheetType + '__' + sheetName;
+
+  // students は status 判定仕様の変更時に旧キャッシュを確実に捨てる。
+  if (
+    spreadsheetType === 'MASTER' &&
+    sheetName === CONFIG.SHEETS.STUDENTS
+  ) {
+    return baseKey + '__statusV2';
+  }
+
+  return baseKey;
+}
+
 function getSheetDataCached_(spreadsheetType, sheetName, ttlSeconds) {
-  const cacheKey = 'sheetData__' + spreadsheetType + '__' + sheetName;
+  const cacheKey = buildSheetDataCacheKey_(spreadsheetType, sheetName);
   const cached = getScriptCacheJson_(cacheKey);
   if (cached) {
     return cached;
@@ -135,6 +172,24 @@ function getAttendanceSessionsSheetCacheKey_() {
   return 'sheetData__OPERATION__' + CONFIG.SHEETS.ATTENDANCE_SESSIONS;
 }
 
+function getClassSessionsSheetCacheKey_() {
+  return 'sheetData__OPERATION__' + CONFIG.SHEETS.CLASS_SESSIONS;
+}
+
+function buildClassSessionsByDateCacheKey_(ymd) {
+  return 'classSessionsByDate__v6__' + formatDateToYmd(ymd);
+}
+
+function getClassSessionsByDateIndexCacheKey_() {
+  return 'classSessionsByDateIndex__v4';
+}
+
+function getClassSessionsDateRowRangeIndexCacheKey_() {
+  return 'classSessionsDateRowRangeIndex__v1';
+}
+
+
+
 function buildHomeroomSummaryCacheKey_(grade, unit, termFilter) {
   return 'homeroomSummary__' +
     String(grade || '').trim() + '__' +
@@ -171,7 +226,9 @@ function clearCoreCachesForTest() {
 
   const keys = [
     'sheetData__MASTER__' + CONFIG.SHEETS.CLASSES,
+    // students の旧キーと statusV2 キーを両方掃除する。
     'sheetData__MASTER__' + CONFIG.SHEETS.STUDENTS,
+    buildSheetDataCacheKey_('MASTER', CONFIG.SHEETS.STUDENTS),
     'sheetData__MASTER__' + CONFIG.SHEETS.SUBJECTS,
     'sheetData__OPERATION__' + CONFIG.SHEETS.TIMETABLE,
     'sheetData__OPERATION__' + CONFIG.SHEETS.CLASS_TEACHER_TEAMS,

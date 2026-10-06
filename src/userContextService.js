@@ -156,7 +156,7 @@ function getCurrentUserContext() {
     return cached;
   }
 
-  const teachers = getTeachersSheetObjectsCached_(300);
+  const teachers = getTeachersSheetObjectsCached_(1800);
 
   const teacher = teachers.find(function(row) {
     return normalizeString_(row.email).toLowerCase() === resolvedEmail;
@@ -186,7 +186,7 @@ function getCurrentUserContext() {
     isAdmin: roles.includes('admin')
   };
 
-  putScriptCacheJson_(cacheKey, context, 300);
+  putScriptCacheJson_(cacheKey, context, 1800);
   return context;
 }
 
@@ -194,7 +194,7 @@ function getHomeroomClassesByTeacherId_(teacherId) {
   const targetTeacherId = normalizeString_(teacherId);
   if (!targetTeacherId) return [];
 
-  const rows = getHomeroomAssignmentsSheetObjectsCached_(300);
+  const rows = getHomeroomAssignmentsSheetObjectsCached_(1800);
 
   const results = [];
   const seen = new Set();
