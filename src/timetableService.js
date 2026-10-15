@@ -1177,9 +1177,36 @@ function getTeacherUnsavedStartDate_(baseDate) {
   d.setHours(0, 0, 0, 0);
 
   const schoolYear = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
-  const start = new Date(schoolYear, 3, 7);
-  start.setHours(0, 0, 0, 0);
-  return start;
+  const defaultStart = new Date(schoolYear, 3, 7);
+  defaultStart.setHours(0, 0, 0, 0);
+
+  const baseYmd = formatDateToYmd(d);
+  const ranges = (
+    typeof CALENDAR_SERVICE_CONFIG !== 'undefined' &&
+    CALENDAR_SERVICE_CONFIG &&
+    Array.isArray(CALENDAR_SERVICE_CONFIG.ACADEMIC_TERM_RANGES_2026)
+  )
+    ? CALENDAR_SERVICE_CONFIG.ACADEMIC_TERM_RANGES_2026
+    : [];
+
+  const secondTermRange = ranges.find(function(item) {
+    return (
+      normalizeString_(item && item.term).toUpperCase() === 'SP' &&
+      normalizeString_(item && item.start).indexOf(String(schoolYear) + '-') === 0
+    );
+  });
+
+  if (
+    secondTermRange &&
+    secondTermRange.start &&
+    baseYmd >= normalizeString_(secondTermRange.start)
+  ) {
+    return new Date(
+      normalizeString_(secondTermRange.start) + 'T12:00:00+09:00'
+    );
+  }
+
+  return defaultStart;
 }
 
 function isTeacherUnsavedExperimentClass_(classId) {
